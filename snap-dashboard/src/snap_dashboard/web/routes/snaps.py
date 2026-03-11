@@ -6,7 +6,9 @@ import logging
 from datetime import timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Request
+from concurrent.futures import ThreadPoolExecutor
+
+from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -209,6 +211,26 @@ async def snap_detail(request: Request, name: str) -> HTMLResponse:
             "channels": ["stable", "candidate", "beta", "edge"],
         },
     )
+
+
+_executor = ThreadPoolExecutor(max_workers=2)
+
+
+@router.post("/snap/{name}/refresh")
+async def snap_refresh(
+    name: str,
+    background_tasks: BackgroundTasks,
+) -> RedirectResponse:
+    """Trigger a collection run for a single snap then redirect to its detail page."""
+    from snap_dashboard.collector import collect_one
+
+    def _bg() -> None:
+        config = get_config()
+        with get_session() as session:
+            collect_one(session, config, name)
+
+    background_tasks.add_task(_bg)
+    return RedirectResponse(url=f"/snap/{name}", status_code=303)
 
 
 @router.post("/snap/{name}/edit")

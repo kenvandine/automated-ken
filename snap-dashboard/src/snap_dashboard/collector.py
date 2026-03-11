@@ -90,6 +90,23 @@ def run_collection(session: Session, config: Config) -> dict:
     }
 
 
+def collect_one(session: Session, config: Config, snap_name: str) -> dict:
+    """Run collection for a single snap by name.
+
+    Returns a summary dict: {snap, status, error}.
+    """
+    snap = session.query(Snap).filter_by(name=snap_name).first()
+    if not snap:
+        return {"snap": snap_name, "status": "error", "error": "Snap not found"}
+    gh_client = GitHubClient(token=config.github_token)
+    try:
+        _update_snap(session, snap, gh_client)
+        return {"snap": snap_name, "status": "success", "error": None}
+    except Exception as exc:
+        logger.warning("Error collecting snap %r: %s", snap_name, exc)
+        return {"snap": snap_name, "status": "error", "error": str(exc)}
+
+
 def _update_snap(session: Session, snap: Snap, gh_client: GitHubClient) -> None:
     """Update channel map and issues for a single snap."""
     logger.info("Updating snap %r", snap.name)

@@ -29,6 +29,9 @@
           ⬆ Upstream repo
         </a>
         {% endif %}
+        <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
+          <button type="submit" class="btn btn-secondary btn-sm">Refresh</button>
+        </form>
       </div>
     </div>
   </div>
@@ -83,7 +86,7 @@
     {% else %}
     <div class="empty-state small-empty">
       <p>No channel data collected yet.
-        <form method="post" action="/refresh" style="display:inline">
+        <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
           <button type="submit" class="link-btn">Run collection</button>
         </form>
       </p>
