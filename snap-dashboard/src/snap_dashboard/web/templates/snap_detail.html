@@ -82,7 +82,11 @@
     </div>
     {% else %}
     <div class="empty-state small-empty">
-      <p>No channel data collected yet. <a href="/refresh" class="link-inline">Run collection</a></p>
+      <p>No channel data collected yet.
+        <form method="post" action="/refresh" style="display:inline">
+          <button type="submit" class="link-btn">Run collection</button>
+        </form>
+      </p>
     </div>
     {% endif %}
   </section>
