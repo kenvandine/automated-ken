@@ -100,3 +100,30 @@ class CollectionRun(Base):
 
     def __repr__(self) -> str:
         return f"<CollectionRun id={self.id} status={self.status!r}>"
+
+
+class TestRun(Base):
+    """Tracks a YARF test run triggered from the dashboard."""
+
+    __tablename__ = "test_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snap_name = Column(String(255), nullable=False)
+    from_channel = Column(String(64), nullable=False)  # 'candidate', 'beta', 'edge'
+    version = Column(String(128), nullable=True)
+    revision = Column(Integer, nullable=True)
+    # statuses: pending, triggered, running, passed, failed, error, promoted
+    status = Column(String(32), nullable=False, default="pending")
+    gh_run_id = Column(String(128), nullable=True)  # GitHub Actions run ID
+    pr_number = Column(Integer, nullable=True)
+    pr_url = Column(Text, nullable=True)
+    pr_body = Column(Text, nullable=True)
+    triggered_by = Column(String(64), nullable=True)  # 'auto', 'manual', or 'external'
+    started_at = Column(DateTime, default=_now, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+    promoted = Column(Boolean, default=False, nullable=False)
+    promoted_at = Column(DateTime, nullable=True)
+    error_msg = Column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        return f"<TestRun id={self.id} snap={self.snap_name!r} status={self.status!r}>"

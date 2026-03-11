@@ -1,0 +1,244 @@
+{% extends "base.html" %}
+
+{% block title %}Testing — snap-dashboard{% endblock %}
+
+{% block content %}
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">YARF Testing</h2>
+    <p class="text-muted">Trigger, track, and promote snap test runs</p>
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <form method="post" action="/testing/sync">
+      <button type="submit" class="btn btn-secondary btn-sm">Sync from GitHub</button>
+    </form>
+  </div>
+</div>
+
+{% if not config.testing_repo %}
+<!-- No testing repo configured — show setup prompt -->
+<div class="card" style="border-left: 3px solid var(--accent);">
+  <h3 class="section-label">Testing Repository Not Configured</h3>
+  <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+    To use YARF testing you need a GitHub repository that contains your test suites
+    and a GitHub Actions workflow.
+  </p>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    <a href="/settings" class="btn btn-primary btn-sm">Configure in Settings</a>
+    <a href="/testing/workflow-template" class="btn btn-secondary btn-sm" download="snap-test.yml">
+      Download Workflow Template
+    </a>
+  </div>
+</div>
+{% else %}
+
+<!-- ================================================================
+     PENDING PROMOTION
+     ================================================================ -->
+{% if pending_promotion %}
+<section class="detail-section">
+  <h3 class="section-label" style="color: #4ade80;">Pending Promotion</h3>
+  <div class="attention-scroll">
+    {% for run in pending_promotion %}
+    <div class="attention-card" style="border-left-color: #4ade80; min-width: 240px;">
+      <div class="attention-card-header">
+        <span class="attention-tag" style="background: rgba(74,222,128,0.15); color:#4ade80; border: 1px solid rgba(74,222,128,0.3);">Passed — ready to promote</span>
+        <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="attention-name">{{ run.snap_name }}</a>
+      </div>
+      <div class="attention-versions">
+        <div class="version-compare">
+          <span class="ver-label">{{ run.from_channel }}</span>
+          <span class="ver-value ver-new">{{ run.version or '—' }}</span>
+        </div>
+        <div class="ver-arrow">→</div>
+        <div class="version-compare">
+          <span class="ver-label">stable</span>
+          <span class="ver-value ver-old">target</span>
+        </div>
+      </div>
+      {% if run.pr_number %}
+      <form method="post" action="/testing/promote/{{ run.snap_name }}" style="margin-top: 8px;">
+        <input type="hidden" name="pr_number" value="{{ run.pr_number }}">
+        <input type="hidden" name="revision" value="{{ run.revision or 0 }}">
+        <input type="hidden" name="to_channel" value="stable">
+        <div style="display:flex; gap:6px; flex-wrap:wrap;">
+          <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="btn btn-secondary btn-sm">View PR</a>
+          <button type="submit" class="btn btn-primary btn-sm"
+            onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')">
+            Promote to Stable
+          </button>
+        </div>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<!-- ================================================================
+     SNAPS NEEDING TESTS
+     ================================================================ -->
+{% if snaps_needing %}
+<div class="card">
+  <h3 class="section-label">Snaps Needing Tests</h3>
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>Snap</th>
+          <th>Channel</th>
+          <th>Version</th>
+          <th>Stable</th>
+          <th>Suite</th>
+          <th>Active Run</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in snaps_needing %}
+        <tr>
+          <td class="snap-name-cell">
+            <a href="/snap/{{ item.snap.name }}" class="snap-link">{{ item.snap.name }}</a>
+          </td>
+          <td>
+            <span class="channel-badge badge-amber">{{ item.from_channel }}</span>
+          </td>
+          <td class="muted small">{{ item.version or '—' }}</td>
+          <td class="muted small">{{ item.stable_ver or 'none' }}</td>
+          <td>
+            {% if item.has_suite %}
+            <span class="badge badge-green">yes</span>
+            {% else %}
+            <span class="badge badge-gray" title="No suite found in testing repo">no suite</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.existing_run %}
+            {% set run = item.existing_run %}
+            {% if run.status == 'passed' %}
+            <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-green">passed</a>
+            {% elif run.status == 'failed' %}
+            <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-red">failed</a>
+            {% elif run.status in ('pending', 'triggered', 'running') %}
+            <span class="badge badge-amber">{{ run.status }}</span>
+            {% elif run.status == 'error' %}
+            <span class="badge badge-red" title="{{ run.error_msg }}">error</span>
+            {% else %}
+            <span class="muted small">{{ run.status }}</span>
+            {% endif %}
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if item.has_suite %}
+            <form method="post" action="/testing/trigger/{{ item.snap.name }}">
+              <input type="hidden" name="from_channel" value="{{ item.from_channel }}">
+              <input type="hidden" name="version" value="{{ item.version }}">
+              <input type="hidden" name="revision" value="{{ item.revision or '' }}">
+              <button type="submit" class="btn btn-secondary btn-sm">Run Tests</button>
+            </form>
+            {% else %}
+            <span class="muted small">No suite</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="card">
+  <div class="empty-state small-empty">
+    <p>No snaps have a newer version in candidate/beta/edge than stable. Nothing to test right now.</p>
+  </div>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     ALL RUNS HISTORY
+     ================================================================ -->
+<div class="card">
+  <h3 class="section-label">Recent Test Runs</h3>
+  {% if all_runs %}
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Snap</th>
+          <th>Channel</th>
+          <th>Version</th>
+          <th>Status</th>
+          <th>PR</th>
+          <th>Triggered by</th>
+          <th>Started</th>
+          <th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in all_runs %}
+        <tr>
+          <td class="muted small">{{ run.id }}</td>
+          <td>
+            <a href="/snap/{{ run.snap_name }}" class="snap-link">{{ run.snap_name }}</a>
+          </td>
+          <td>
+            <span class="channel-badge badge-gray">{{ run.from_channel }}</span>
+          </td>
+          <td class="muted small">{{ run.version or '—' }}</td>
+          <td>
+            {% if run.status == 'passed' %}
+            <span class="badge badge-green">passed</span>
+            {% elif run.status == 'failed' %}
+            <span class="badge badge-red">failed</span>
+            {% elif run.status == 'promoted' %}
+            <span class="badge badge-green">promoted</span>
+            {% elif run.status == 'error' %}
+            <span class="badge badge-red" title="{{ run.error_msg }}">error</span>
+            {% elif run.status in ('pending', 'triggered') %}
+            <span class="badge badge-amber">{{ run.status }}</span>
+            {% elif run.status == 'running' %}
+            <span class="badge badge-amber">running</span>
+            {% else %}
+            <span class="muted small">{{ run.status }}</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if run.pr_number %}
+            <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="link-inline small">
+              #{{ run.pr_number }}
+            </a>
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="muted small">{{ run.triggered_by or '—' }}</td>
+          <td class="muted small">
+            {% if run.started_at %}
+            {{ run.started_at.strftime('%m-%d %H:%M') }}
+            {% else %}—{% endif %}
+          </td>
+          <td class="muted small">
+            {% if run.finished_at %}
+            {{ run.finished_at.strftime('%m-%d %H:%M') }}
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state small-empty">
+    <p>No test runs recorded yet. Trigger a test from the table above.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endif %}{# end if config.testing_repo #}
+
+{% endblock %}

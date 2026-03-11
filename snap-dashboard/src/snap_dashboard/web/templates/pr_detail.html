@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+
+{% block title %}Test PR — {{ run.snap_name }} — snap-dashboard{% endblock %}
+
+{% block content %}
+
+<a href="/testing" class="back-link">&larr; Back to Testing</a>
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">{{ run.snap_name }}</h2>
+    <p class="text-muted">
+      YARF test results &mdash;
+      <span class="channel-badge badge-amber">{{ run.from_channel }}</span>
+      {{ run.version or '' }}
+      {% if run.revision %}&nbsp;(rev {{ run.revision }}){% endif %}
+    </p>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    {% if run.status == 'passed' %}
+    <span class="badge badge-green" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
+    {% elif run.status == 'failed' %}
+    <span class="badge badge-red" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
+    {% elif run.status == 'promoted' %}
+    <span class="badge badge-green" style="font-size:13px; padding: 4px 12px;">Promoted to stable</span>
+    {% elif run.status == 'error' %}
+    <span class="badge badge-red" style="font-size:13px; padding: 4px 12px;">Error</span>
+    {% elif run.status in ('pending', 'triggered', 'running') %}
+    <span class="badge badge-amber" style="font-size:13px; padding: 4px 12px;">{{ run.status | capitalize }}</span>
+    {% else %}
+    <span class="badge badge-gray" style="font-size:13px; padding: 4px 12px;">{{ run.status }}</span>
+    {% endif %}
+    {% if pr_url %}
+    <a href="{{ pr_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
+      View on GitHub &rarr;
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ================================================================
+     PROMOTION ERROR
+     ================================================================ -->
+{% if error %}
+<div class="error-banner" style="margin-bottom: 20px;">
+  <strong>Promotion failed:</strong><br>
+  <pre style="white-space: pre-wrap; font-size: 12px; margin-top: 8px;">{{ error }}</pre>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     METADATA
+     ================================================================ -->
+{% if metadata %}
+<div class="card">
+  <h3 class="section-label">Test Metadata</h3>
+  <div class="table-wrapper">
+    <table class="snap-table" style="width:auto;">
+      <tbody>
+        {% for key, value in metadata.items() %}
+        <tr>
+          <td class="muted small" style="width:160px; font-weight:500;">{{ key }}</td>
+          <td class="small">{{ value }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     PROMOTE TO STABLE
+     ================================================================ -->
+{% if run.status == 'passed' and not run.promoted and run.revision %}
+<div class="card" style="border-left: 3px solid #4ade80;">
+  <h3 class="section-label" style="color: #4ade80;">Promote to Stable</h3>
+  <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+    All tests passed for <strong>{{ run.snap_name }}</strong> {{ run.version }}.
+    Click below to run <code>snapcraft release {{ run.snap_name }} {{ run.revision }} stable</code>
+    and close this PR.
+  </p>
+  <form method="post" action="/testing/promote/{{ run.snap_name }}">
+    <input type="hidden" name="pr_number" value="{{ run.pr_number }}">
+    <input type="hidden" name="revision" value="{{ run.revision }}">
+    <input type="hidden" name="to_channel" value="stable">
+    <button
+      type="submit"
+      class="btn btn-primary"
+      onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')"
+    >
+      Promote {{ run.snap_name }} to Stable
+    </button>
+  </form>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     SCREENSHOTS
+     ================================================================ -->
+{% if screenshot_urls %}
+<div class="card">
+  <h3 class="section-label">Screenshots</h3>
+  <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+    {% for url in screenshot_urls %}
+    <a href="{{ url }}" target="_blank" rel="noopener" style="display:block;">
+      <img
+        src="{{ url }}"
+        alt="Test screenshot"
+        style="max-width: 320px; max-height: 240px; border-radius: 6px; border: 1px solid var(--border); object-fit: contain; background: var(--surface2);"
+        loading="lazy"
+      >
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     PR BODY
+     ================================================================ -->
+{% if pr.body %}
+<div class="card">
+  <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:14px;">
+    <h3 class="section-label" style="margin-bottom:0;">PR Description</h3>
+    {% if pr_url %}
+    <a href="{{ pr_url }}" target="_blank" rel="noopener" class="link-inline small">Open on GitHub &rarr;</a>
+    {% endif %}
+  </div>
+  <div id="pr-body-rendered" style="font-size: 13px; line-height: 1.7; color: var(--text);"></div>
+  <script id="pr-body-raw" type="text/plain">{{ pr.body | e }}</script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script>
+    (function () {
+      var raw = document.getElementById('pr-body-raw').textContent;
+      document.getElementById('pr-body-rendered').innerHTML = marked.parse(raw);
+    })();
+  </script>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     RESULT FILES
+     ================================================================ -->
+{% if files %}
+<div class="card">
+  <h3 class="section-label">Changed Files</h3>
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>File</th>
+          <th>Status</th>
+          <th>+additions</th>
+          <th>-deletions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in files %}
+        <tr>
+          <td class="small" style="font-family: monospace; word-break: break-all;">
+            {{ f.filename }}
+          </td>
+          <td>
+            {% if f.status == 'added' %}
+            <span class="badge badge-green">added</span>
+            {% elif f.status == 'removed' %}
+            <span class="badge badge-red">removed</span>
+            {% elif f.status == 'modified' %}
+            <span class="badge badge-amber">modified</span>
+            {% else %}
+            <span class="muted small">{{ f.status }}</span>
+            {% endif %}
+          </td>
+          <td class="small" style="color: #4ade80;">+{{ f.additions }}</td>
+          <td class="small" style="color: #f87171;">-{{ f.deletions }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     COMMENTS
+     ================================================================ -->
+{% if comments %}
+<div class="card">
+  <h3 class="section-label">Comments</h3>
+  <div style="display: flex; flex-direction: column; gap: 10px;">
+    {% for comment in comments %}
+    <div style="background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom: 8px; font-size: 12px; color: var(--text-muted);">
+        {% if comment.user %}
+        <img
+          src="{{ comment.user.avatar_url }}"
+          alt="{{ comment.user.login }}"
+          style="width:20px; height:20px; border-radius:50%;"
+        >
+        <strong style="color: var(--text);">{{ comment.user.login }}</strong>
+        {% endif %}
+        {% if comment.created_at %}
+        <span>&mdash; {{ comment.created_at[:10] }}</span>
+        {% endif %}
+      </div>
+      <div class="comment-body-{{ loop.index }}" style="font-size: 13px; line-height: 1.6;"></div>
+      <script id="comment-raw-{{ loop.index }}" type="text/plain">{{ comment.body | e }}</script>
+      <script>
+        (function () {
+          var raw = document.getElementById('comment-raw-{{ loop.index }}').textContent;
+          document.querySelector('.comment-body-{{ loop.index }}').innerHTML = marked.parse(raw);
+        })();
+      </script>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

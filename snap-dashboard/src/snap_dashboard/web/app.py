@@ -34,9 +34,10 @@ async def on_startup() -> None:
 
 
 # Import and include routers after app is created to avoid circular imports
-from snap_dashboard.web.routes import dashboard, onboarding, settings, snaps  # noqa: E402
+from snap_dashboard.web.routes import dashboard, onboarding, settings, snaps, testing  # noqa: E402
 
 app.include_router(dashboard.router)
 app.include_router(onboarding.router)
 app.include_router(snaps.router)
 app.include_router(settings.router)
+app.include_router(testing.router)

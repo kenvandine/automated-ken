@@ -49,6 +49,27 @@
         {% endif %}
       </div>
       {% endif %}
+      {% set snap_run = test_runs_by_snap.get(item.snap.name) %}
+      {% if snap_run %}
+      <div class="attention-test-status">
+        {% if snap_run.status == 'passed' %}
+        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="badge badge-green">Tests passed</a>
+        {% elif snap_run.status == 'failed' %}
+        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="badge badge-red">Tests failed</a>
+        {% elif snap_run.status in ('pending', 'triggered', 'running') %}
+        <span class="badge badge-amber">Tests running…</span>
+        {% elif snap_run.status == 'promoted' %}
+        <span class="badge badge-green">Promoted</span>
+        {% endif %}
+      </div>
+      {% elif config.testing_repo %}
+      <form method="post" action="/testing/trigger/{{ item.snap.name }}" class="attention-test-form">
+        <input type="hidden" name="from_channel" value="edge">
+        <input type="hidden" name="version" value="{{ item.edge_ver }}">
+        <input type="hidden" name="revision" value="">
+        <button type="submit" class="btn btn-secondary btn-sm">Run Tests</button>
+      </form>
+      {% endif %}
     </div>
     {% endfor %}
   </div>

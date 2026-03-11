@@ -50,6 +50,8 @@ class Config:
     github_token: str = ""
     publisher: str = ""
     collect_interval_hours: int = 6
+    testing_repo: str = ""  # format: "owner/repo"
+    auto_test: bool = False
 
 
 def get_config() -> Config:
@@ -64,6 +66,9 @@ def get_config() -> Config:
     github_token = _get_value("GITHUB_TOKEN", file_values, "")
     publisher = _get_value("PUBLISHER", file_values, "")
     interval_str = _get_value("COLLECT_INTERVAL_HOURS", file_values, "6")
+
+    testing_repo = _get_value("TESTING_REPO", file_values, "")
+    auto_test = _get_value("AUTO_TEST", file_values, "false").lower() in ("1", "true", "yes")
 
     try:
         port = int(port_str)
@@ -81,6 +86,8 @@ def get_config() -> Config:
         github_token=github_token,
         publisher=publisher,
         collect_interval_hours=interval,
+        testing_repo=testing_repo,
+        auto_test=auto_test,
     )
 
 

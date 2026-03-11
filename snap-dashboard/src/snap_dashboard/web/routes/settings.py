@@ -64,6 +64,8 @@ async def settings_post(
     publisher: str = Form(default=""),
     github_token: str = Form(default=""),
     interval: int = Form(default=6),
+    testing_repo: str = Form(default=""),
+    auto_test: str = Form(default=""),
 ) -> RedirectResponse:
     """Save settings and redirect."""
     updates: dict[str, str] = {}
@@ -72,8 +74,9 @@ async def settings_post(
     if github_token.strip():
         updates["GITHUB_TOKEN"] = github_token.strip()
     updates["COLLECT_INTERVAL_HOURS"] = str(interval)
-    if updates:
-        save_config(updates)
+    updates["TESTING_REPO"] = testing_repo.strip()
+    updates["AUTO_TEST"] = "true" if auto_test in ("1", "true", "on", "yes") else "false"
+    save_config(updates)
     return RedirectResponse(url="/settings", status_code=303)
 
 

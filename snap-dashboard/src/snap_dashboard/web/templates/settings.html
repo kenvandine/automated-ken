@@ -72,6 +72,66 @@
   </form>
 </div>
 
+<!-- Testing Configuration -->
+<div class="card">
+  <h3 class="section-label">Testing Configuration</h3>
+  <form method="post" action="/settings">
+    <div class="form-row">
+      <label class="form-label" for="testing_repo">Testing Repository</label>
+      <input
+        type="text"
+        id="testing_repo"
+        name="testing_repo"
+        class="form-input"
+        value="{{ config.testing_repo }}"
+        placeholder="owner/repo"
+      >
+      <span class="form-hint">
+        GitHub repository containing YARF test suites at
+        <code>suites/&lt;snap_name&gt;/suite/</code> and the workflow at
+        <code>.github/workflows/snap-test.yml</code>.
+        Format: <code>owner/repo</code>.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label checkbox-label">
+        <input
+          type="checkbox"
+          name="auto_test"
+          value="true"
+          {% if config.auto_test %}checked{% endif %}
+          style="margin-right: 6px;"
+        >
+        Enable automatic testing
+      </label>
+      <span class="form-hint">
+        Automatically trigger tests when a newer version is detected in candidate/beta/edge
+        (requires a testing repository to be configured).
+      </span>
+    </div>
+
+    <div class="form-actions">
+      <a href="/testing/workflow-template" class="btn btn-secondary btn-sm" download="snap-test.yml">
+        Download Workflow Template
+      </a>
+      <button type="submit" class="btn btn-primary">Save Testing Config</button>
+    </div>
+  </form>
+
+  <div class="setup-instructions" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);">
+    <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px;">Setup Instructions</h4>
+    <ol style="font-size: 13px; color: var(--text-muted); line-height: 2; padding-left: 18px;">
+      <li>Create a GitHub repository (e.g. <code>you/snap-tests</code>) for your test suites.</li>
+      <li>Download the workflow template above and commit it to <code>.github/workflows/snap-test.yml</code>.</li>
+      <li>Add a repository secret named <code>SNAP_DASHBOARD_GITHUB_TOKEN</code> with a token that has <code>repo</code> scope.</li>
+      <li>Create YARF test suites under <code>suites/&lt;snap_name&gt;/suite/__init__.robot</code>.</li>
+      <li>Add a label named <code>snap-test-results</code> to the repository.</li>
+      <li>Enter the repository name above and save.</li>
+    </ol>
+  </div>
+</div>
+
 <!-- Tracked Snaps -->
 <div class="card">
   <div class="section-header-row">

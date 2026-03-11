@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 
 from snap_dashboard.config import get_config
-from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap
+from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
 from snap_dashboard.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -124,6 +124,22 @@ async def dashboard_index(request: Request) -> HTMLResponse:
         rows, attention = _build_snap_rows(session)
         last_run = _get_last_run()
 
+        # Build a dict of snap_name → most recent non-promoted TestRun for badge display
+        active_runs = (
+            session.query(TestRun)
+            .filter(TestRun.promoted.is_(False))
+            .order_by(TestRun.started_at.desc())
+            .all()
+        )
+        test_runs_by_snap: dict[str, dict] = {}
+        for run in active_runs:
+            if run.snap_name not in test_runs_by_snap:
+                test_runs_by_snap[run.snap_name] = {
+                    "status": run.status,
+                    "pr_number": run.pr_number,
+                    "version": run.version,
+                }
+
         return templates.TemplateResponse(
             "dashboard.html",
             {
@@ -132,6 +148,8 @@ async def dashboard_index(request: Request) -> HTMLResponse:
                 "attention": attention,
                 "last_run": last_run,
                 "publisher": config.publisher,
+                "config": config,
+                "test_runs_by_snap": test_runs_by_snap,
             },
         )
 
