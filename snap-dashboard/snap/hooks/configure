@@ -1,0 +1,18 @@
+#!/bin/sh
+set -e
+bind=$(snapctl get bind 2>/dev/null || echo "127.0.0.1")
+port=$(snapctl get port 2>/dev/null || echo "9080")
+token=$(snapctl get github-token 2>/dev/null || echo "")
+publisher=$(snapctl get publisher 2>/dev/null || echo "")
+interval=$(snapctl get interval 2>/dev/null || echo "6")
+
+mkdir -p "$SNAP_DATA"
+cat > "$SNAP_DATA/config.env" <<EOF
+BIND=${bind}
+PORT=${port}
+GITHUB_TOKEN=${token}
+PUBLISHER=${publisher}
+COLLECT_INTERVAL_HOURS=${interval}
+EOF
+
+snapctl restart snap-dashboard.serve 2>/dev/null || true

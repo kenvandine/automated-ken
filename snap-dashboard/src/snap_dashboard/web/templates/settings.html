@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — snap-dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="container">
+    <h1 class="page-title"><span class="gradient-text">Settings</span></h1>
+    <p class="page-subtitle">Configure snap-dashboard</p>
+  </div>
+</div>
+
+<div class="container page-content">
+
+  <!-- Configuration form -->
+  <section class="detail-section">
+    <h2 class="section-heading">Configuration</h2>
+    <div class="form-card">
+      <form method="post" action="/settings">
+        <div class="form-row">
+          <label class="form-label" for="publisher">Snap Store Publisher</label>
+          <input
+            type="text"
+            id="publisher"
+            name="publisher"
+            class="form-input"
+            value="{{ config.publisher }}"
+            placeholder="e.g. ken-vandine"
+          >
+          <span class="form-hint">Your Snap Store account name for auto-discovery</span>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="github_token">GitHub Token</label>
+          <input
+            type="password"
+            id="github_token"
+            name="github_token"
+            class="form-input"
+            placeholder="ghp_..."
+            autocomplete="off"
+          >
+          <span class="form-hint">
+            Optional Personal Access Token for higher GitHub API rate limits.
+            <a href="https://github.com/settings/tokens/new?scopes=repo&description=snap-dashboard"
+               target="_blank" rel="noopener" class="link-inline">Create one →</a>
+          </span>
+        </div>
+
+        <div class="form-row">
+          <label class="form-label" for="interval">Collection Interval</label>
+          <select id="interval" name="interval" class="form-input form-select">
+            {% for h in intervals %}
+            <option value="{{ h }}" {% if h == config.collect_interval_hours %}selected{% endif %}>
+              Every {{ h }} hour{% if h != 1 %}s{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+          <span class="form-hint">How often to automatically refresh snap data</span>
+        </div>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save Settings</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Snap management table -->
+  <section class="detail-section">
+    <div class="section-header-row">
+      <h2 class="section-heading">Tracked Snaps</h2>
+      <a href="/snaps/add" class="btn btn-secondary btn-sm">+ Add Snap</a>
+    </div>
+
+    {% if snaps %}
+    <div class="table-wrapper">
+      <table class="snap-table">
+        <thead>
+          <tr>
+            <th>Snap</th>
+            <th>Publisher</th>
+            <th>Packaging Repo</th>
+            <th>Added</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for snap in snaps %}
+          <tr>
+            <td>
+              <a href="/snap/{{ snap.name }}" class="snap-link">{{ snap.name }}</a>
+              {% if snap.manually_added %}
+              <span class="manual-badge">manual</span>
+              {% endif %}
+            </td>
+            <td class="muted">{{ snap.publisher or '—' }}</td>
+            <td class="muted small">
+              {% if snap.packaging_repo %}
+              <a href="{{ snap.packaging_repo }}" target="_blank" rel="noopener" class="link-inline small">
+                {{ snap.packaging_repo | truncate(40) }}
+              </a>
+              {% else %}
+              —
+              {% endif %}
+            </td>
+            <td class="muted">
+              {% if snap.manually_added %}Manual{% else %}Auto{% endif %}
+            </td>
+            <td>
+              <form method="post" action="/settings/remove/{{ snap.name }}"
+                    onsubmit="return confirm('Remove {{ snap.name }} from tracking?')">
+                <button type="submit" class="btn-danger-sm">Remove</button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state small-empty">
+      <p>No snaps tracked yet. <a href="/snaps/add" class="link-inline">Add one</a> or run a collection.</p>
+    </div>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+name: snap-dashboard
+base: core24
+version: git
+summary: Personal snap maintenance dashboard
+description: |
+  Tracks channel versions, open issues, and PRs for snaps you maintain.
+  Provides a web dashboard and scheduled background collection.
+grade: stable
+confinement: strict
+
+# User-configurable snap options (snap set snap-dashboard <key>=<value>)
+# bind:         bind address (default: 127.0.0.1)
+# port:         listen port   (default: 9080)
+# github-token: GitHub PAT    (default: "")
+# publisher:    Store account  (default: "")
+# interval:     collect interval in hours (default: 6)
+
+apps:
+  snap-dashboard:
+    command: bin/snap-dashboard
+    plugs: [network, home]
+
+  collect:
+    command: bin/snap-dashboard collect
+    daemon: oneshot
+    timer: 00:00~24:00/4
+    plugs: [network]
+
+  serve:
+    command: bin/snap-dashboard serve
+    daemon: simple
+    plugs: [network-bind]
+
+parts:
+  snap-dashboard:
+    plugin: python
+    source: .
+    python-requirements: [requirements.txt]

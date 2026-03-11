@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+
+{% block title %}{{ snap.name }} — snap-dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="container">
+    <div class="page-header-inner">
+      <div>
+        <a href="/" class="back-link">← Dashboard</a>
+        <h1 class="page-title">
+          <span class="gradient-text">{{ snap.name }}</span>
+        </h1>
+        {% if snap.publisher %}
+        <p class="page-subtitle">Publisher: {{ snap.publisher }}</p>
+        {% endif %}
+      </div>
+      <div class="snap-meta-badges">
+        {% if snap.manually_added %}
+        <span class="manual-badge">manually added</span>
+        {% endif %}
+        {% if snap.packaging_repo %}
+        <a href="{{ snap.packaging_repo }}" target="_blank" rel="noopener" class="repo-link">
+          📦 Packaging repo
+        </a>
+        {% endif %}
+        {% if snap.upstream_repo %}
+        <a href="{{ snap.upstream_repo }}" target="_blank" rel="noopener" class="repo-link">
+          ⬆ Upstream repo
+        </a>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container page-content">
+
+  <!-- Channel Map Table -->
+  <section class="detail-section">
+    <h2 class="section-heading">Channel Map</h2>
+    {% if arch_map %}
+    <div class="table-wrapper">
+      <table class="snap-table">
+        <thead>
+          <tr>
+            <th>Architecture</th>
+            {% for ch in channels %}
+            <th>{{ ch }}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for arch, ch_data in arch_map.items() %}
+          <tr>
+            <td><strong>{{ arch }}</strong></td>
+            {% set stable_ver = ch_data.get('stable', {}).get('version') %}
+            {% for ch in channels %}
+            {% set info = ch_data.get(ch) %}
+            <td>
+              {% if info %}
+              {% set ver = info.version %}
+              {% if ch == 'stable' %}
+              <span class="channel-badge badge-green">{{ ver or '?' }}</span>
+              {% elif ver == stable_ver and stable_ver %}
+              <span class="channel-badge badge-green">{{ ver }}</span>
+              {% elif ver and ver != stable_ver %}
+              <span class="channel-badge badge-amber">{{ ver }}</span>
+              {% else %}
+              <span class="channel-badge badge-gray">{{ ver or '?' }}</span>
+              {% endif %}
+              <div class="channel-rev">r{{ info.revision }}</div>
+              {% else %}
+              <span class="channel-badge badge-gray">—</span>
+              {% endif %}
+            </td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state small-empty">
+      <p>No channel data collected yet. <a href="/refresh" class="link-inline">Run collection</a></p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- Issues and PRs -->
+  <section class="detail-section">
+    <h2 class="section-heading">Issues &amp; Pull Requests</h2>
+
+    {% if issues %}
+    <!-- Filter tabs -->
+    <div class="filter-tabs" id="filter-tabs">
+      <button class="filter-tab active" data-filter="all">
+        All <span class="tab-count">{{ issues|length }}</span>
+      </button>
+      <button class="filter-tab" data-filter="issue">
+        Issues <span class="tab-count">{{ issues|selectattr('type', 'equalto', 'issue')|list|length }}</span>
+      </button>
+      <button class="filter-tab" data-filter="pr">
+        PRs <span class="tab-count">{{ issues|selectattr('type', 'equalto', 'pr')|list|length }}</span>
+      </button>
+      {% if snap.packaging_repo %}
+      <button class="filter-tab" data-filter="packaging">
+        Packaging <span class="tab-count">{{ issues|selectattr('repo_url', 'equalto', snap.packaging_repo)|list|length }}</span>
+      </button>
+      {% endif %}
+      {% if snap.upstream_repo %}
+      <button class="filter-tab" data-filter="upstream">
+        Upstream <span class="tab-count">{{ issues|selectattr('repo_url', 'equalto', snap.upstream_repo)|list|length }}</span>
+      </button>
+      {% endif %}
+    </div>
+
+    <div class="issues-list" id="issues-list">
+      {% for issue in issues %}
+      <div class="issue-item"
+           data-type="{{ issue.type }}"
+           data-repo="{% if issue.repo_url == snap.packaging_repo %}packaging{% elif issue.repo_url == snap.upstream_repo %}upstream{% else %}other{% endif %}">
+        <div class="issue-header">
+          <span class="issue-type-badge {% if issue.type == 'pr' %}type-pr{% else %}type-issue{% endif %}">
+            {% if issue.type == 'pr' %}PR{% else %}Issue{% endif %}
+          </span>
+          <a href="{{ issue.url }}" target="_blank" rel="noopener" class="issue-title">
+            {{ issue.title }}
+          </a>
+          <span class="issue-number">#{{ issue.issue_number }}</span>
+        </div>
+        <div class="issue-meta">
+          <span class="muted">by {{ issue.author or 'unknown' }}</span>
+          {% if issue.updated_at %}
+          <span class="muted">· updated {{ issue.updated_at.strftime('%Y-%m-%d') }}</span>
+          {% endif %}
+          <span class="repo-badge muted">
+            {% if issue.repo_url == snap.packaging_repo %}
+            📦 packaging
+            {% elif issue.repo_url == snap.upstream_repo %}
+            ⬆ upstream
+            {% else %}
+            {{ issue.repo_url }}
+            {% endif %}
+          </span>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state small-empty">
+      <p>No open issues or PRs found.
+        {% if not snap.packaging_repo and not snap.upstream_repo %}
+        Add repository URLs below to enable issue tracking.
+        {% endif %}
+      </p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- Edit form (collapsible) -->
+  <section class="detail-section">
+    <details class="collapsible">
+      <summary class="collapsible-trigger">
+        <span>Edit Snap Details</span>
+        <span class="chevron">▾</span>
+      </summary>
+      <div class="collapsible-body">
+        <form method="post" action="/snap/{{ snap.name }}/edit" class="edit-form">
+          <div class="form-row">
+            <label class="form-label" for="packaging_repo">Packaging Repository URL</label>
+            <input
+              type="url"
+              id="packaging_repo"
+              name="packaging_repo"
+              class="form-input"
+              value="{{ snap.packaging_repo or '' }}"
+              placeholder="https://github.com/owner/snap-repo"
+            >
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="upstream_repo">Upstream Repository URL</label>
+            <input
+              type="url"
+              id="upstream_repo"
+              name="upstream_repo"
+              class="form-input"
+              value="{{ snap.upstream_repo or '' }}"
+              placeholder="https://github.com/owner/upstream"
+            >
+          </div>
+          <div class="form-row">
+            <label class="form-label" for="notes">Notes</label>
+            <textarea
+              id="notes"
+              name="notes"
+              class="form-input form-textarea"
+              rows="3"
+              placeholder="Any notes about this snap..."
+            >{{ snap.notes or '' }}</textarea>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </details>
+  </section>
+
+</div>
+
+<script>
+// Filter tabs for issues
+document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
+  const tab = e.target.closest('.filter-tab');
+  if (!tab) return;
+
+  document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+
+  const filter = tab.dataset.filter;
+  document.querySelectorAll('.issue-item').forEach(item => {
+    if (filter === 'all') {
+      item.style.display = '';
+    } else if (filter === 'issue' || filter === 'pr') {
+      item.style.display = item.dataset.type === filter ? '' : 'none';
+    } else {
+      item.style.display = item.dataset.repo === filter ? '' : 'none';
+    }
+  });
+});
+</script>
+{% endblock %}

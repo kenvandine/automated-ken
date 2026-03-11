@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — snap-dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="container">
+    <div class="page-header-inner">
+      <div>
+        <h1 class="page-title">
+          <span class="gradient-text">{{ publisher }}</span> Snaps
+        </h1>
+        <p class="page-subtitle">{{ rows|length }} snaps tracked</p>
+      </div>
+      <form method="post" action="/refresh" class="refresh-form">
+        <button type="submit" class="btn btn-primary btn-sm">
+          <span class="btn-icon">🔄</span> Refresh Now
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="container page-content">
+
+  {% if attention %}
+  <!-- Attention needed section -->
+  <section class="attention-section">
+    <h2 class="section-heading">Attention Needed</h2>
+    <div class="attention-scroll">
+      {% for item in attention %}
+      <div class="attention-card {% if item.label == 'ready_to_promote' %}attention-cyan{% else %}attention-orange{% endif %}">
+        <div class="attention-card-header">
+          {% if item.label == 'ready_to_promote' %}
+          <span class="attention-tag tag-cyan">Ready to promote</span>
+          {% else %}
+          <span class="attention-tag tag-orange">Has open items</span>
+          {% endif %}
+          <a href="/snap/{{ item.snap.name }}" class="attention-name">{{ item.snap.name }}</a>
+        </div>
+        <div class="attention-versions">
+          <div class="version-compare">
+            <span class="ver-label">edge</span>
+            <span class="ver-value ver-new">{{ item.edge_ver or '—' }}</span>
+          </div>
+          <div class="ver-arrow">→</div>
+          <div class="version-compare">
+            <span class="ver-label">stable</span>
+            <span class="ver-value ver-old">{{ item.stable_ver or 'none' }}</span>
+          </div>
+        </div>
+        {% if item.label == 'has_open_items' %}
+        <div class="attention-counts">
+          {% if item.issue_count %}
+          <span class="badge badge-orange">{{ item.issue_count }} issues</span>
+          {% endif %}
+          {% if item.pr_count %}
+          <span class="badge badge-purple">{{ item.pr_count }} PRs</span>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <!-- Snap table -->
+  <section class="snap-table-section">
+    <h2 class="section-heading">All Snaps</h2>
+    {% if rows %}
+    <div class="table-wrapper">
+      <table class="snap-table">
+        <thead>
+          <tr>
+            <th>Snap</th>
+            <th>Stable</th>
+            <th>Candidate</th>
+            <th>Beta</th>
+            <th>Edge</th>
+            <th>Issues</th>
+            <th>PRs</th>
+            <th>Updated</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr class="snap-row">
+            <td class="snap-name-cell">
+              <a href="/snap/{{ row.snap.name }}" class="snap-link">{{ row.snap.name }}</a>
+              {% if row.snap.manually_added %}
+              <span class="manual-badge">manual</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.stable %}
+              <span class="channel-badge badge-green">{{ row.stable }}</span>
+              {% else %}
+              <span class="channel-badge badge-red">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.candidate %}
+              {% if row.candidate == row.stable %}
+              <span class="channel-badge badge-green">{{ row.candidate }}</span>
+              {% else %}
+              <span class="channel-badge badge-amber">{{ row.candidate }}</span>
+              {% endif %}
+              {% else %}
+              <span class="channel-badge badge-gray">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.beta %}
+              {% if row.beta == row.stable %}
+              <span class="channel-badge badge-green">{{ row.beta }}</span>
+              {% else %}
+              <span class="channel-badge badge-amber">{{ row.beta }}</span>
+              {% endif %}
+              {% else %}
+              <span class="channel-badge badge-gray">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.edge %}
+              {% if row.edge == row.stable %}
+              <span class="channel-badge badge-green">{{ row.edge }}</span>
+              {% elif row.edge != row.stable %}
+              <span class="channel-badge badge-amber">{{ row.edge }}</span>
+              {% endif %}
+              {% else %}
+              <span class="channel-badge badge-gray">—</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.issue_count > 0 %}
+              <span class="badge badge-orange">{{ row.issue_count }}</span>
+              {% else %}
+              <span class="muted">0</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if row.pr_count > 0 %}
+              <span class="badge badge-purple">{{ row.pr_count }}</span>
+              {% else %}
+              <span class="muted">0</span>
+              {% endif %}
+            </td>
+            <td class="muted small">
+              {% if row.last_collected %}
+              {{ row.last_collected.strftime('%m-%d %H:%M') }}
+              {% else %}
+              —
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <div class="empty-icon">📭</div>
+      <h3>No snaps tracked yet</h3>
+      <p>Run a collection to discover your snaps, or add one manually.</p>
+      <div class="empty-actions">
+        <form method="post" action="/refresh" style="display:inline">
+          <button type="submit" class="btn btn-primary">Run Collection</button>
+        </form>
+        <a href="/snaps/add" class="btn btn-secondary">Add Snap</a>
+      </div>
+    </div>
+    {% endif %}
+  </section>
+
+</div>
+{% endblock %}

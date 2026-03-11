@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}Add Snap — snap-dashboard{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div class="container">
+    <a href="/" class="back-link">← Dashboard</a>
+    <h1 class="page-title"><span class="gradient-text">Add Snap</span></h1>
+    <p class="page-subtitle">Search the Snap Store or add a snap manually</p>
+  </div>
+</div>
+
+<div class="container page-content">
+  <div class="form-card">
+    <!-- Search box -->
+    <div class="search-box">
+      <div class="form-row">
+        <label class="form-label" for="search-input">Snap name</label>
+        <div class="search-input-row">
+          <input
+            type="text"
+            id="search-input"
+            name="snap_name"
+            class="form-input"
+            placeholder="e.g. firefox, gimp, vlc"
+            autocomplete="off"
+          >
+          <button
+            class="btn btn-primary"
+            hx-post="/snaps/search"
+            hx-include="#search-input"
+            hx-target="#search-results"
+            hx-swap="outerHTML"
+            hx-vals='js:{"snap_name": document.getElementById("search-input").value}'
+          >
+            Search
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Search results (HTMX target) -->
+    <div id="search-results"></div>
+
+    <!-- Add form -->
+    <form method="post" action="/snaps/add" id="add-form" class="add-form">
+      <input type="hidden" id="snap_name_hidden" name="snap_name" value="">
+
+      <div class="form-row">
+        <label class="form-label" for="packaging_repo_main">Packaging Repository URL</label>
+        <input
+          type="url"
+          id="packaging_repo_main"
+          name="packaging_repo"
+          class="form-input"
+          placeholder="https://github.com/owner/snap-repo"
+        >
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="upstream_repo_main">Upstream Repository URL</label>
+        <input
+          type="url"
+          id="upstream_repo_main"
+          name="upstream_repo"
+          class="form-input"
+          placeholder="https://github.com/owner/upstream"
+        >
+      </div>
+
+      <div class="form-row">
+        <label class="form-label" for="notes_main">Notes</label>
+        <textarea
+          id="notes_main"
+          name="notes"
+          class="form-input form-textarea"
+          rows="3"
+          placeholder="Optional notes about this snap"
+        ></textarea>
+      </div>
+
+      <div class="form-actions">
+        <a href="/" class="btn btn-secondary">Cancel</a>
+        <button type="submit" class="btn btn-primary" id="save-btn" disabled>Save Snap</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+// Enable save button when snap name is present
+const searchInput = document.getElementById('search-input');
+const hiddenInput = document.getElementById('snap_name_hidden');
+const saveBtn = document.getElementById('save-btn');
+
+searchInput.addEventListener('input', function() {
+  const val = this.value.trim();
+  hiddenInput.value = val;
+  saveBtn.disabled = val.length === 0;
+});
+
+// After HTMX search result loads, copy fields to the main form
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+  if (evt.detail.target.id === 'search-results') {
+    const result = document.getElementById('search-results');
+    if (result && result.classList.contains('found')) {
+      // Copy packaging/upstream repo values into main form
+      const pkgInput = result.querySelector('[name="packaging_repo"]');
+      const upstreamInput = result.querySelector('[name="upstream_repo"]');
+      if (pkgInput) document.getElementById('packaging_repo_main').value = pkgInput.value;
+      if (upstreamInput) document.getElementById('upstream_repo_main').value = upstreamInput.value;
+
+      // Set snap name hidden input
+      hiddenInput.value = searchInput.value.trim();
+      saveBtn.disabled = false;
+    }
+  }
+});
+</script>
+{% endblock %}
