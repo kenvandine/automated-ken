@@ -97,13 +97,13 @@ def _update_snap(session: Session, snap: Snap, gh_client: GitHubClient) -> None:
     # 2a: Fetch and upsert channel map
     info = get_snap_info(snap.name)
     if info:
-        # Detect repo URLs if not already set
-        if not snap.packaging_repo:
+        # Always re-derive repo URLs from Store metadata for auto-discovered snaps
+        # so stale or incorrect values are corrected on each collection run.
+        # For manually-added snaps the user's values are preserved.
+        if not snap.manually_added:
             repos = extract_repo_urls(info)
-            if repos.get("packaging_repo"):
-                snap.packaging_repo = repos["packaging_repo"]
-            if repos.get("upstream_repo"):
-                snap.upstream_repo = repos["upstream_repo"]
+            snap.packaging_repo = repos.get("packaging_repo") or snap.packaging_repo
+            snap.upstream_repo = repos.get("upstream_repo") or None
 
         channel_entries = extract_channel_map(info)
         # Delete all existing channel_map rows for this snap

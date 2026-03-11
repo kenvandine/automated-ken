@@ -146,44 +146,72 @@ def _looks_like_repo(url: str) -> bool:
     return "github.com" in host or "gitlab.com" in host
 
 
+def _base_repo_url(url: str) -> str | None:
+    """Return the base repo URL, stripping trailing path segments like /issues."""
+    if not url or not _looks_like_repo(url):
+        return None
+    parsed = urlparse(url.rstrip("/"))
+    parts = [p for p in parsed.path.split("/") if p]
+    # Need at least /owner/repo
+    if len(parts) < 2:
+        return None
+    base_path = "/" + "/".join(parts[:2])
+    return f"{parsed.scheme}://{parsed.netloc}{base_path}"
+
+
 def extract_repo_urls(info: dict[str, Any]) -> dict[str, str | None]:
     """Extract packaging_repo and upstream_repo from snap info.
 
-    Looks in snap.links and snap.media for GitHub/GitLab URLs.
+    Mapping logic:
+    - ``issues`` / ``contact`` links point to where snap-specific bugs are filed
+      → packaging_repo (base repo, /issues suffix stripped)
+    - ``source`` links point to the upstream project source code
+      → upstream_repo
+    - ``website`` / ``homepage`` used as fallback if neither of the above is set
+
     Returns {packaging_repo, upstream_repo}.
     """
-    # With fields=channel-map,links the links dict is top-level; fall back to snap.links
-    links = info.get("links", {}) or info.get("snap", {}).get("links", {}) or {}
-    media = info.get("media", []) or info.get("snap", {}).get("media", []) or []
+    # links may be top-level (when requested as a field) or under snap sub-object
+    links: dict[str, Any] = (
+        info.get("links")
+        or info.get("snap", {}).get("links")
+        or {}
+    )
 
-    candidates: list[str] = []
+    def _first_repo(keys: list[str]) -> str | None:
+        for key in keys:
+            urls = links.get(key, [])
+            if isinstance(urls, str):
+                urls = [urls]
+            for u in urls:
+                repo = _base_repo_url(u)
+                if repo:
+                    return repo
+        return None
 
-    # links is a dict like {"source": ["url"], "website": ["url"], ...}
-    for key in ("source", "source-code", "vcs-browser", "website", "homepage"):
-        urls = links.get(key, [])
-        if isinstance(urls, str):
-            urls = [urls]
-        for u in urls:
-            if _looks_like_repo(u):
-                candidates.append(u)
+    # Issues/contact → snap packaging repo (where snap bugs are filed)
+    packaging_repo = _first_repo(["issues", "contact"])
 
-    # Also scan media items
-    for m in media:
-        if isinstance(m, dict):
-            url = m.get("url", "")
-            if _looks_like_repo(url):
-                candidates.append(url)
+    # Source → upstream project
+    upstream_repo = _first_repo(["source", "source-code", "vcs-browser"])
 
-    # Deduplicate preserving order
-    seen: set[str] = set()
-    unique: list[str] = []
-    for u in candidates:
-        if u not in seen:
-            seen.add(u)
-            unique.append(u)
+    # Fallback: if neither found, use website/homepage as packaging_repo
+    if not packaging_repo and not upstream_repo:
+        packaging_repo = _first_repo(["website", "homepage"])
+    elif not packaging_repo:
+        # No issues link but have source; check website as possible packaging repo
+        website = _first_repo(["website", "homepage"])
+        # Only use website as packaging_repo if it differs from upstream
+        if website and website.rstrip("/") != (upstream_repo or "").rstrip("/"):
+            packaging_repo = website
 
-    packaging_repo: str | None = unique[0] if len(unique) >= 1 else None
-    upstream_repo: str | None = unique[1] if len(unique) >= 2 else None
+    # If both resolved to the same repo there's no separate upstream
+    if (
+        packaging_repo
+        and upstream_repo
+        and packaging_repo.rstrip("/") == upstream_repo.rstrip("/")
+    ):
+        upstream_repo = None
 
     return {
         "packaging_repo": packaging_repo,
