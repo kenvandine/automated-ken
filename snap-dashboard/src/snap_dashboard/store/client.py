@@ -147,7 +147,11 @@ def _looks_like_repo(url: str) -> bool:
 
 
 def _base_repo_url(url: str) -> str | None:
-    """Return the base repo URL, stripping trailing path segments like /issues."""
+    """Return the canonical base repo URL.
+
+    Strips trailing path segments (e.g. /issues, /tree/main) and the
+    .git suffix so that equivalent URLs compare equal.
+    """
     if not url or not _looks_like_repo(url):
         return None
     parsed = urlparse(url.rstrip("/"))
@@ -155,7 +159,8 @@ def _base_repo_url(url: str) -> str | None:
     # Need at least /owner/repo
     if len(parts) < 2:
         return None
-    base_path = "/" + "/".join(parts[:2])
+    repo_name = parts[1].removesuffix(".git")
+    base_path = "/" + parts[0] + "/" + repo_name
     return f"{parsed.scheme}://{parsed.netloc}{base_path}"
 
 
