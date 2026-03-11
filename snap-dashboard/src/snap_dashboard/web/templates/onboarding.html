@@ -5,20 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Setup — snap-dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&family=Poppins:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
 </head>
 <body class="onboarding-body">
-  <!-- Background blobs -->
-  <div class="paint-splatter paint-splatter-1"></div>
-  <div class="paint-splatter paint-splatter-2"></div>
-  <div class="paint-splatter paint-splatter-3"></div>
-
   <div class="onboarding-wrapper">
     <div class="onboarding-card">
-      <!-- Progress dots -->
+
+      <!-- Step indicator -->
       <div class="onboarding-steps">
         <div class="step-dot {% if step >= 1 %}active{% endif %}">1</div>
         <div class="step-line {% if step >= 2 %}active{% endif %}"></div>
@@ -32,36 +27,31 @@
       {% if step == 1 %}
       <!-- Step 1: Welcome -->
       <div class="onboarding-step">
-        <div class="onboarding-icon">🚀</div>
-        <h1 class="onboarding-title">
-          Let's set up your<br>
-          <span class="gradient-text">snap dashboard</span>
-        </h1>
+        <h1 class="onboarding-title">Welcome to snap-dashboard</h1>
         <p class="onboarding-desc">
           Track channel versions, open issues, and pull requests across all
           your published snaps — all in one place, hosted locally.
         </p>
         <div class="onboarding-features">
           <div class="feature-item">
-            <span class="feature-icon">📦</span>
+            <span class="feature-icon">&#x1F4E6;</span>
             <span>Auto-discover snaps by publisher</span>
           </div>
           <div class="feature-item">
-            <span class="feature-icon">🔄</span>
+            <span class="feature-icon">&#x1F504;</span>
             <span>Channel comparison (stable / beta / edge)</span>
           </div>
           <div class="feature-item">
-            <span class="feature-icon">🐙</span>
+            <span class="feature-icon">&#x1F419;</span>
             <span>GitHub &amp; GitLab issues + PRs</span>
           </div>
         </div>
-        <a href="/onboarding?step=2" class="btn btn-primary btn-large">Get Started</a>
+        <a href="/onboarding?step=2" class="btn btn-primary">Get Started</a>
       </div>
 
       {% elif step == 2 %}
       <!-- Step 2: Publisher -->
       <div class="onboarding-step">
-        <div class="onboarding-icon">🏪</div>
         <h2 class="onboarding-title">Snap Store Publisher</h2>
         <p class="onboarding-desc">
           Enter your Snap Store publisher account name. We'll use this to
@@ -83,7 +73,7 @@
           </div>
           {% if verify_result and verify_result.get('found') %}
           <div class="verify-success">
-            ✓ Found <strong>{{ verify_result.snap_count }}</strong> snaps for
+            Found <strong>{{ verify_result.snap_count }}</strong> snaps for
             <strong>{{ verify_result.publisher }}</strong>
           </div>
           {% elif verify_result and not verify_result.get('found') %}
@@ -102,13 +92,12 @@
       {% elif step == 3 %}
       <!-- Step 3: GitHub Token -->
       <div class="onboarding-step">
-        <div class="onboarding-icon">🐙</div>
         <h2 class="onboarding-title">GitHub Token <span class="optional-badge">Optional</span></h2>
         <p class="onboarding-desc">
           Add a GitHub Personal Access Token to fetch issue and PR data.
           Without a token, GitHub API is limited to 60 requests/hour.
           <a href="https://github.com/settings/tokens/new?scopes=repo&description=snap-dashboard"
-             target="_blank" rel="noopener" class="link-inline">Create a token →</a>
+             target="_blank" rel="noopener" class="link-inline">Create a token &rarr;</a>
         </p>
         <form method="post" action="/onboarding/token" class="onboarding-form">
           <div class="form-row">
@@ -130,12 +119,12 @@
       </div>
 
       {% elif step == 4 or step >= 4 %}
-      <!-- Step 4: All set! -->
-      <div class="onboarding-step onboarding-complete">
-        <div class="onboarding-icon spin">⚙️</div>
+      <!-- Step 4: Running first collection -->
+      <div class="onboarding-step">
+        <div class="spinner"></div>
         <h2 class="onboarding-title">All Set!</h2>
         <p class="onboarding-desc">
-          Running first collection… this may take a moment while we fetch
+          Running first collection&hellip; this may take a moment while we fetch
           your snaps from the Snap Store and GitHub.
         </p>
         <div class="loading-bar">
@@ -146,12 +135,12 @@
         </form>
       </div>
       <script>
-        // Auto-submit after a short delay to start collection
         setTimeout(function() {
           document.getElementById('complete-form').submit();
         }, 1500);
       </script>
       {% endif %}
+
     </div>
   </div>
 </body>

@@ -5,47 +5,35 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}snap-dashboard{% endblock %}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&family=Poppins:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
-  <nav class="navbar" id="navbar">
-    <div class="nav-container">
-      <a href="/" class="logo">snap-dashboard</a>
-      <ul class="nav-menu" id="nav-menu">
-        <li><a href="/" class="nav-link">Dashboard</a></li>
-        <li><a href="/snaps/add" class="nav-link">Add Snap</a></li>
-        <li><a href="/settings" class="nav-link">Settings</a></li>
-      </ul>
-      {% if last_run %}
-      <div class="nav-meta">
-        <span class="last-updated">Updated {{ last_run.strftime('%Y-%m-%d %H:%M') }} UTC</span>
-      </div>
-      {% endif %}
-      <div class="hamburger" id="hamburger" aria-label="Toggle navigation" role="button" tabindex="0">
-        <span></span>
-        <span></span>
-        <span></span>
-      </div>
+<div class="app">
+  <header>
+    <div class="header-brand">
+      <h1><a href="/" class="brand-link">snap-dashboard</a></h1>
+      <p>Snap maintenance tracker</p>
     </div>
-  </nav>
-
-  <main class="main-content">
-    {% block content %}{% endblock %}
-  </main>
-
-  <footer class="footer">
-    <div class="container">
-      <p>Powered by <a href="https://snapcraft.io" target="_blank" rel="noopener" class="footer-link">snapcraft.io</a></p>
+    <nav class="header-nav">
+      <a href="/" class="nav-link">Dashboard</a>
+      <a href="/snaps/add" class="nav-link">Add Snap</a>
+      <a href="/settings" class="nav-link">Settings</a>
+    </nav>
+    <div class="last-updated">
       {% if last_run %}
-      <p class="footer-tagline">Last collection: {{ last_run.strftime('%Y-%m-%d %H:%M:%S') }} UTC</p>
-      {% else %}
-      <p class="footer-tagline">No collection run yet</p>
+      Updated {{ last_run.strftime('%Y-%m-%d %H:%M') }} UTC
       {% endif %}
     </div>
+  </header>
+
+  {% block content %}{% endblock %}
+
+  <footer>
+    <p>snap-dashboard &middot; powered by <a href="https://snapcraft.io" target="_blank" rel="noopener">snapcraft.io</a></p>
   </footer>
+</div>
 </body>
 </html>
