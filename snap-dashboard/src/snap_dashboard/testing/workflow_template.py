@@ -110,7 +110,7 @@ jobs:
 
       - name: Create (or update) test PR
         env:
-          GITHUB_TOKEN: ${{ secrets.SNAP_DASHBOARD_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SNAP_DASHBOARD_GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
         run: |
           STATUS="${{ steps.status.outputs.status }}"
