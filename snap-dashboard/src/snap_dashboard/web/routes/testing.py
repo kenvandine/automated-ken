@@ -37,24 +37,47 @@ async def testing_index(request: Request) -> HTMLResponse:
     config = get_config()
 
     with get_session() as session:
-        snaps_needing = find_snaps_needing_tests(session)
+        snaps_needing_raw = find_snaps_needing_tests(session)
 
-        # Annotate each item with suite existence and any active run
-        for item in snaps_needing:
-            item["has_suite"] = suite_exists_in_repo(
-                config.testing_repo, item["snap"].name, config.github_token
-            )
+        # Annotate each item with suite existence and any active run,
+        # and replace the ORM Snap object with a plain dict to avoid
+        # DetachedInstanceError after the session closes.
+        snaps_needing = []
+        for item in snaps_needing_raw:
+            snap_name = item["snap"].name
             existing = (
                 session.query(TestRun)
                 .filter_by(
-                    snap_name=item["snap"].name,
+                    snap_name=snap_name,
                     version=item["version"],
                     promoted=False,
                 )
                 .order_by(TestRun.started_at.desc())
                 .first()
             )
-            item["existing_run"] = existing
+            existing_run = (
+                {
+                    "id": existing.id,
+                    "status": existing.status,
+                    "pr_number": existing.pr_number,
+                    "pr_url": existing.pr_url,
+                }
+                if existing
+                else None
+            )
+            snaps_needing.append(
+                {
+                    "snap": {"name": snap_name},
+                    "from_channel": item["from_channel"],
+                    "version": item["version"],
+                    "revision": item["revision"],
+                    "stable_ver": item["stable_ver"],
+                    "has_suite": suite_exists_in_repo(
+                        config.testing_repo, snap_name, config.github_token
+                    ),
+                    "existing_run": existing_run,
+                }
+            )
 
         all_runs = (
             session.query(TestRun)

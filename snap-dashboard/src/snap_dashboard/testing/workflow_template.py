@@ -59,31 +59,17 @@ jobs:
       - name: Checkout testing repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Install YARF
-        run: pip install canonical-yarf
-
-      - name: Install snap dependencies
+      - name: Install snaps
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y snapd mir-kiosk-x11 xvfb libgl1
-
-      - name: Install ${{ inputs.snap_name }} from ${{ inputs.from_channel }}
-        run: |
+          sudo snap install yarf
+          sudo snap install mir-test-tools
           sudo snap install "${{ inputs.snap_name }}" --channel "${{ inputs.from_channel }}"
+          sudo snap connect yarf:process-control
 
       - name: Run YARF tests
         id: yarf
         continue-on-error: true
-        env:
-          DISPLAY: ":99"
         run: |
-          Xvfb :99 -screen 0 1280x800x24 &
-          sleep 2
           mkdir -p "results/${{ inputs.snap_name }}"
           yarf \\
             --platform Mir \\
