@@ -61,7 +61,7 @@ jobs:
 
       - name: Install snaps
         run: |
-          sudo snap install yarf
+          sudo snap install --beta yarf
           sudo snap install mir-test-tools
           sudo snap install "${{ inputs.snap_name }}" --channel "${{ inputs.from_channel }}"
           sudo snap connect yarf:process-control
