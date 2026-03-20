@@ -102,8 +102,17 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BRANCH"
-          git add "results/${{ inputs.snap_name }}" || true
-          git diff --cached --quiet || git commit -m \\
+          mkdir -p "results/${{ inputs.snap_name }}"
+          cat > "results/${{ inputs.snap_name }}/summary.txt" <<EOF
+          snap: ${{ inputs.snap_name }}
+          version: ${{ inputs.version }}
+          channel: ${{ inputs.from_channel }}
+          revision: ${{ inputs.revision }}
+          status: ${{ steps.status.outputs.status }}
+          gh_run: ${{ github.run_id }}
+          EOF
+          git add "results/${{ inputs.snap_name }}"
+          git commit -m \\
             "test results: ${{ inputs.snap_name }} ${{ inputs.version }} (${{ steps.status.outputs.status }})"
           git push origin "$BRANCH"
           echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
