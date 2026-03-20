@@ -252,6 +252,7 @@ def sync_test_runs() -> None:
             run.pr_number = pr.get("number")
             run.pr_url = pr.get("html_url")
             run.pr_body = pr.get("body")
+            run.gh_run_id = meta.get("gh_run_id") or run.gh_run_id
 
             if gh_status in ("passed", "failed"):
                 run.finished_at = datetime.now(timezone.utc)

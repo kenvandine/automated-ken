@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.config import get_config
@@ -59,6 +59,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                 {
                     "id": existing.id,
                     "status": existing.status,
+                    "gh_run_id": existing.gh_run_id,
                     "pr_number": existing.pr_number,
                     "pr_url": existing.pr_url,
                 }
@@ -95,6 +96,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                 "version": r.version,
                 "revision": r.revision,
                 "status": r.status,
+                "gh_run_id": r.gh_run_id,
                 "pr_number": r.pr_number,
                 "pr_url": r.pr_url,
                 "triggered_by": r.triggered_by,
@@ -161,6 +163,40 @@ async def sync_runs(background_tasks: BackgroundTasks) -> RedirectResponse:
     """Sync test run statuses from GitHub PRs in the background."""
     background_tasks.add_task(sync_test_runs)
     return RedirectResponse(url="/testing", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# Live status API — polled by the testing page JS
+# ---------------------------------------------------------------------------
+
+
+@router.get("/testing/api/status")
+async def testing_status() -> JSONResponse:
+    """Return current status of in-flight and recently finished test runs."""
+    config = get_config()
+    with get_session() as session:
+        runs = (
+            session.query(TestRun)
+            .order_by(TestRun.started_at.desc())
+            .limit(50)
+            .all()
+        )
+        data = [
+            {
+                "id": r.id,
+                "status": r.status,
+                "gh_run_id": r.gh_run_id,
+                "pr_number": r.pr_number,
+                "pr_url": r.pr_url,
+            }
+            for r in runs
+        ]
+    return JSONResponse(
+        {
+            "runs": data,
+            "testing_repo": config.testing_repo or "",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
