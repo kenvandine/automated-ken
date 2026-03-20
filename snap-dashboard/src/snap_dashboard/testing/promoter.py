@@ -79,8 +79,8 @@ def close_test_pr(
                 comment_url,
                 json={
                     "body": (
-                        f"`{snap_name}` {version} has been promoted to `{testing_repo}`."
-                        " Closing this PR."
+                        f"`{snap_name}` {version} has been promoted to `stable`. "
+                        "Closing this PR."
                     )
                 },
                 headers=headers,
