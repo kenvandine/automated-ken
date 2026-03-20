@@ -96,7 +96,7 @@ jobs:
 
       - name: Commit results to branch
         env:
-          GITHUB_TOKEN: ${{ secrets.SNAP_DASHBOARD_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.SNAP_DASHBOARD_GITHUB_TOKEN || github.token }}
         run: |
           BRANCH="test-results/${{ inputs.snap_name }}/${{ github.run_id }}"
           git config user.name  "github-actions[bot]"
@@ -110,7 +110,7 @@ jobs:
 
       - name: Create (or update) test PR
         env:
-          GH_TOKEN: ${{ secrets.SNAP_DASHBOARD_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.SNAP_DASHBOARD_GITHUB_TOKEN || github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           STATUS="${{ steps.status.outputs.status }}"
