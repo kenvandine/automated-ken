@@ -66,6 +66,7 @@ jobs:
 
       - name: Install snaps
         run: |
+          sudo apt-get install -y xvfb
           sudo snap install --beta yarf
           sudo snap install mir-test-tools
           sudo snap install "${{ inputs.snap_name }}" --channel "${{ inputs.from_channel }}"
@@ -76,10 +77,12 @@ jobs:
         continue-on-error: true
         run: |
           mkdir -p "results/${{ inputs.snap_name }}"
-          yarf \\
+          Xvfb :99 -screen 0 1920x1080x24 &
+          sleep 1
+          DISPLAY=:99 yarf \\
             --platform Mir \\
             --outdir "results/${{ inputs.snap_name }}" \\
-            "suites/${{ inputs.snap_name }}/suite" || true
+            "suites/${{ inputs.snap_name }}/suite"
           echo "yarf_exit=$?" >> "$GITHUB_OUTPUT"
 
       - name: Upload test artifacts
