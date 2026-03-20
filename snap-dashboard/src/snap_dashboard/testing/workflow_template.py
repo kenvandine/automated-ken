@@ -30,9 +30,14 @@ on:
         required: true
         type: string
       from_channel:
-        description: "Channel to install from (candidate/beta/edge)"
+        description: "Channel to install from (candidate/edge)"
         required: true
         default: candidate
+        type: string
+      architecture:
+        description: "Architecture to test (amd64, arm64)"
+        required: true
+        default: amd64
         type: string
       version:
         description: "Expected snap version (informational)"
@@ -49,8 +54,8 @@ on:
 
 jobs:
   yarf-test:
-    name: "YARF — ${{ inputs.snap_name }} from ${{ inputs.from_channel }}"
-    runs-on: ubuntu-latest
+    name: "YARF — ${{ inputs.snap_name }} ${{ inputs.architecture }} from ${{ inputs.from_channel }}"
+    runs-on: ${{ inputs.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     permissions:
       contents: write
       pull-requests: write
@@ -130,6 +135,7 @@ jobs:
           RUN_ID="${{ inputs.dashboard_run_id }}"
           GH_RUN="${{ github.run_id }}"
           EXIT="${{ steps.yarf.outputs.yarf_exit }}"
+          ARCH="${{ inputs.architecture }}"
 
           if [ "$STATUS" = "passed" ]; then
             TITLE_EMOJI="✅"
@@ -152,12 +158,13 @@ jobs:
 
 | Field       | Value            |
 |-------------|------------------|
-| Snap        | \`${SNAP}\`      |
-| Version     | \`${VERSION}\`   |
-| Channel     | \`${CHANNEL}\`   |
-| Revision    | \`${REVISION}\`  |
-| Status      | **${STATUS}**    |
-| GHA Run     | [#${GH_RUN}](https://github.com/${GH_REPO}/actions/runs/${GH_RUN}) |
+| Snap         | \`${SNAP}\`      |
+| Version      | \`${VERSION}\`   |
+| Channel      | \`${CHANNEL}\`   |
+| Architecture | \`${ARCH}\`      |
+| Revision     | \`${REVISION}\`  |
+| Status       | **${STATUS}**    |
+| GHA Run      | [#${GH_RUN}](https://github.com/${GH_REPO}/actions/runs/${GH_RUN}) |
 ${SCREENSHOTS:+
 ## Screenshots
 
@@ -166,6 +173,7 @@ ${SCREENSHOTS}}
 snap: ${SNAP}
 version: ${VERSION}
 from_channel: ${CHANNEL}
+architecture: ${ARCH}
 revision: ${REVISION}
 dashboard_run_id: ${RUN_ID}
 yarf_exit_code: ${EXIT}

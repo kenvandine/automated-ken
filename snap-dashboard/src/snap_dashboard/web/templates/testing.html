@@ -45,6 +45,7 @@
       <div class="attention-card-header">
         <span class="attention-tag" style="background: rgba(74,222,128,0.15); color:#4ade80; border: 1px solid rgba(74,222,128,0.3);">Passed — ready to promote</span>
         <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="attention-name">{{ run.snap_name }}</a>
+        <span class="muted small" style="margin-left:6px;">{{ run.architecture or 'amd64' }}</span>
       </div>
       <div class="attention-versions">
         <div class="version-compare">
@@ -86,6 +87,7 @@
     <thead>
       <tr>
         <th>Snap</th>
+        <th>Arch</th>
         <th>Channel</th>
         <th>Version</th>
         <th>Stable</th>
@@ -100,6 +102,7 @@
         <td class="snap-name-cell">
           <a href="/snap/{{ item.snap.name }}" class="snap-link">{{ item.snap.name }}</a>
         </td>
+        <td class="muted small">{{ item.architecture }}</td>
         <td>
           <span class="channel-badge {% if item.can_promote %}badge-amber{% else %}badge-gray{% endif %}">{{ item.from_channel }}</span>
         </td>
@@ -139,6 +142,7 @@
           {% if item.has_suite %}
           <form method="post" action="/testing/trigger/{{ item.snap.name }}">
             <input type="hidden" name="from_channel" value="{{ item.from_channel }}">
+            <input type="hidden" name="architecture" value="{{ item.architecture }}">
             <input type="hidden" name="version" value="{{ item.version }}">
             <input type="hidden" name="revision" value="{{ item.revision or '' }}">
             <button type="submit" class="btn btn-secondary btn-sm">Run Tests</button>
@@ -196,6 +200,7 @@
         <tr>
           <th>#</th>
           <th>Snap</th>
+          <th>Arch</th>
           <th>Channel</th>
           <th>Version</th>
           <th>Status</th>
@@ -212,6 +217,7 @@
           <td>
             <a href="/snap/{{ run.snap_name }}" class="snap-link">{{ run.snap_name }}</a>
           </td>
+          <td class="muted small">{{ run.architecture or 'amd64' }}</td>
           <td>
             <span class="channel-badge badge-gray">{{ run.from_channel }}</span>
           </td>

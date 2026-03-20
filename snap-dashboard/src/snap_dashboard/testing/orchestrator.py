@@ -29,21 +29,22 @@ def _gh_headers(token: str) -> dict[str, str]:
 
 
 def find_snaps_needing_tests(session) -> list[dict]:
-    """Return snaps where candidate or edge version differs from stable (amd64).
+    """Return snaps where candidate or edge version differs from stable, per architecture.
 
-    Returns one entry per snap per relevant channel:
+    Returns one entry per snap+channel+architecture combination:
     - candidate entries have ``can_promote=True``  (promotion path to stable)
     - edge entries have ``can_promote=False``       (test-only, no promotion)
 
-    Edge is only included when its version differs from candidate (so a snap
-    already in candidate at the same version doesn't appear twice).
+    Edge is only included for an arch when its version differs from candidate
+    for that same arch (avoids duplicate rows).
 
     Each dict contains:
       snap          – Snap ORM object
+      architecture  – e.g. "amd64", "arm64"
       from_channel  – "candidate" or "edge"
-      version       – version string in that channel
-      revision      – revision int in that channel (may be None)
-      stable_ver    – current stable version (may be None if not yet released)
+      version       – version string in that channel+arch
+      revision      – revision int in that channel+arch (may be None)
+      stable_ver    – current stable version for that arch (may be None)
       can_promote   – True for candidate, False for edge
     """
     snaps = session.query(Snap).order_by(Snap.name).all()
@@ -51,50 +52,56 @@ def find_snaps_needing_tests(session) -> list[dict]:
 
     for snap in snaps:
         cm_rows = session.query(ChannelMap).filter_by(snap_id=snap.id).all()
+        # channels[channel][arch] = {version, revision}
         channels: dict[str, dict[str, dict]] = {}
         for cm in cm_rows:
-            if cm.channel not in channels:
-                channels[cm.channel] = {}
-            channels[cm.channel][cm.architecture] = {
+            channels.setdefault(cm.channel, {})[cm.architecture] = {
                 "version": cm.version,
                 "revision": cm.revision,
             }
 
-        def _get_amd64(ch: str) -> dict:
-            return (channels.get(ch) or {}).get("amd64") or {}
+        # Collect all architectures published across any channel
+        all_archs: set[str] = set()
+        for arch_map in channels.values():
+            all_archs.update(arch_map.keys())
 
-        stable = _get_amd64("stable")
-        stable_ver = stable.get("version")
+        for arch in sorted(all_archs):
+            def _get(ch: str, a: str = arch) -> dict:
+                return (channels.get(ch) or {}).get(a) or {}
 
-        # Candidate — the promotion path to stable
-        candidate_info = _get_amd64("candidate")
-        candidate_ver = candidate_info.get("version")
-        if candidate_ver and candidate_ver != stable_ver:
-            results.append(
-                {
-                    "snap": snap,
-                    "from_channel": "candidate",
-                    "version": candidate_ver,
-                    "revision": candidate_info.get("revision"),
-                    "stable_ver": stable_ver,
-                    "can_promote": True,
-                }
-            )
+            stable_ver = _get("stable").get("version")
+            candidate_info = _get("candidate")
+            candidate_ver = candidate_info.get("version")
 
-        # Edge — test-only; only include when version differs from candidate
-        edge_info = _get_amd64("edge")
-        edge_ver = edge_info.get("version")
-        if edge_ver and edge_ver != stable_ver and edge_ver != candidate_ver:
-            results.append(
-                {
-                    "snap": snap,
-                    "from_channel": "edge",
-                    "version": edge_ver,
-                    "revision": edge_info.get("revision"),
-                    "stable_ver": stable_ver,
-                    "can_promote": False,
-                }
-            )
+            # Candidate — promotion path to stable
+            if candidate_ver and candidate_ver != stable_ver:
+                results.append(
+                    {
+                        "snap": snap,
+                        "architecture": arch,
+                        "from_channel": "candidate",
+                        "version": candidate_ver,
+                        "revision": candidate_info.get("revision"),
+                        "stable_ver": stable_ver,
+                        "can_promote": True,
+                    }
+                )
+
+            # Edge — test-only; only when version differs from candidate for this arch
+            edge_info = _get("edge")
+            edge_ver = edge_info.get("version")
+            if edge_ver and edge_ver != stable_ver and edge_ver != candidate_ver:
+                results.append(
+                    {
+                        "snap": snap,
+                        "architecture": arch,
+                        "from_channel": "edge",
+                        "version": edge_ver,
+                        "revision": edge_info.get("revision"),
+                        "stable_ver": stable_ver,
+                        "can_promote": False,
+                    }
+                )
 
     return results
 
@@ -125,6 +132,7 @@ def trigger_workflow(
     from_channel: str,
     version: str,
     revision: int | None,
+    architecture: str = "amd64",
     triggered_by: str = "manual",
 ) -> tuple[bool, str, int | None]:
     """Dispatch a ``workflow_dispatch`` event to run YARF tests for the given snap.
@@ -150,6 +158,7 @@ def trigger_workflow(
     with get_session() as session:
         run = TestRun(
             snap_name=snap_name,
+            architecture=architecture,
             from_channel=from_channel,
             version=version,
             revision=revision,
@@ -166,6 +175,7 @@ def trigger_workflow(
         "inputs": {
             "snap_name": snap_name,
             "from_channel": from_channel,
+            "architecture": architecture,
             "version": str(version),
             "revision": str(revision or 0),
             "dashboard_run_id": str(run_id),
@@ -378,6 +388,7 @@ def sync_test_runs() -> None:
             gh_status = meta.get("status", "running")
             new_run = TestRun(
                 snap_name=snap,
+                architecture=meta.get("architecture", "amd64"),
                 from_channel=meta.get("from_channel", "unknown"),
                 version=version,
                 revision=int(meta["revision"]) if meta.get("revision", "").isdigit() else None,

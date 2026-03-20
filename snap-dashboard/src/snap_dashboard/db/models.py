@@ -109,7 +109,8 @@ class TestRun(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     snap_name = Column(String(255), nullable=False)
-    from_channel = Column(String(64), nullable=False)  # 'candidate', 'beta', 'edge'
+    architecture = Column(String(32), nullable=True)  # 'amd64', 'arm64', etc.
+    from_channel = Column(String(64), nullable=False)  # 'candidate', 'edge'
     version = Column(String(128), nullable=True)
     revision = Column(Integer, nullable=True)
     # statuses: pending, triggered, running, passed, failed, error, promoted

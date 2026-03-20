@@ -50,6 +50,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                 session.query(TestRun)
                 .filter_by(
                     snap_name=snap_name,
+                    architecture=item["architecture"],
                     version=item["version"],
                     promoted=False,
                 )
@@ -70,6 +71,7 @@ async def testing_index(request: Request) -> HTMLResponse:
             snaps_needing.append(
                 {
                     "snap": {"name": snap_name},
+                    "architecture": item["architecture"],
                     "from_channel": item["from_channel"],
                     "version": item["version"],
                     "revision": item["revision"],
@@ -93,6 +95,7 @@ async def testing_index(request: Request) -> HTMLResponse:
             {
                 "id": r.id,
                 "snap_name": r.snap_name,
+                "architecture": r.architecture or "amd64",
                 "from_channel": r.from_channel,
                 "version": r.version,
                 "revision": r.revision,
@@ -139,6 +142,7 @@ async def trigger_test(
     request: Request,
     background_tasks: BackgroundTasks,
     from_channel: str = Form(default="candidate"),
+    architecture: str = Form(default="amd64"),
     version: str = Form(default=""),
     revision: str = Form(default="0"),
 ) -> RedirectResponse:
@@ -148,7 +152,8 @@ async def trigger_test(
 
     def _bg() -> None:
         ok, err, db_run_id = trigger_workflow(
-            snap_name, from_channel, version, rev, triggered_by="manual"
+            snap_name, from_channel, version, rev,
+            architecture=architecture, triggered_by="manual"
         )
         if not ok:
             logger.error("Failed to trigger test for %s: %s", snap_name, err)
@@ -208,6 +213,7 @@ async def testing_status() -> JSONResponse:
             {
                 "id": r.id,
                 "status": r.status,
+                "architecture": r.architecture or "amd64",
                 "gh_run_id": r.gh_run_id,
                 "pr_number": r.pr_number,
                 "pr_url": r.pr_url,

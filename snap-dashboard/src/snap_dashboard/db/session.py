@@ -41,8 +41,23 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def init_db() -> None:
-    """Create all database tables if they do not exist."""
+    """Create all database tables if they do not exist, and run lightweight migrations."""
     Base.metadata.create_all(engine)
+    _migrate()
+
+
+def _migrate() -> None:
+    """Apply additive schema changes that create_all cannot handle on existing tables."""
+    migrations = [
+        "ALTER TABLE test_runs ADD COLUMN architecture VARCHAR(32)",
+    ]
+    with engine.connect() as conn:
+        for sql in migrations:
+            try:
+                conn.execute(__import__("sqlalchemy").text(sql))
+                conn.commit()
+            except Exception:
+                pass  # column already exists — safe to ignore
 
 
 @contextmanager
