@@ -53,6 +53,7 @@ from snap_dashboard.web.routes import (  # noqa: E402
     admin,
     auth,
     dashboard,
+    docs,
     onboarding,
     settings,
     snaps,
@@ -62,6 +63,7 @@ from snap_dashboard.web.routes import (  # noqa: E402
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(dashboard.router)
+app.include_router(docs.router)
 app.include_router(onboarding.router)
 app.include_router(snaps.router)
 app.include_router(settings.router)

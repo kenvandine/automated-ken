@@ -67,6 +67,7 @@ async def onboarding_publisher(
                 uc = UserConfig(user_id=user["id"])
                 session.add(uc)
             uc.publisher = publisher
+        return RedirectResponse(url="/onboarding?step=3", status_code=303)
 
     return RedirectResponse(url="/onboarding?step=2", status_code=303)
 
