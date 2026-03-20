@@ -153,6 +153,7 @@ jobs:
           EOF
           )
 
+          gh label create "snap-test-results" --color "0075ca" --description "YARF snap test results" --force
           gh pr create \\
             --base main \\
             --head "$BRANCH" \\
