@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -125,24 +126,25 @@ def trigger_workflow(
     version: str,
     revision: int | None,
     triggered_by: str = "manual",
-) -> tuple[bool, str]:
+) -> tuple[bool, str, int | None]:
     """Dispatch a ``workflow_dispatch`` event to run YARF tests for the given snap.
 
     Creates a :class:`TestRun` record in the database before dispatching.
 
     Returns:
-        A ``(success, error_message)`` tuple.  ``error_message`` is an empty
-        string on success.
+        A ``(success, error_message, db_run_id)`` tuple.  ``error_message`` is
+        an empty string on success; ``db_run_id`` is the new TestRun PK or None
+        on failure.
     """
     config = get_config()
     if not config.testing_repo:
-        return False, "No testing_repo configured"
+        return False, "No testing_repo configured", None
     if not config.github_token:
-        return False, "No GitHub token configured"
+        return False, "No GitHub token configured", None
 
     owner, _, repo = config.testing_repo.partition("/")
     if not repo:
-        return False, f"Invalid testing_repo format: {config.testing_repo!r} (expected owner/repo)"
+        return False, f"Invalid testing_repo format: {config.testing_repo!r} (expected owner/repo)", None
 
     # Persist a TestRun record first so we have a run_id to pass as an input.
     with get_session() as session:
@@ -178,7 +180,7 @@ def trigger_workflow(
                 run = session.query(TestRun).get(run_id)
                 if run:
                     run.status = "triggered"
-            return True, ""
+            return True, "", run_id
         else:
             err = f"GitHub API returned {resp.status_code}: {resp.text[:300]}"
             with get_session() as session:
@@ -186,7 +188,7 @@ def trigger_workflow(
                 if run:
                     run.status = "error"
                     run.error_msg = err
-            return False, err
+            return False, err, None
 
     except httpx.RequestError as exc:
         err = str(exc)
@@ -195,7 +197,77 @@ def trigger_workflow(
             if run:
                 run.status = "error"
                 run.error_msg = err
-        return False, err
+        return False, err, None
+
+
+def poll_for_gh_run_id(db_run_id: int, triggered_at: datetime) -> None:
+    """Background task: poll GH Actions API until we find the run started by our dispatch.
+
+    Stores the GH Actions run ID and updates status to "running" once found.
+    Gives up after ~3 minutes.
+    """
+    config = get_config()
+    if not config.testing_repo or not config.github_token:
+        return
+    owner, _, repo = config.testing_repo.partition("/")
+    if not repo:
+        return
+
+    url = f"{_GH_API}/repos/{owner}/{repo}/actions/runs"
+    params = {"event": "workflow_dispatch", "per_page": 20}
+    headers = _gh_headers(config.github_token)
+
+    for _attempt in range(9):  # ~3 minutes total (9 × 20s)
+        time.sleep(20)
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.get(url, params=params, headers=headers)
+            if resp.status_code != 200:
+                continue
+            for run in resp.json().get("workflow_runs", []):
+                if "snap-test" not in run.get("path", ""):
+                    continue
+                # Accept runs created at or after our trigger time
+                created_str = run.get("created_at", "")
+                if not created_str:
+                    continue
+                created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                if created < triggered_at:
+                    continue
+                gh_run_id = str(run["id"])
+                gha_status = run.get("status", "")  # queued, in_progress, completed
+                db_status = "running" if gha_status == "in_progress" else "triggered"
+                with get_session() as session:
+                    db_run = session.query(TestRun).get(db_run_id)
+                    if db_run and not db_run.gh_run_id:
+                        db_run.gh_run_id = gh_run_id
+                        db_run.status = db_status
+                logger.info("poll_for_gh_run_id: found run %s for TestRun %s", gh_run_id, db_run_id)
+                return
+        except Exception as exc:
+            logger.warning("poll_for_gh_run_id attempt failed: %s", exc)
+
+    logger.warning("poll_for_gh_run_id: gave up finding GH run for TestRun %s", db_run_id)
+
+
+def _check_gh_run_status(gh_run_id: str, owner: str, repo: str, token: str) -> str | None:
+    """Return a dashboard status string for a GH Actions run, or None on error."""
+    url = f"{_GH_API}/repos/{owner}/{repo}/actions/runs/{gh_run_id}"
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(url, headers=_gh_headers(token))
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        gha_status = data.get("status", "")
+        conclusion = data.get("conclusion") or ""
+        if gha_status == "completed":
+            return "passed" if conclusion == "success" else "failed"
+        if gha_status == "in_progress":
+            return "running"
+        return None  # queued / unknown — leave as-is
+    except Exception:
+        return None
 
 
 def sync_test_runs() -> None:
@@ -237,7 +309,15 @@ def sync_test_runs() -> None:
         ).all()
 
         for run in in_flight:
+            # If we have a GH run ID but no PR yet, check GH Actions API directly
             pr = pr_map.get((run.snap_name, run.version or ""))
+            if not pr and run.gh_run_id:
+                gha_status = _check_gh_run_status(run.gh_run_id, owner, repo, config.github_token)
+                if gha_status and gha_status != run.status:
+                    run.status = gha_status
+                    if gha_status in ("passed", "failed"):
+                        run.finished_at = datetime.now(timezone.utc)
+                continue
             if not pr:
                 continue
             meta = parse_pr_metadata(pr.get("body", ""))

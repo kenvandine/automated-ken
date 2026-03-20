@@ -15,6 +15,7 @@ from snap_dashboard.db.models import TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.orchestrator import (
     find_snaps_needing_tests,
+    poll_for_gh_run_id,
     suite_exists_in_repo,
     sync_test_runs,
     trigger_workflow,
@@ -143,11 +144,17 @@ async def trigger_test(
 ) -> RedirectResponse:
     """Dispatch a YARF workflow for *snap_name* and redirect to the testing page."""
     rev: int | None = int(revision) if revision.isdigit() and int(revision) > 0 else None
+    triggered_at = datetime.now(timezone.utc)
 
     def _bg() -> None:
-        ok, err = trigger_workflow(snap_name, from_channel, version, rev, triggered_by="manual")
+        ok, err, db_run_id = trigger_workflow(
+            snap_name, from_channel, version, rev, triggered_by="manual"
+        )
         if not ok:
             logger.error("Failed to trigger test for %s: %s", snap_name, err)
+            return
+        if db_run_id:
+            poll_for_gh_run_id(db_run_id, triggered_at)
 
     background_tasks.add_task(_bg)
     return RedirectResponse(url="/testing", status_code=303)

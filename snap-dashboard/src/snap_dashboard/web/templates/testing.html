@@ -123,6 +123,8 @@
           <span class="badge badge-amber js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
           {% if run.gh_run_id %}
           <a href="https://github.com/{{ config.testing_repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
+          {% else %}
+          <a href="https://github.com/{{ config.testing_repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow">↗</a>
           {% endif %}
           {% elif run.status == 'error' %}
           <span class="badge badge-red">error</span>
@@ -225,6 +227,7 @@
             <span class="badge badge-red" title="{{ run.error_msg }}">error</span>
             {% elif run.status in ('pending', 'triggered', 'running') %}
             <span class="badge badge-amber js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
+
             {% else %}
             <span class="muted small">{{ run.status }}</span>
             {% endif %}
@@ -238,7 +241,9 @@
             <span class="muted small">—</span>
             {% endif %}
             {% if run.gh_run_id %}
-            <a href="https://github.com/{{ config.testing_repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open GitHub Actions run">↗</a>
+            <a href="https://github.com/{{ config.testing_repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open GitHub Actions run" data-gh-run="1">↗</a>
+            {% elif run.status in ('pending', 'triggered', 'running') %}
+            <a href="https://github.com/{{ config.testing_repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow" data-gh-run="fallback">↗</a>
             {% endif %}
           </td>
           <td class="muted small">{{ run.triggered_by or '—' }}</td>
@@ -296,13 +301,18 @@
           if (!run) return;
           el.textContent = run.status;
           el.className = badgeClass(run.status);
-          if (TERMINAL.has(run.status)) {
-            el.classList.remove('js-run-status');
-            // If a GH run link doesn't exist yet but now has an ID, add it
-            const cell = el.closest('td');
-            if (run.gh_run_id && !cell.querySelector('a[data-gh-run]')) {
+          const cell = el.closest('td');
+          if (run.gh_run_id) {
+            // Upgrade fallback link or insert specific run link
+            const existing = cell.querySelector('a[data-gh-run]');
+            const runUrl = 'https://github.com/' + data.testing_repo + '/actions/runs/' + run.gh_run_id;
+            if (existing && existing.dataset.ghRun === 'fallback') {
+              existing.href = runUrl;
+              existing.title = 'Open GitHub Actions run';
+              existing.dataset.ghRun = '1';
+            } else if (!existing) {
               const a = document.createElement('a');
-              a.href = 'https://github.com/' + data.testing_repo + '/actions/runs/' + run.gh_run_id;
+              a.href = runUrl;
               a.target = '_blank';
               a.rel = 'noopener';
               a.className = 'muted small';
@@ -312,26 +322,13 @@
               a.dataset.ghRun = '1';
               cell.appendChild(a);
             }
+          }
+          if (TERMINAL.has(run.status)) {
+            el.classList.remove('js-run-status');
             // Reload once a run finishes so pending-promotion & tables update
             setTimeout(() => location.reload(), 2000);
           } else {
             anyInFlight = true;
-            // Inject GH run link as soon as we have the ID
-            if (run.gh_run_id) {
-              const cell = el.closest('td');
-              if (!cell.querySelector('a[data-gh-run]')) {
-                const a = document.createElement('a');
-                a.href = 'https://github.com/' + data.testing_repo + '/actions/runs/' + run.gh_run_id;
-                a.target = '_blank';
-                a.rel = 'noopener';
-                a.className = 'muted small';
-                a.style.marginLeft = '4px';
-                a.title = 'Open GitHub Actions run';
-                a.textContent = '↗';
-                a.dataset.ghRun = '1';
-                cell.appendChild(a);
-              }
-            }
           }
         });
 
