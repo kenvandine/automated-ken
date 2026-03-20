@@ -55,7 +55,7 @@ on:
 jobs:
   yarf-test:
     name: "YARF — ${{ inputs.snap_name }} ${{ inputs.architecture }} from ${{ inputs.from_channel }}"
-    runs-on: ${{ inputs.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
+    runs-on: "${{ inputs.architecture == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}"
     permissions:
       contents: write
       pull-requests: write
