@@ -8,7 +8,7 @@ $SNAP_DATA/config.env if $SNAP_DATA is set, else
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -47,11 +47,16 @@ def _get_value(key: str, file_values: dict[str, str], default: str) -> str:
 class Config:
     bind: str = "127.0.0.1"
     port: int = 9080
+    # Legacy single-user fields — still used as fallback when UserConfig is absent
     github_token: str = ""
     publisher: str = ""
     collect_interval_hours: int = 6
     testing_repo: str = ""  # format: "owner/repo"
     auto_test: bool = False
+    # Multi-tenant / auth settings (server-level)
+    session_secret: str = ""
+    github_client_id: str = ""
+    github_client_secret: str = ""
 
 
 def get_config() -> Config:
@@ -66,9 +71,11 @@ def get_config() -> Config:
     github_token = _get_value("GITHUB_TOKEN", file_values, "")
     publisher = _get_value("PUBLISHER", file_values, "")
     interval_str = _get_value("COLLECT_INTERVAL_HOURS", file_values, "6")
-
     testing_repo = _get_value("TESTING_REPO", file_values, "")
     auto_test = _get_value("AUTO_TEST", file_values, "false").lower() in ("1", "true", "yes")
+    session_secret = _get_value("SESSION_SECRET", file_values, "")
+    github_client_id = _get_value("GITHUB_CLIENT_ID", file_values, "")
+    github_client_secret = _get_value("GITHUB_CLIENT_SECRET", file_values, "")
 
     try:
         port = int(port_str)
@@ -88,6 +95,9 @@ def get_config() -> Config:
         collect_interval_hours=interval,
         testing_repo=testing_repo,
         auto_test=auto_test,
+        session_secret=session_secret,
+        github_client_id=github_client_id,
+        github_client_secret=github_client_secret,
     )
 
 

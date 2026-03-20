@@ -48,13 +48,20 @@ def init_db() -> None:
 
 def _migrate() -> None:
     """Apply additive schema changes that create_all cannot handle on existing tables."""
+    import sqlalchemy
+
     migrations = [
+        # Phase 1 (original)
         "ALTER TABLE test_runs ADD COLUMN architecture VARCHAR(32)",
+        # Multi-tenant phase: user_id columns on existing tables
+        "ALTER TABLE snaps ADD COLUMN user_id INTEGER REFERENCES users(id)",
+        "ALTER TABLE collection_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
+        "ALTER TABLE test_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
             try:
-                conn.execute(__import__("sqlalchemy").text(sql))
+                conn.execute(sqlalchemy.text(sql))
                 conn.commit()
             except Exception:
                 pass  # column already exists — safe to ignore

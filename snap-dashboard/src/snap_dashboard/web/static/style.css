@@ -105,6 +105,7 @@ header {
   align-items: center;
   gap: 16px;
   margin-left: auto;
+  margin-right: 8px;
   padding-top: 4px;
   flex-wrap: wrap;
 }
@@ -120,6 +121,28 @@ header {
 .nav-link:hover {
   color: var(--accent-hover);
   text-decoration: none;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 16px;
+  padding-top: 4px;
+  flex-shrink: 0;
+}
+
+.user-avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+.user-name {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
 }
 
 .last-updated {
@@ -929,6 +952,20 @@ header {
 .error-msg {
   color: #f87171;
   font-size: 13px;
+}
+
+/* ---- Alert boxes ----------------------------------------- */
+.alert {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+
+.alert-error {
+  background: rgba(248,113,113,0.1);
+  border-color: rgba(248,113,113,0.3);
+  color: #f87171;
 }
 
 /* ---- Error banner ----------------------------------------- */

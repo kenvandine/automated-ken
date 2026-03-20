@@ -20,13 +20,13 @@ from snap_dashboard.store.client import (
 logger = logging.getLogger(__name__)
 
 
-def run_collection(session: Session, config: Config) -> dict:
+def run_collection(session: Session, config: Config, user_id: int | None = None) -> dict:
     """Run the full data collection pipeline.
 
     Returns a summary dict: {snaps_updated, issues_updated, status, error}.
     """
     started_at = datetime.now(timezone.utc)
-    run = CollectionRun(started_at=started_at, status="running")
+    run = CollectionRun(started_at=started_at, status="running", user_id=user_id)
     session.add(run)
     session.flush()
 
@@ -37,19 +37,26 @@ def run_collection(session: Session, config: Config) -> dict:
 
     try:
         # Step 1: Discover snaps on first run
-        snap_count = session.query(Snap).count()
+        q = session.query(Snap)
+        if user_id is not None:
+            q = q.filter_by(user_id=user_id)
+        snap_count = q.count()
+
         if snap_count == 0 and config.publisher:
             logger.info("First run — discovering snaps for publisher %r", config.publisher)
             discovered = find_snaps_by_publisher(config.publisher)
             for s in discovered:
                 if not s.get("name"):
                     continue
-                existing = session.query(Snap).filter_by(name=s["name"]).first()
+                existing = session.query(Snap).filter_by(
+                    name=s["name"], user_id=user_id
+                ).first()
                 if not existing:
                     snap_obj = Snap(
                         name=s["name"],
                         publisher=s.get("publisher", config.publisher),
                         manually_added=False,
+                        user_id=user_id,
                     )
                     session.add(snap_obj)
             session.flush()
@@ -57,7 +64,10 @@ def run_collection(session: Session, config: Config) -> dict:
 
         # Step 2: Update each snap
         gh_client = GitHubClient(token=config.github_token)
-        all_snaps = session.query(Snap).all()
+        q2 = session.query(Snap)
+        if user_id is not None:
+            q2 = q2.filter_by(user_id=user_id)
+        all_snaps = q2.all()
 
         for snap in all_snaps:
             try:
@@ -90,12 +100,20 @@ def run_collection(session: Session, config: Config) -> dict:
     }
 
 
-def collect_one(session: Session, config: Config, snap_name: str) -> dict:
+def collect_one(
+    session: Session,
+    config: Config,
+    snap_name: str,
+    user_id: int | None = None,
+) -> dict:
     """Run collection for a single snap by name.
 
     Returns a summary dict: {snap, status, error}.
     """
-    snap = session.query(Snap).filter_by(name=snap_name).first()
+    q = session.query(Snap).filter_by(name=snap_name)
+    if user_id is not None:
+        q = q.filter_by(user_id=user_id)
+    snap = q.first()
     if not snap:
         return {"snap": snap_name, "status": "error", "error": "Snap not found"}
     gh_client = GitHubClient(token=config.github_token)

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Admin — snap-dashboard{% endblock %}
+
+{% block content %}
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">Admin</h2>
+    <p class="text-muted">Manage users and access control</p>
+  </div>
+</div>
+
+<!-- Registered Users -->
+<div class="card">
+  <h3 class="section-label">Registered Users</h3>
+  {% if users %}
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>GitHub Login</th>
+          <th>Display Name</th>
+          <th>Role</th>
+          <th>Joined</th>
+          <th>Last Login</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>
+            <a href="https://github.com/{{ u.github_login }}" target="_blank" rel="noopener" class="snap-link">
+              {% if u.avatar_url %}
+              <img src="{{ u.avatar_url }}" alt="{{ u.github_login }}" style="width:20px;height:20px;border-radius:50%;vertical-align:middle;margin-right:6px;">
+              {% endif %}
+              {{ u.github_login }}
+            </a>
+          </td>
+          <td class="muted small">{{ u.display_name or '—' }}</td>
+          <td>
+            {% if u.is_admin %}
+            <span class="badge badge-green">admin</span>
+            {% else %}
+            <span class="badge badge-gray">user</span>
+            {% endif %}
+          </td>
+          <td class="muted small">
+            {% if u.created_at %}{{ u.created_at.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+          </td>
+          <td class="muted small">
+            {% if u.last_login %}{{ u.last_login.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+          </td>
+          <td>
+            {% if u.id != current_user.id %}
+            <form method="post" action="/admin/users/{{ u.id }}/toggle-admin">
+              <button type="submit" class="btn btn-sm btn-secondary">
+                {% if u.is_admin %}Remove Admin{% else %}Make Admin{% endif %}
+              </button>
+            </form>
+            {% else %}
+            <span class="muted small">you</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state small-empty">
+    <p>No users registered yet.</p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Allowlist -->
+<div class="card">
+  <h3 class="section-label">Access Allowlist</h3>
+  <p class="text-muted" style="font-size:13px; margin-bottom:14px;">
+    Only GitHub accounts on this list can log in. Admins are automatically allowlisted.
+  </p>
+
+  <form method="post" action="/admin/allowlist/add" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
+    <input type="text" name="github_login" placeholder="GitHub username" class="form-input" style="width:200px;" required>
+    <input type="text" name="note" placeholder="Note (optional)" class="form-input" style="width:200px;">
+    <button type="submit" class="btn btn-primary btn-sm">Add to Allowlist</button>
+  </form>
+
+  {% if allowlist %}
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>GitHub Login</th>
+          <th>Added By</th>
+          <th>Added</th>
+          <th>Note</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for a in allowlist %}
+        <tr>
+          <td>
+            <a href="https://github.com/{{ a.github_login }}" target="_blank" rel="noopener" class="snap-link">{{ a.github_login }}</a>
+          </td>
+          <td class="muted small">{{ a.added_by or '—' }}</td>
+          <td class="muted small">
+            {% if a.added_at %}{{ a.added_at.strftime('%Y-%m-%d') }}{% else %}—{% endif %}
+          </td>
+          <td class="muted small">{{ a.note or '—' }}</td>
+          <td>
+            <form method="post" action="/admin/allowlist/remove/{{ a.id }}"
+                  onsubmit="return confirm('Remove {{ a.github_login }} from allowlist?')">
+              <button type="submit" class="btn btn-sm" style="color:var(--error);">Remove</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state small-empty">
+    <p>The allowlist is empty. Add GitHub usernames above.</p>
+  </div>
+  {% endif %}
+</div>
+
+{% endblock %}

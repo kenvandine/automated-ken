@@ -10,7 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from snap_dashboard.config import get_config
+from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.orchestrator import (
@@ -35,10 +35,15 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 @router.get("/testing", response_class=HTMLResponse)
 async def testing_index(request: Request) -> HTMLResponse:
     """Render the YARF testing overview page."""
-    config = get_config()
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
 
     with get_session() as session:
-        snaps_needing_raw = find_snaps_needing_tests(session)
+        snaps_needing_raw = find_snaps_needing_tests(session, user_id=user_id)
 
         # Annotate each item with suite existence and any active run,
         # and replace the ORM Snap object with a plain dict to avoid
@@ -53,6 +58,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                     architecture=item["architecture"],
                     version=item["version"],
                     promoted=False,
+                    user_id=user_id,
                 )
                 .order_by(TestRun.started_at.desc())
                 .first()
@@ -78,7 +84,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "stable_ver": item["stable_ver"],
                     "can_promote": item["can_promote"],
                     "has_suite": suite_exists_in_repo(
-                        config.testing_repo, snap_name, config.github_token
+                        uc.testing_repo, snap_name, uc.github_token
                     ),
                     "existing_run": existing_run,
                 }
@@ -86,6 +92,7 @@ async def testing_index(request: Request) -> HTMLResponse:
 
         all_runs = (
             session.query(TestRun)
+            .filter_by(user_id=user_id)
             .order_by(TestRun.started_at.desc())
             .limit(50)
             .all()
@@ -122,11 +129,12 @@ async def testing_index(request: Request) -> HTMLResponse:
         "testing.html",
         {
             "request": request,
-            "config": config,
+            "config": uc,
             "snaps_needing": snaps_needing,
             "all_runs": runs_data,
             "pending_promotion": pending_promotion,
             "last_run": None,
+            "current_user": user,
         },
     )
 
@@ -147,19 +155,37 @@ async def trigger_test(
     revision: str = Form(default="0"),
 ) -> RedirectResponse:
     """Dispatch a YARF workflow for *snap_name* and redirect to the testing page."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
     rev: int | None = int(revision) if revision.isdigit() and int(revision) > 0 else None
     triggered_at = datetime.now(timezone.utc)
+
+    # Capture config values for the background task (session-independent)
+    testing_repo = uc.testing_repo
+    github_token = uc.github_token
 
     def _bg() -> None:
         ok, err, db_run_id = trigger_workflow(
             snap_name, from_channel, version, rev,
-            architecture=architecture, triggered_by="manual"
+            architecture=architecture,
+            triggered_by="manual",
+            testing_repo=testing_repo,
+            github_token=github_token,
+            user_id=user_id,
         )
         if not ok:
             logger.error("Failed to trigger test for %s: %s", snap_name, err)
             return
         if db_run_id:
-            poll_for_gh_run_id(db_run_id, triggered_at)
+            poll_for_gh_run_id(
+                db_run_id, triggered_at,
+                testing_repo=testing_repo,
+                github_token=github_token,
+            )
 
     background_tasks.add_task(_bg)
     return RedirectResponse(url="/testing", status_code=303)
@@ -171,9 +197,26 @@ async def trigger_test(
 
 
 @router.post("/testing/sync")
-async def sync_runs(background_tasks: BackgroundTasks) -> RedirectResponse:
+async def sync_runs(
+    request: Request,
+    background_tasks: BackgroundTasks,
+) -> RedirectResponse:
     """Sync test run statuses from GitHub PRs in the background."""
-    background_tasks.add_task(sync_test_runs)
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+    testing_repo = uc.testing_repo
+    github_token = uc.github_token
+
+    background_tasks.add_task(
+        sync_test_runs,
+        testing_repo=testing_repo,
+        github_token=github_token,
+        user_id=user_id,
+    )
     return RedirectResponse(url="/testing", status_code=303)
 
 
@@ -183,10 +226,16 @@ async def sync_runs(background_tasks: BackgroundTasks) -> RedirectResponse:
 
 
 @router.post("/testing/runs/{run_id}/fail")
-async def mark_run_failed(run_id: int) -> RedirectResponse:
+async def mark_run_failed(run_id: int, request: Request) -> RedirectResponse:
     """Manually mark an in-flight run as failed."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+
     with get_session() as session:
-        run = session.query(TestRun).get(run_id)
+        run = session.query(TestRun).filter_by(id=run_id, user_id=user_id).first()
         if run and run.status not in ("passed", "promoted"):
             run.status = "failed"
             run.finished_at = datetime.now(timezone.utc)
@@ -199,12 +248,19 @@ async def mark_run_failed(run_id: int) -> RedirectResponse:
 
 
 @router.get("/testing/api/status")
-async def testing_status() -> JSONResponse:
+async def testing_status(request: Request) -> JSONResponse:
     """Return current status of in-flight and recently finished test runs."""
-    config = get_config()
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"runs": [], "testing_repo": ""}, status_code=401)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+
     with get_session() as session:
         runs = (
             session.query(TestRun)
+            .filter_by(user_id=user_id)
             .order_by(TestRun.started_at.desc())
             .limit(50)
             .all()
@@ -223,7 +279,7 @@ async def testing_status() -> JSONResponse:
     return JSONResponse(
         {
             "runs": data,
-            "testing_repo": config.testing_repo or "",
+            "testing_repo": uc.testing_repo or "",
         }
     )
 
@@ -236,7 +292,12 @@ async def testing_status() -> JSONResponse:
 @router.get("/testing/pr/{snap_name}/{pr_number}", response_class=HTMLResponse)
 async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
     """Render the PR detail page for a test run."""
-    config = get_config()
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
 
     from snap_dashboard.github.pr_viewer import (
         get_pr_details,
@@ -248,17 +309,17 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
     screenshot_urls: list[str] = []
     metadata: dict = {}
 
-    if config.testing_repo:
-        pr_data = get_pr_details(config.testing_repo, pr_number, config.github_token)
+    if uc.testing_repo:
+        pr_data = get_pr_details(uc.testing_repo, pr_number, uc.github_token)
         metadata = pr_data.get("metadata", {})
         screenshot_urls = get_pr_screenshot_urls(
-            config.testing_repo, pr_data, "", config.github_token
+            uc.testing_repo, pr_data, "", uc.github_token
         )
 
     with get_session() as session:
         run_orm = (
             session.query(TestRun)
-            .filter_by(snap_name=snap_name, pr_number=pr_number)
+            .filter_by(snap_name=snap_name, pr_number=pr_number, user_id=user_id)
             .first()
         )
         if run_orm:
@@ -287,7 +348,7 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
     pr_info = pr_data.get("pr", {})
     pr_url = pr_info.get(
         "html_url",
-        f"https://github.com/{config.testing_repo}/pull/{pr_number}",
+        f"https://github.com/{uc.testing_repo}/pull/{pr_number}",
     )
 
     return templates.TemplateResponse(
@@ -301,9 +362,10 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
             "screenshot_urls": screenshot_urls,
             "files": pr_data.get("files", []),
             "comments": pr_data.get("comments", []),
-            "testing_repo": config.testing_repo,
+            "testing_repo": uc.testing_repo,
             "error": None,
             "last_run": None,
+            "current_user": user,
         },
     )
 
@@ -320,18 +382,24 @@ async def promote_snap_route(
     pr_number: int = Form(...),
     revision: int = Form(...),
     to_channel: str = Form(default="stable"),
-) -> HTMLResponse | RedirectResponse:
+) -> HTMLResponse:
     """Promote a snap revision to stable via ``snapcraft release`` then close the test PR."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+
     from snap_dashboard.testing.promoter import close_test_pr, promote_snap
 
-    config = get_config()
     ok, output = promote_snap(snap_name, revision, to_channel)
 
     version = ""
     with get_session() as session:
         run_orm = (
             session.query(TestRun)
-            .filter_by(snap_name=snap_name, pr_number=pr_number)
+            .filter_by(snap_name=snap_name, pr_number=pr_number, user_id=user_id)
             .first()
         )
         if ok:
@@ -345,13 +413,13 @@ async def promote_snap_route(
                 run_orm.error_msg = output[:500]
 
     if ok:
-        if config.testing_repo:
+        if uc.testing_repo:
             close_test_pr(
-                config.testing_repo,
+                uc.testing_repo,
                 pr_number,
                 snap_name,
                 version,
-                config.github_token,
+                uc.github_token,
             )
         return RedirectResponse(url="/testing", status_code=303)
 
@@ -368,14 +436,15 @@ async def promote_snap_route(
                 "promoted": False,
             },
             "pr": {},
-            "pr_url": f"https://github.com/{config.testing_repo}/pull/{pr_number}",
+            "pr_url": f"https://github.com/{uc.testing_repo}/pull/{pr_number}",
             "metadata": {},
             "screenshot_urls": [],
             "files": [],
             "comments": [],
-            "testing_repo": config.testing_repo,
+            "testing_repo": uc.testing_repo,
             "error": output,
             "last_run": None,
+            "current_user": user,
         },
     )
 

@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from pathlib import Path
 
-from snap_dashboard.config import get_config
+from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
 from snap_dashboard.db.session import get_session
 
@@ -23,12 +22,12 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 _executor = ThreadPoolExecutor(max_workers=2)
 
 
-def _get_last_run():
-    """Return the most recent successful CollectionRun finished_at or None."""
+def _get_last_run(user_id: int):
+    """Return the most recent successful CollectionRun finished_at for this user."""
     with get_session() as session:
         run = (
             session.query(CollectionRun)
-            .filter(CollectionRun.status == "success")
+            .filter_by(user_id=user_id, status="success")
             .order_by(CollectionRun.finished_at.desc())
             .first()
         )
@@ -37,9 +36,9 @@ def _get_last_run():
     return None
 
 
-def _build_snap_rows(session):
+def _build_snap_rows(session, user_id: int):
     """Build the snap table rows with channel data and issue counts."""
-    snaps = session.query(Snap).order_by(Snap.name).all()
+    snaps = session.query(Snap).filter_by(user_id=user_id).order_by(Snap.name).all()
     rows = []
     attention = []
 
@@ -112,21 +111,28 @@ def _build_snap_rows(session):
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard_index(request: Request) -> HTMLResponse:
-    config = get_config()
-    if not config.publisher:
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+
+    if not uc.publisher:
         return RedirectResponse(url="/onboarding", status_code=302)
 
     with get_session() as session:
-        snap_count = session.query(Snap).count()
+        snap_count = session.query(Snap).filter_by(user_id=user_id).count()
         if snap_count == 0:
             return RedirectResponse(url="/onboarding", status_code=302)
 
-        rows, attention = _build_snap_rows(session)
-        last_run = _get_last_run()
+        rows, attention = _build_snap_rows(session, user_id)
+        last_run = _get_last_run(user_id)
 
         # Build a dict of snap_name → most recent non-promoted TestRun for badge display
         active_runs = (
             session.query(TestRun)
+            .filter_by(user_id=user_id)
             .filter(TestRun.promoted.is_(False))
             .order_by(TestRun.started_at.desc())
             .all()
@@ -147,27 +153,34 @@ async def dashboard_index(request: Request) -> HTMLResponse:
                 "rows": rows,
                 "attention": attention,
                 "last_run": last_run,
-                "publisher": config.publisher,
-                "config": config,
+                "publisher": uc.publisher,
+                "config": uc,
                 "test_runs_by_snap": test_runs_by_snap,
+                "current_user": user,
             },
         )
 
 
-def _run_collection_sync():
+def _run_collection_sync(user_id: int):
     from snap_dashboard.collector import run_collection
-    config = get_config()
+    uc = get_user_config(user_id)
+    config = uc.to_config()
     with get_session() as session:
-        return run_collection(session, config)
+        return run_collection(session, config, user_id=user_id)
 
 
 @router.post("/refresh")
 async def refresh(background_tasks: BackgroundTasks, request: Request):
     """Trigger a background collection then redirect to dashboard."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
 
     def _bg():
         try:
-            _run_collection_sync()
+            _run_collection_sync(user_id)
         except Exception as exc:
             logger.error("Background collection failed: %s", exc)
 

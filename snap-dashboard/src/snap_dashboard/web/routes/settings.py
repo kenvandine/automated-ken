@@ -9,8 +9,8 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from snap_dashboard.config import get_config, save_config
-from snap_dashboard.db.models import CollectionRun, Snap
+from snap_dashboard.auth import get_current_user, get_user_config
+from snap_dashboard.db.models import CollectionRun, Snap, UserConfig
 from snap_dashboard.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -19,11 +19,11 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
-def _get_last_run():
+def _get_last_run(user_id: int):
     with get_session() as session:
         run = (
             session.query(CollectionRun)
-            .filter(CollectionRun.status == "success")
+            .filter_by(user_id=user_id, status="success")
             .order_by(CollectionRun.finished_at.desc())
             .first()
         )
@@ -32,9 +32,20 @@ def _get_last_run():
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_get(request: Request) -> HTMLResponse:
-    config = get_config()
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+
     with get_session() as session:
-        snaps = session.query(Snap).order_by(Snap.name).all()
+        snaps = (
+            session.query(Snap)
+            .filter_by(user_id=user_id)
+            .order_by(Snap.name)
+            .all()
+        )
         snap_list = [
             {
                 "name": s.name,
@@ -50,10 +61,11 @@ async def settings_get(request: Request) -> HTMLResponse:
         "settings.html",
         {
             "request": request,
-            "config": config,
+            "config": uc,
             "snaps": snap_list,
-            "last_run": _get_last_run(),
+            "last_run": _get_last_run(user_id),
             "intervals": [1, 6, 12, 24],
+            "current_user": user,
         },
     )
 
@@ -67,24 +79,42 @@ async def settings_post(
     testing_repo: str = Form(default=""),
     auto_test: str = Form(default=""),
 ) -> RedirectResponse:
-    """Save settings and redirect."""
-    updates: dict[str, str] = {}
-    if publisher.strip():
-        updates["PUBLISHER"] = publisher.strip()
-    if github_token.strip():
-        updates["GITHUB_TOKEN"] = github_token.strip()
-    updates["COLLECT_INTERVAL_HOURS"] = str(interval)
-    updates["TESTING_REPO"] = testing_repo.strip()
-    updates["AUTO_TEST"] = "true" if auto_test in ("1", "true", "on", "yes") else "false"
-    save_config(updates)
+    """Save per-user settings to UserConfig in the database."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    _auto_test = auto_test in ("1", "true", "on", "yes")
+
+    with get_session() as session:
+        uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+        if uc is None:
+            uc = UserConfig(user_id=user_id)
+            session.add(uc)
+        if publisher.strip():
+            uc.publisher = publisher.strip()
+        if github_token.strip():
+            uc.github_token = github_token.strip()
+        uc.collect_interval_hours = interval
+        uc.testing_repo = testing_repo.strip()
+        uc.auto_test = _auto_test
+
     return RedirectResponse(url="/settings", status_code=303)
 
 
 @router.post("/settings/remove/{snap_name}")
 async def settings_remove_snap(snap_name: str, request: Request) -> RedirectResponse:
     """Remove a snap from tracking."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+
     with get_session() as session:
-        snap = session.query(Snap).filter_by(name=snap_name).first()
+        snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
         if snap:
             session.delete(snap)
+
     return RedirectResponse(url="/settings", status_code=303)

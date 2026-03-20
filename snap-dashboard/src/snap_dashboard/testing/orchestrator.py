@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 import httpx
 
-from snap_dashboard.config import get_config
 from snap_dashboard.db.models import ChannelMap, Snap, TestRun
 from snap_dashboard.db.session import get_session
 
@@ -28,7 +27,7 @@ def _gh_headers(token: str) -> dict[str, str]:
     return h
 
 
-def find_snaps_needing_tests(session) -> list[dict]:
+def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
     """Return snaps where candidate or edge version differs from stable, per architecture.
 
     Returns one entry per snap+channel+architecture combination:
@@ -47,7 +46,10 @@ def find_snaps_needing_tests(session) -> list[dict]:
       stable_ver    – current stable version for that arch (may be None)
       can_promote   – True for candidate, False for edge
     """
-    snaps = session.query(Snap).order_by(Snap.name).all()
+    q = session.query(Snap).order_by(Snap.name)
+    if user_id is not None:
+        q = q.filter_by(user_id=user_id)
+    snaps = q.all()
     results: list[dict] = []
 
     for snap in snaps:
@@ -134,6 +136,9 @@ def trigger_workflow(
     revision: int | None,
     architecture: str = "amd64",
     triggered_by: str = "manual",
+    testing_repo: str = "",
+    github_token: str = "",
+    user_id: int | None = None,
 ) -> tuple[bool, str, int | None]:
     """Dispatch a ``workflow_dispatch`` event to run YARF tests for the given snap.
 
@@ -144,15 +149,21 @@ def trigger_workflow(
         an empty string on success; ``db_run_id`` is the new TestRun PK or None
         on failure.
     """
-    config = get_config()
-    if not config.testing_repo:
+    if not testing_repo:
+        # Fall back to global config
+        from snap_dashboard.config import get_config
+        cfg = get_config()
+        testing_repo = cfg.testing_repo
+        github_token = github_token or cfg.github_token
+
+    if not testing_repo:
         return False, "No testing_repo configured", None
-    if not config.github_token:
+    if not github_token:
         return False, "No GitHub token configured", None
 
-    owner, _, repo = config.testing_repo.partition("/")
+    owner, _, repo = testing_repo.partition("/")
     if not repo:
-        return False, f"Invalid testing_repo format: {config.testing_repo!r} (expected owner/repo)", None
+        return False, f"Invalid testing_repo format: {testing_repo!r} (expected owner/repo)", None
 
     # Persist a TestRun record first so we have a run_id to pass as an input.
     with get_session() as session:
@@ -164,6 +175,7 @@ def trigger_workflow(
             revision=revision,
             status="pending",
             triggered_by=triggered_by,
+            user_id=user_id,
         )
         session.add(run)
         session.flush()
@@ -183,7 +195,7 @@ def trigger_workflow(
     }
     try:
         with httpx.Client(timeout=30) as client:
-            resp = client.post(url, json=payload, headers=_gh_headers(config.github_token))
+            resp = client.post(url, json=payload, headers=_gh_headers(github_token))
 
         if resp.status_code == 204:
             with get_session() as session:
@@ -210,7 +222,12 @@ def trigger_workflow(
         return False, err, None
 
 
-def poll_for_gh_run_id(db_run_id: int, triggered_at: datetime) -> None:
+def poll_for_gh_run_id(
+    db_run_id: int,
+    triggered_at: datetime,
+    testing_repo: str = "",
+    github_token: str = "",
+) -> None:
     """Background task: find the GH Actions run for our dispatch then monitor it to completion.
 
     Phase 1 — find the run ID by polling the Actions API (up to ~3 min).
@@ -220,14 +237,20 @@ def poll_for_gh_run_id(db_run_id: int, triggered_at: datetime) -> None:
     Status updates are written directly to the DB so the JS polling picks
     them up without a manual sync.
     """
-    config = get_config()
-    if not config.testing_repo or not config.github_token:
+    if not testing_repo or not github_token:
+        # Fall back to global config
+        from snap_dashboard.config import get_config
+        cfg = get_config()
+        testing_repo = testing_repo or cfg.testing_repo
+        github_token = github_token or cfg.github_token
+
+    if not testing_repo or not github_token:
         return
-    owner, _, repo = config.testing_repo.partition("/")
+    owner, _, repo = testing_repo.partition("/")
     if not repo:
         return
 
-    headers = _gh_headers(config.github_token)
+    headers = _gh_headers(github_token)
 
     # ---- Phase 1: find the run ID ----------------------------------------
     list_url = f"{_GH_API}/repos/{owner}/{repo}/actions/runs"
@@ -270,7 +293,7 @@ def poll_for_gh_run_id(db_run_id: int, triggered_at: datetime) -> None:
     # ---- Phase 2: monitor until complete ------------------------------------
     for _attempt in range(180):  # up to 90 min (180 × 30s)
         time.sleep(30)
-        new_status = _check_gh_run_status(gh_run_id, owner, repo, config.github_token)
+        new_status = _check_gh_run_status(gh_run_id, owner, repo, github_token)
         if new_status is None:
             continue
         with get_session() as session:
@@ -304,25 +327,34 @@ def _check_gh_run_status(gh_run_id: str, owner: str, repo: str, token: str) -> s
         return None
 
 
-def sync_test_runs() -> None:
+def sync_test_runs(
+    testing_repo: str = "",
+    github_token: str = "",
+    user_id: int | None = None,
+) -> None:
     """Poll GitHub for open test PRs and reconcile with local :class:`TestRun` records.
 
     - Updates existing *pending/triggered/running* runs with PR metadata.
     - Creates new ``TestRun`` records for PRs that arrived without a prior dispatch
       (e.g. runs triggered externally or before the dashboard was set up).
     """
-    config = get_config()
-    if not config.testing_repo or not config.github_token:
+    if not testing_repo or not github_token:
+        from snap_dashboard.config import get_config
+        cfg = get_config()
+        testing_repo = testing_repo or cfg.testing_repo
+        github_token = github_token or cfg.github_token
+
+    if not testing_repo or not github_token:
         return
 
-    owner, _, repo = config.testing_repo.partition("/")
+    owner, _, repo = testing_repo.partition("/")
     if not repo:
         return
 
     from snap_dashboard.github.pr_viewer import get_test_prs, parse_pr_metadata
 
     try:
-        prs = get_test_prs(config.testing_repo, config.github_token)
+        prs = get_test_prs(testing_repo, github_token)
     except Exception as exc:
         logger.warning("sync_test_runs: failed to fetch test PRs: %s", exc)
         return
@@ -338,15 +370,18 @@ def sync_test_runs() -> None:
 
     with get_session() as session:
         # Update runs that are still in-flight
-        in_flight = session.query(TestRun).filter(
+        q = session.query(TestRun).filter(
             TestRun.status.in_(["pending", "triggered", "running"])
-        ).all()
+        )
+        if user_id is not None:
+            q = q.filter_by(user_id=user_id)
+        in_flight = q.all()
 
         for run in in_flight:
             # If we have a GH run ID but no PR yet, check GH Actions API directly
             pr = pr_map.get((run.snap_name, run.version or ""))
             if not pr and run.gh_run_id:
-                gha_status = _check_gh_run_status(run.gh_run_id, owner, repo, config.github_token)
+                gha_status = _check_gh_run_status(run.gh_run_id, owner, repo, github_token)
                 if gha_status and gha_status != run.status:
                     run.status = gha_status
                     if gha_status in ("passed", "failed"):
@@ -372,9 +407,12 @@ def sync_test_runs() -> None:
                 run.finished_at = datetime.now(timezone.utc)
 
         # Create stubs for externally-triggered PRs we have no record for
+        q2 = session.query(TestRun)
+        if user_id is not None:
+            q2 = q2.filter_by(user_id=user_id)
         known_keys = {
             (r.snap_name, r.version or "")
-            for r in session.query(TestRun).all()
+            for r in q2.all()
         }
         for pr in prs:
             meta = parse_pr_metadata(pr.get("body", ""))
@@ -398,6 +436,7 @@ def sync_test_runs() -> None:
                 pr_url=pr.get("html_url"),
                 pr_body=pr.get("body"),
                 triggered_by="external",
+                user_id=user_id,
             )
             if new_run.status in ("passed", "failed"):
                 new_run.finished_at = datetime.now(timezone.utc)
