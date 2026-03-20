@@ -151,35 +151,31 @@ jobs:
             SCREENSHOTS="${SCREENSHOTS}"$'\\n'"![$(basename "$png")](${url})"$'\\n'
           done < <(find "results/${SNAP}" -name "*.png" -print0 2>/dev/null | sort -z)
 
-          BODY=$(cat <<EOF
-## YARF Test Results: ${SNAP}
-
-| Field       | Value            |
-|-------------|------------------|
-| Snap         | \`${SNAP}\`      |
-| Version      | \`${VERSION}\`   |
-| Channel      | \`${CHANNEL}\`   |
-| Architecture | \`${ARCH}\`      |
-| Revision     | \`${REVISION}\`  |
-| Status       | **${STATUS}**    |
-| GHA Run      | [#${GH_RUN}](https://github.com/${GH_REPO}/actions/runs/${GH_RUN}) |
-${SCREENSHOTS:+
-## Screenshots
-
-${SCREENSHOTS}}
-<!-- snap-test-metadata
-snap: ${SNAP}
-version: ${VERSION}
-from_channel: ${CHANNEL}
-architecture: ${ARCH}
-revision: ${REVISION}
-dashboard_run_id: ${RUN_ID}
-yarf_exit_code: ${EXIT}
-gh_run_id: ${GH_RUN}
-status: ${STATUS}
--->
-EOF
-          )
+          BODY="## YARF Test Results: ${SNAP}"$'\\n\\n'
+          BODY+="| Field        | Value            |"$'\\n'
+          BODY+="|--------------|------------------|"$'\\n'
+          BODY+="| Snap         | \\`${SNAP}\\`      |"$'\\n'
+          BODY+="| Version      | \\`${VERSION}\\`   |"$'\\n'
+          BODY+="| Channel      | \\`${CHANNEL}\\`   |"$'\\n'
+          BODY+="| Architecture | \\`${ARCH}\\`      |"$'\\n'
+          BODY+="| Revision     | \\`${REVISION}\\`  |"$'\\n'
+          BODY+="| Status       | **${STATUS}**    |"$'\\n'
+          BODY+="| GHA Run      | [#${GH_RUN}](https://github.com/${GH_REPO}/actions/runs/${GH_RUN}) |"$'\\n'
+          if [ -n "${SCREENSHOTS}" ]; then
+            BODY+=$'\\n## Screenshots\\n\\n'
+            BODY+="${SCREENSHOTS}"$'\\n'
+          fi
+          BODY+=$'\\n<!-- snap-test-metadata\\n'
+          BODY+="snap: ${SNAP}"$'\\n'
+          BODY+="version: ${VERSION}"$'\\n'
+          BODY+="from_channel: ${CHANNEL}"$'\\n'
+          BODY+="architecture: ${ARCH}"$'\\n'
+          BODY+="revision: ${REVISION}"$'\\n'
+          BODY+="dashboard_run_id: ${RUN_ID}"$'\\n'
+          BODY+="yarf_exit_code: ${EXIT}"$'\\n'
+          BODY+="gh_run_id: ${GH_RUN}"$'\\n'
+          BODY+="status: ${STATUS}"$'\\n'
+          BODY+="-->"
 
           gh label create "snap-test-results" --color "0075ca" --description "YARF snap test results" --force
           gh pr create \\
