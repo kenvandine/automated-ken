@@ -137,29 +137,42 @@ jobs:
             TITLE_EMOJI="❌"
           fi
 
+          # Build screenshot section from PNGs committed to the branch
+          SCREENSHOTS=""
+          while IFS= read -r -d '' png; do
+            rel="${png#./}"
+            url="https://raw.githubusercontent.com/${GH_REPO}/${BRANCH}/${rel}"
+            SCREENSHOTS="${SCREENSHOTS}
+![$(basename "$png")]($url)
+"
+          done < <(find "results/${SNAP}" -name "*.png" -print0 2>/dev/null | sort -z)
+
           BODY=$(cat <<EOF
-          ## YARF Test Results: ${SNAP}
+## YARF Test Results: ${SNAP}
 
-          | Field       | Value            |
-          |-------------|------------------|
-          | Snap        | \`${SNAP}\`      |
-          | Version     | \`${VERSION}\`   |
-          | Channel     | \`${CHANNEL}\`   |
-          | Revision    | \`${REVISION}\`  |
-          | Status      | **${STATUS}**    |
-          | GHA Run     | [#${GH_RUN}](https://github.com/${GH_REPO}/actions/runs/${GH_RUN}) |
+| Field       | Value            |
+|-------------|------------------|
+| Snap        | \`${SNAP}\`      |
+| Version     | \`${VERSION}\`   |
+| Channel     | \`${CHANNEL}\`   |
+| Revision    | \`${REVISION}\`  |
+| Status      | **${STATUS}**    |
+| GHA Run     | [#${GH_RUN}](https://github.com/${GH_REPO}/actions/runs/${GH_RUN}) |
+${SCREENSHOTS:+
+## Screenshots
 
-          <!-- snap-test-metadata
-          snap: ${SNAP}
-          version: ${VERSION}
-          from_channel: ${CHANNEL}
-          revision: ${REVISION}
-          dashboard_run_id: ${RUN_ID}
-          yarf_exit_code: ${EXIT}
-          gh_run_id: ${GH_RUN}
-          status: ${STATUS}
-          -->
-          EOF
+${SCREENSHOTS}}
+<!-- snap-test-metadata
+snap: ${SNAP}
+version: ${VERSION}
+from_channel: ${CHANNEL}
+revision: ${REVISION}
+dashboard_run_id: ${RUN_ID}
+yarf_exit_code: ${EXIT}
+gh_run_id: ${GH_RUN}
+status: ${STATUS}
+-->
+EOF
           )
 
           gh label create "snap-test-results" --color "0075ca" --description "YARF snap test results" --force
