@@ -173,6 +173,22 @@ async def sync_runs(background_tasks: BackgroundTasks) -> RedirectResponse:
 
 
 # ---------------------------------------------------------------------------
+# Mark a run as failed (manual override for stuck runs)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/testing/runs/{run_id}/fail")
+async def mark_run_failed(run_id: int) -> RedirectResponse:
+    """Manually mark an in-flight run as failed."""
+    with get_session() as session:
+        run = session.query(TestRun).get(run_id)
+        if run and run.status not in ("passed", "promoted"):
+            run.status = "failed"
+            run.finished_at = datetime.now(timezone.utc)
+    return RedirectResponse(url="/testing", status_code=303)
+
+
+# ---------------------------------------------------------------------------
 # Live status API — polled by the testing page JS
 # ---------------------------------------------------------------------------
 

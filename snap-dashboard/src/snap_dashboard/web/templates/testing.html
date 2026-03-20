@@ -246,7 +246,15 @@
             <a href="https://github.com/{{ config.testing_repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow" data-gh-run="fallback">↗</a>
             {% endif %}
           </td>
-          <td class="muted small">{{ run.triggered_by or '—' }}</td>
+          <td class="muted small">
+            {{ run.triggered_by or '—' }}
+            {% if run.status in ('pending', 'triggered', 'running') %}
+            <form method="post" action="/testing/runs/{{ run.id }}/fail" style="display:inline; margin-left:6px;">
+              <button type="submit" class="btn btn-sm" style="font-size:11px; padding:1px 6px; opacity:0.5;"
+                title="Mark as failed" onclick="return confirm('Mark run #{{ run.id }} as failed?')">✕</button>
+            </form>
+            {% endif %}
+          </td>
           <td class="muted small">
             {% if run.started_at %}
             {{ run.started_at.strftime('%m-%d %H:%M') }}
