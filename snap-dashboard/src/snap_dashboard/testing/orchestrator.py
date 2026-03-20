@@ -28,14 +28,22 @@ def _gh_headers(token: str) -> dict[str, str]:
 
 
 def find_snaps_needing_tests(session) -> list[dict]:
-    """Return snaps where candidate/beta/edge version differs from stable (amd64).
+    """Return snaps where candidate or edge version differs from stable (amd64).
 
-    Each dict in the returned list contains:
+    Returns one entry per snap per relevant channel:
+    - candidate entries have ``can_promote=True``  (promotion path to stable)
+    - edge entries have ``can_promote=False``       (test-only, no promotion)
+
+    Edge is only included when its version differs from candidate (so a snap
+    already in candidate at the same version doesn't appear twice).
+
+    Each dict contains:
       snap          – Snap ORM object
-      from_channel  – highest-priority channel that is ahead ("candidate" > "beta" > "edge")
+      from_channel  – "candidate" or "edge"
       version       – version string in that channel
       revision      – revision int in that channel (may be None)
       stable_ver    – current stable version (may be None if not yet released)
+      can_promote   – True for candidate, False for edge
     """
     snaps = session.query(Snap).order_by(Snap.name).all()
     results: list[dict] = []
@@ -57,21 +65,35 @@ def find_snaps_needing_tests(session) -> list[dict]:
         stable = _get_amd64("stable")
         stable_ver = stable.get("version")
 
-        for ch in ("candidate", "beta", "edge"):
-            info = _get_amd64(ch)
-            ver = info.get("version")
-            rev = info.get("revision")
-            if ver and ver != stable_ver:
-                results.append(
-                    {
-                        "snap": snap,
-                        "from_channel": ch,
-                        "version": ver,
-                        "revision": rev,
-                        "stable_ver": stable_ver,
-                    }
-                )
-                break  # only report the highest-priority channel
+        # Candidate — the promotion path to stable
+        candidate_info = _get_amd64("candidate")
+        candidate_ver = candidate_info.get("version")
+        if candidate_ver and candidate_ver != stable_ver:
+            results.append(
+                {
+                    "snap": snap,
+                    "from_channel": "candidate",
+                    "version": candidate_ver,
+                    "revision": candidate_info.get("revision"),
+                    "stable_ver": stable_ver,
+                    "can_promote": True,
+                }
+            )
+
+        # Edge — test-only; only include when version differs from candidate
+        edge_info = _get_amd64("edge")
+        edge_ver = edge_info.get("version")
+        if edge_ver and edge_ver != stable_ver and edge_ver != candidate_ver:
+            results.append(
+                {
+                    "snap": snap,
+                    "from_channel": "edge",
+                    "version": edge_ver,
+                    "revision": edge_info.get("revision"),
+                    "stable_ver": stable_ver,
+                    "can_promote": False,
+                }
+            )
 
     return results
 

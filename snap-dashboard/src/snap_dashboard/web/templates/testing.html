@@ -78,82 +78,103 @@
 {% endif %}
 
 <!-- ================================================================
-     SNAPS NEEDING TESTS
+     SNAPS NEEDING TESTS — macros
      ================================================================ -->
-{% if snaps_needing %}
-<div class="card">
-  <h3 class="section-label">Snaps Needing Tests</h3>
-  <div class="table-wrapper">
-    <table class="snap-table">
-      <thead>
-        <tr>
-          <th>Snap</th>
-          <th>Channel</th>
-          <th>Version</th>
-          <th>Stable</th>
-          <th>Suite</th>
-          <th>Active Run</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for item in snaps_needing %}
-        <tr>
-          <td class="snap-name-cell">
-            <a href="/snap/{{ item.snap.name }}" class="snap-link">{{ item.snap.name }}</a>
-          </td>
-          <td>
-            <span class="channel-badge badge-amber">{{ item.from_channel }}</span>
-          </td>
-          <td class="muted small">{{ item.version or '—' }}</td>
-          <td class="muted small">{{ item.stable_ver or 'none' }}</td>
-          <td>
-            {% if item.has_suite %}
-            <span class="badge badge-green">yes</span>
-            {% else %}
-            <span class="badge badge-gray" title="No suite found in testing repo">no suite</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if item.existing_run %}
-            {% set run = item.existing_run %}
-            {% if run.status == 'passed' %}
-            <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-green">passed</a>
-            {% elif run.status == 'failed' %}
-            <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-red">failed</a>
-            {% elif run.status in ('pending', 'triggered', 'running') %}
-            <span class="badge badge-amber">{{ run.status }}</span>
-            {% elif run.status == 'error' %}
-            <span class="badge badge-red" title="{{ run.error_msg }}">error</span>
-            {% else %}
-            <span class="muted small">{{ run.status }}</span>
-            {% endif %}
-            {% else %}
-            <span class="muted small">—</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if item.has_suite %}
-            <form method="post" action="/testing/trigger/{{ item.snap.name }}">
-              <input type="hidden" name="from_channel" value="{{ item.from_channel }}">
-              <input type="hidden" name="version" value="{{ item.version }}">
-              <input type="hidden" name="revision" value="{{ item.revision or '' }}">
-              <button type="submit" class="btn btn-secondary btn-sm">Run Tests</button>
-            </form>
-            {% else %}
-            <span class="muted small">No suite</span>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+{% macro snap_test_table(items) %}
+<div class="table-wrapper">
+  <table class="snap-table">
+    <thead>
+      <tr>
+        <th>Snap</th>
+        <th>Channel</th>
+        <th>Version</th>
+        <th>Stable</th>
+        <th>Suite</th>
+        <th>Active Run</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td class="snap-name-cell">
+          <a href="/snap/{{ item.snap.name }}" class="snap-link">{{ item.snap.name }}</a>
+        </td>
+        <td>
+          <span class="channel-badge {% if item.can_promote %}badge-amber{% else %}badge-gray{% endif %}">{{ item.from_channel }}</span>
+        </td>
+        <td class="muted small">{{ item.version or '—' }}</td>
+        <td class="muted small">{{ item.stable_ver or 'none' }}</td>
+        <td>
+          {% if item.has_suite %}
+          <span class="badge badge-green">yes</span>
+          {% else %}
+          <span class="badge badge-gray" title="No suite found in testing repo">no suite</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if item.existing_run %}
+          {% set run = item.existing_run %}
+          {% if run.status == 'passed' %}
+          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-green">passed</a>
+          {% elif run.status == 'failed' %}
+          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-red">failed</a>
+          {% elif run.status in ('pending', 'triggered', 'running') %}
+          <span class="badge badge-amber">{{ run.status }}</span>
+          {% elif run.status == 'error' %}
+          <span class="badge badge-red" title="{{ run.error_msg }}">error</span>
+          {% else %}
+          <span class="muted small">{{ run.status }}</span>
+          {% endif %}
+          {% else %}
+          <span class="muted small">—</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if item.has_suite %}
+          <form method="post" action="/testing/trigger/{{ item.snap.name }}">
+            <input type="hidden" name="from_channel" value="{{ item.from_channel }}">
+            <input type="hidden" name="version" value="{{ item.version }}">
+            <input type="hidden" name="revision" value="{{ item.revision or '' }}">
+            <button type="submit" class="btn btn-secondary btn-sm">Run Tests</button>
+          </form>
+          {% else %}
+          <span class="muted small">No suite</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
-{% else %}
+{% endmacro %}
+
+<!-- Candidate: promotion path -->
+{% set candidate_items = snaps_needing | selectattr("can_promote") | list %}
+{% set edge_items = snaps_needing | rejectattr("can_promote") | list %}
+
+{% if candidate_items %}
+<div class="card">
+  <h3 class="section-label">Candidate — Ready to Test &amp; Promote</h3>
+  {{ snap_test_table(candidate_items) }}
+</div>
+{% endif %}
+
+<!-- Edge: test-only -->
+{% if edge_items %}
+<div class="card">
+  <h3 class="section-label">Edge — Test Only</h3>
+  <p class="text-muted" style="font-size:13px; margin-bottom:12px;">
+    These snaps have a newer version in edge that isn't in candidate yet. Tests can be run but there is no promotion path to stable from edge.
+  </p>
+  {{ snap_test_table(edge_items) }}
+</div>
+{% endif %}
+
+{% if not snaps_needing %}
 <div class="card">
   <div class="empty-state small-empty">
-    <p>No snaps have a newer version in candidate/beta/edge than stable. Nothing to test right now.</p>
+    <p>No snaps have a newer version in candidate or edge than stable. Nothing to test right now.</p>
   </div>
 </div>
 {% endif %}

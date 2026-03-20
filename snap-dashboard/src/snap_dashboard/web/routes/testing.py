@@ -72,6 +72,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "version": item["version"],
                     "revision": item["revision"],
                     "stable_ver": item["stable_ver"],
+                    "can_promote": item["can_promote"],
                     "has_suite": suite_exists_in_repo(
                         config.testing_repo, snap_name, config.github_token
                     ),
@@ -106,7 +107,10 @@ async def testing_index(request: Request) -> HTMLResponse:
             for r in all_runs
         ]
 
-    pending_promotion = [r for r in runs_data if r["status"] == "passed" and not r["promoted"]]
+    pending_promotion = [
+        r for r in runs_data
+        if r["status"] == "passed" and not r["promoted"] and r["from_channel"] == "candidate"
+    ]
 
     return templates.TemplateResponse(
         "testing.html",
