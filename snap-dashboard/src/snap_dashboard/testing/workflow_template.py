@@ -148,9 +148,7 @@ jobs:
           while IFS= read -r -d '' png; do
             rel="${png#./}"
             url="https://raw.githubusercontent.com/${GH_REPO}/${BRANCH}/${rel}"
-            SCREENSHOTS="${SCREENSHOTS}
-![$(basename "$png")]($url)
-"
+            SCREENSHOTS="${SCREENSHOTS}"$'\\n'"![$(basename "$png")](${url})"$'\\n'
           done < <(find "results/${SNAP}" -name "*.png" -print0 2>/dev/null | sort -z)
 
           BODY=$(cat <<EOF
