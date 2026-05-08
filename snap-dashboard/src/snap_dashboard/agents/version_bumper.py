@@ -51,6 +51,7 @@ class VersionBumperAgent(BaseAgent):
         self.release_notes = release_notes
 
     def _run(self) -> str:
+        self._report(f"Checking if PR needed for {self.snap_name} {self.old_version}→{self.new_version}", self.snap_name)
         uc = get_user_config(self.user_id) if self.user_id else None
         bot_token = (uc.bot_github_token if uc else "") or ""
         if not bot_token:
@@ -76,7 +77,7 @@ class VersionBumperAgent(BaseAgent):
             return f"skipped {self.snap_name}: snapcraft.yaml not found in {repo_slug}"
         yaml_path, yaml_content, yaml_sha = found
 
-        # Patch the file
+        self._report(f"Patching snapcraft.yaml — {self.snap_name} → {self.new_version}", self.snap_name)
         patched = patch_snapcraft_yaml(yaml_content, self.part_name, self.new_version)
         if patched == yaml_content:
             return (
@@ -110,7 +111,7 @@ class VersionBumperAgent(BaseAgent):
         ):
             return f"failed {self.snap_name}: could not push updated {yaml_path}"
 
-        # Generate PR title + body (with lemonade assist if available)
+        self._report(f"Opening PR on {self.packaging_repo}…", self.snap_name)
         title, body = self._build_pr_text(uc)
 
         pr = client.create_pr(
@@ -185,6 +186,7 @@ class VersionBumperAgent(BaseAgent):
         # Try to improve with lemonade
         lemonade = self._get_lemonade(uc)
         if lemonade:
+            self._report(f"⚡ Asking Lemonade AI to draft PR description for {self.snap_name}…", self.snap_name)
             result = lemonade.generate_pr_description(
                 snap_name=self.snap_name,
                 part_name=self.part_name,

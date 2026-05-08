@@ -30,6 +30,7 @@ class BaseAgent(ABC):
     def run(self) -> None:
         """Execute the agent, recording start/end/error to agent_runs."""
         self._run_id = self._start_run()
+        self._report("Starting…")
         logger.info("agent %s started (run_id=%s snap=%s)", self.agent_type, self._run_id, self.snap_name)
         try:
             summary = self._run()
@@ -38,6 +39,9 @@ class BaseAgent(ABC):
         except Exception as exc:
             logger.exception("agent %s error (run_id=%s): %s", self.agent_type, self._run_id, exc)
             self._error_run(str(exc))
+        finally:
+            from snap_dashboard.agents.runner import get_tracker
+            get_tracker().clear_active(self.agent_type)
 
     # ------------------------------------------------------------------
     # Subclass interface
@@ -82,6 +86,19 @@ class BaseAgent(ABC):
                 run.status = "error"
                 run.error_msg = error_msg
                 run.finished_at = datetime.now(timezone.utc)
+
+    # ------------------------------------------------------------------
+    # Progress reporting (shown live in the dashboard)
+    # ------------------------------------------------------------------
+
+    def _report(self, message: str, snap_name: str | None = None) -> None:
+        """Broadcast what this agent is doing right now to the activity tracker."""
+        from snap_dashboard.agents.runner import get_tracker
+        get_tracker().set_active(
+            self.agent_type,
+            message,
+            snap_name=snap_name if snap_name is not None else (self.snap_name or ""),
+        )
 
     # ------------------------------------------------------------------
     # Lemonade helper

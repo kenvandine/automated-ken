@@ -1,4 +1,4 @@
-"""Agent activity feed routes."""
+"""Agent activity feed routes — mission control dashboard."""
 
 from __future__ import annotations
 
@@ -7,11 +7,11 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 
-from snap_dashboard.auth import get_current_user
-from snap_dashboard.db.models import AgentRun, UpstreamRelease
+from snap_dashboard.auth import get_current_user, get_user_config
+from snap_dashboard.db.models import AgentRun, UpstreamRelease, VersionBumpPR
 from snap_dashboard.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -20,86 +20,169 @@ router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
+# ---------------------------------------------------------------------------
+# Pages
+# ---------------------------------------------------------------------------
+
 @router.get("/agents", response_class=HTMLResponse)
 async def agents_page(request: Request) -> HTMLResponse:
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
+    return templates.TemplateResponse(
+        "agents.html",
+        {"request": request, "current_user": user, "last_run": None},
+    )
+
+
+# ---------------------------------------------------------------------------
+# JSON status API — polled by the dashboard
+# ---------------------------------------------------------------------------
+
+@router.get("/api/agent-status")
+async def agent_status(request: Request) -> JSONResponse:
+    """Return live agent state, pipeline counts, lemonade status, and schedules."""
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
 
     user_id = user["id"]
+    uc = get_user_config(user_id)
 
+    from snap_dashboard.agents.runner import get_runner, get_tracker
+    tracker = get_tracker()
+    runner = get_runner()
+
+    # Active agents from in-memory tracker
+    active = tracker.get_active()
+
+    # Recent activity log (last 40 entries)
+    log = tracker.get_log_since(max(0, tracker.latest_seq() - 40))
+
+    # Pipeline stage counts from DB
     with get_session() as session:
-        runs = (
+        new_releases = (
+            session.query(UpstreamRelease)
+            .join(UpstreamRelease.snap)
+            .filter_by(user_id=user_id)
+            .filter(UpstreamRelease.acted_on.is_(False))
+            .count()
+        )
+        def _bump_count(*statuses):
+            return (
+                session.query(VersionBumpPR)
+                .filter(VersionBumpPR.user_id == user_id)
+                .filter(VersionBumpPR.status.in_(statuses))
+                .count()
+            )
+        pipeline = {
+            "new_releases": new_releases,
+            "prs_open": _bump_count("open", "ci_pending", "ci_passed", "ci_failed"),
+            "yarf_running": _bump_count("yarf_running"),
+            "under_review": _bump_count("yarf_passed", "yarf_failed", "needs_review"),
+            "approved": _bump_count("agent_approved"),
+            "merged": _bump_count("merged"),
+        }
+
+        # Recent agent run history (last 20)
+        recent_runs = (
             session.query(AgentRun)
             .filter_by(user_id=user_id)
             .order_by(AgentRun.started_at.desc())
-            .limit(100)
+            .limit(20)
             .all()
         )
-        run_list = [
+        history = [
             {
                 "id": r.id,
                 "agent_type": r.agent_type,
                 "snap_name": r.snap_name or "",
                 "status": r.status,
-                "result_summary": r.result_summary or "",
-                "error_msg": r.error_msg or "",
-                "started_at": r.started_at,
-                "finished_at": r.finished_at,
+                "summary": r.result_summary or r.error_msg or "",
+                "started_at": r.started_at.strftime("%H:%M:%S") if r.started_at else "",
+                "duration_s": (
+                    int((r.finished_at - r.started_at).total_seconds())
+                    if r.finished_at and r.started_at else None
+                ),
             }
-            for r in runs
+            for r in recent_runs
         ]
 
-        pending_releases = (
-            session.query(UpstreamRelease)
-            .join(UpstreamRelease.snap)
-            .filter_by(user_id=user_id)
-            .filter(UpstreamRelease.acted_on.is_(False))
-            .order_by(UpstreamRelease.discovered_at.desc())
-            .all()
-        )
-        release_list = [
-            {
-                "id": r.id,
-                "snap_name": r.snap.name if r.snap else "",
-                "part_name": r.part_name,
-                "current_version": r.current_version or "unknown",
-                "latest_version": r.latest_version,
-                "release_url": r.release_url or "",
-                "discovered_at": r.discovered_at,
-            }
-            for r in pending_releases
-        ]
+    # Lemonade status
+    lemonade_url = uc.lemonade_server_url or "http://localhost:8080"
+    lemonade_model = uc.lemonade_model or "llava"
+    lemonade_available = False
+    try:
+        from snap_dashboard.lemonade.client import LemonadeClient
+        lemonade_available = LemonadeClient(base_url=lemonade_url, model=lemonade_model).is_available()
+    except Exception:
+        pass
 
-    return templates.TemplateResponse(
-        "agents.html",
-        {
-            "request": request,
-            "current_user": user,
-            "agent_runs": run_list,
-            "pending_releases": release_list,
-            "last_run": None,
+    # Schedule countdown
+    schedules = runner.get_schedules()
+
+    return JSONResponse({
+        "active_agents": active,
+        "activity_log": log,
+        "pipeline": pipeline,
+        "history": history,
+        "lemonade": {
+            "available": lemonade_available,
+            "url": lemonade_url,
+            "model": lemonade_model,
+            "inferencing": any(
+                "Lemonade AI" in v.get("task", "") or "⚡" in v.get("task", "")
+                for v in active.values()
+            ),
         },
-    )
+        "schedules": schedules,
+        "activity_seq": get_tracker().latest_seq(),
+    })
 
 
 @router.post("/agents/scan-now")
 async def scan_now(request: Request) -> RedirectResponse:
-    """Trigger an immediate release scan for the current user."""
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
-
     from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
     from snap_dashboard.agents.runner import get_runner
     get_runner().submit(ReleaseScannerAgent(user_id=user["id"]))
-
     return RedirectResponse(url="/agents", status_code=303)
 
 
+@router.post("/agents/test-lemonade")
+async def test_lemonade(request: Request) -> JSONResponse:
+    """Ping lemonade-server and return availability + model list."""
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    uc = get_user_config(user["id"])
+    url = uc.lemonade_server_url or "http://localhost:8080"
+    model = uc.lemonade_model or "llava"
+    try:
+        from snap_dashboard.lemonade.client import LemonadeClient
+        import httpx
+        client = LemonadeClient(base_url=url, model=model)
+        available = client.is_available()
+        models: list[str] = []
+        if available:
+            with httpx.Client(timeout=5) as hc:
+                resp = hc.get(f"{url}/v1/models")
+            if resp.status_code == 200:
+                models = [m.get("id", "") for m in resp.json().get("data", [])]
+        return JSONResponse({"available": available, "url": url, "model": model, "models": models})
+    except Exception as exc:
+        return JSONResponse({"available": False, "error": str(exc)})
+
+
+# ---------------------------------------------------------------------------
+# SSE — activity stream
+# ---------------------------------------------------------------------------
+
 @router.get("/api/events")
 async def sse_events(request: Request):
-    """Server-Sent Events stream for live agent and version-bump updates."""
+    """Server-Sent Events stream for live agent activity and version-bump updates."""
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -108,40 +191,24 @@ async def sse_events(request: Request):
 
     async def event_generator():
         import asyncio
-        last_agent_id = 0
+        from snap_dashboard.agents.runner import get_tracker
+        tracker = get_tracker()
+        last_seq = tracker.latest_seq()
         last_bump_id = 0
+
         try:
             while True:
                 if await request.is_disconnected():
                     break
 
-                events: list[str] = []
+                # Activity log entries
+                new_entries = tracker.get_log_since(last_seq)
+                for entry in new_entries:
+                    last_seq = entry["seq"]
+                    yield f"event: agent_activity\ndata: {json.dumps(entry)}\n\n"
 
+                # Version bump status changes
                 with get_session() as session:
-                    # New agent runs
-                    new_runs = (
-                        session.query(AgentRun)
-                        .filter(
-                            AgentRun.user_id == user_id,
-                            AgentRun.id > last_agent_id,
-                        )
-                        .order_by(AgentRun.id)
-                        .limit(20)
-                        .all()
-                    )
-                    for r in new_runs:
-                        last_agent_id = r.id
-                        payload = json.dumps({
-                            "id": r.id,
-                            "agent_type": r.agent_type,
-                            "snap_name": r.snap_name or "",
-                            "status": r.status,
-                            "summary": r.result_summary or r.error_msg or "",
-                        })
-                        events.append(f"event: agent_status\ndata: {payload}\n\n")
-
-                    # Version bump changes
-                    from snap_dashboard.db.models import VersionBumpPR
                     new_bumps = (
                         session.query(VersionBumpPR)
                         .filter(
@@ -149,7 +216,7 @@ async def sse_events(request: Request):
                             VersionBumpPR.id > last_bump_id,
                         )
                         .order_by(VersionBumpPR.id)
-                        .limit(20)
+                        .limit(10)
                         .all()
                     )
                     for b in new_bumps:
@@ -162,23 +229,15 @@ async def sse_events(request: Request):
                             "status": b.status,
                             "pr_url": b.bot_pr_url or "",
                         })
-                        events.append(f"event: version_bump_update\ndata: {payload}\n\n")
+                        yield f"event: version_bump_update\ndata: {payload}\n\n"
 
-                for event in events:
-                    yield event
-
-                if not events:
-                    yield ": keepalive\n\n"
-
-                await asyncio.sleep(5)
+                yield ": keepalive\n\n"
+                await asyncio.sleep(2)
         except asyncio.CancelledError:
             pass
 
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,6 +16,62 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_WORKERS = 4
+
+
+class ActivityTracker:
+    """Thread-safe in-memory log of live agent activity.
+
+    Agents call ``set_active`` / ``clear_active`` to broadcast what they are
+    doing right now.  The SSE endpoint reads ``get_log_since`` to push updates
+    to connected browsers without touching the database.
+    """
+
+    def __init__(self, maxlen: int = 200) -> None:
+        self._lock = threading.Lock()
+        # agent_type → {task, snap_name, started_at (monotonic)}
+        self._active: dict[str, dict] = {}
+        self._log: deque = deque(maxlen=maxlen)
+        self._seq = 0  # monotonically increasing, used as SSE cursor
+
+    def set_active(self, agent_type: str, task: str, snap_name: str = "") -> None:
+        with self._lock:
+            self._active[agent_type] = {
+                "task": task,
+                "snap_name": snap_name,
+                "started_at": time.monotonic(),
+            }
+            self._seq += 1
+            self._log.append({
+                "seq": self._seq,
+                "ts": datetime.now(timezone.utc).strftime("%H:%M:%S"),
+                "agent_type": agent_type,
+                "message": task,
+                "snap_name": snap_name,
+            })
+
+    def clear_active(self, agent_type: str) -> None:
+        with self._lock:
+            self._active.pop(agent_type, None)
+
+    def get_active(self) -> dict:
+        with self._lock:
+            return dict(self._active)
+
+    def get_log_since(self, seq: int) -> list[dict]:
+        with self._lock:
+            return [e for e in self._log if e["seq"] > seq]
+
+    def latest_seq(self) -> int:
+        with self._lock:
+            return self._seq
+
+
+# Module-level tracker shared across all agents
+_tracker = ActivityTracker()
+
+
+def get_tracker() -> ActivityTracker:
+    return _tracker
 
 
 class AgentRunner:
@@ -35,6 +93,20 @@ class AgentRunner:
     # ------------------------------------------------------------------
     # Submit a one-shot agent
     # ------------------------------------------------------------------
+
+    def get_schedules(self) -> list[dict]:
+        """Return info about all registered periodic schedules."""
+        now = time.monotonic()
+        result = []
+        for job in self._scheduled:
+            elapsed = now - job.last_run
+            next_in = max(0.0, job.interval_seconds - elapsed)
+            result.append({
+                "agent_type": job.agent_cls.agent_type,
+                "interval_hours": job.interval_seconds / 3600,
+                "next_run_in_seconds": int(next_in),
+            })
+        return result
 
     def submit(self, agent: "BaseAgent") -> None:
         """Submit an agent for immediate background execution."""

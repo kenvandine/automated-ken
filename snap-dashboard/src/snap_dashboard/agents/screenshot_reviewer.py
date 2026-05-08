@@ -64,7 +64,7 @@ class ScreenshotReviewerAgent(BaseAgent):
                     pr_body = run.pr_body or ""
                     pr_branch = f"test-results/{snap_name}/{run.gh_run_id}" if run.gh_run_id else ""
 
-        # Fetch screenshots from the YARF result PR
+        self._report(f"Fetching YARF screenshots for {snap_name}…", snap_name)
         new_screenshots: list[str] = []
         if pr_body and testing_repo and token:
             from snap_dashboard.github.pr_viewer import get_test_prs, parse_pr_metadata
@@ -93,6 +93,7 @@ class ScreenshotReviewerAgent(BaseAgent):
         decision_dict = None
 
         if lemonade and new_screenshots and baseline_screenshots:
+            self._report(f"⚡ Lemonade AI comparing screenshots — {snap_name} {old_version}→{new_version}", snap_name)
             decision_dict = self._llm_compare(
                 lemonade,
                 baseline_screenshots[0],

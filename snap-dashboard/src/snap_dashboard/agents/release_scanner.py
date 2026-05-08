@@ -46,9 +46,11 @@ class ReleaseScannerAgent(BaseAgent):
                 if s.packaging_repo
             ]
 
+        self._report(f"Scanning {len(snaps)} packaging repos…")
         found = 0
         for snap in snaps:
             try:
+                self._report(f"Fetching snapcraft.yaml for {snap['name']}", snap["name"])
                 discovered = self._scan_snap(snap, token)
                 found += discovered
             except Exception as exc:
@@ -68,6 +70,7 @@ class ReleaseScannerAgent(BaseAgent):
         for part in parts:
             if not part.source or part.source_type == "local":
                 continue
+            self._report(f"Checking upstream {part.source_type} for {snap['name']}/{part.part_name}", snap["name"])
             info = get_latest_version(
                 source=part.source,
                 source_type=part.source_type,

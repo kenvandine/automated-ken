@@ -63,6 +63,7 @@ class PRMonitorAgent(BaseAgent):
                 for p in q.all()
             ]
 
+        self._report(f"Polling {len(prs)} in-flight version bump PR(s)…")
         updated = 0
         for pr in prs:
             try:
@@ -130,6 +131,8 @@ class PRMonitorAgent(BaseAgent):
         if not uc or not uc.testing_repo or not uc.github_token:
             return False
         snap_name = _snap_name_from_id(pr["snap_id"])
+        if snap_name:
+            self._report(f"Triggering YARF test for {snap_name} {pr['new_version']}", snap_name)
         if not snap_name:
             return False
         from snap_dashboard.testing.orchestrator import trigger_workflow
