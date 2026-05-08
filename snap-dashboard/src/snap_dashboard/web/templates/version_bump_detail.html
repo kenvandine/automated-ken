@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}{{ bump.snap_name }} {{ bump.new_version }} — Version Bump{% endblock %}
+
+{% block content %}
+
+<div class="page-title-row">
+  <div>
+    <a href="/version-bumps" class="link-inline small" style="margin-bottom:6px;display:block;">← All Version Bumps</a>
+    <h2 class="page-heading">{{ bump.snap_name }} {{ bump.old_version }} → {{ bump.new_version }}</h2>
+    <p class="text-muted">
+      {% if bump.part_name %}Part: <code>{{ bump.part_name }}</code> &middot; {% endif %}
+      {% if bump.packaging_repo %}
+      <a href="{{ bump.packaging_repo }}" target="_blank" rel="noopener" class="link-inline">{{ bump.packaging_repo }}</a>
+      {% endif %}
+    </p>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% if bump.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
+    <form method="post" action="/version-bumps/{{ bump.id }}/merge"
+          onsubmit="return confirm('Merge this PR?')">
+      <button type="submit" class="btn btn-primary">✓ Merge PR</button>
+    </form>
+    <form method="post" action="/version-bumps/{{ bump.id }}/reject"
+          onsubmit="return confirm('Close this PR?')">
+      <button type="submit" class="btn-danger-sm" style="font-size:13px;padding:6px 14px;">✗ Reject</button>
+    </form>
+    {% endif %}
+    {% if bump.status in ('agent_rejected', 'yarf_failed') %}
+    <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
+      <button type="submit" class="btn btn-secondary">↺ Re-run YARF</button>
+    </form>
+    {% endif %}
+    {% if bump.bot_pr_url %}
+    <a href="{{ bump.bot_pr_url }}" target="_blank" rel="noopener" class="btn btn-secondary">
+      PR #{{ bump.bot_pr_number }} ↗
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Status card -->
+<div class="card">
+  <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
+    <div>
+      <span class="text-muted small">Status</span><br>
+      <span class="badge
+        {% if bump.status == 'agent_approved' %}badge-ok
+        {% elif bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed') %}badge-fail
+        {% elif bump.status == 'needs_review' %}badge-warn
+        {% else %}badge-muted{% endif %}
+      ">{{ bump.status | replace('_', ' ') }}</span>
+    </div>
+    {% if bump.agent_decision %}
+    <div>
+      <span class="text-muted small">Agent decision</span><br>
+      <strong>{{ bump.agent_decision }}</strong>
+      {% if bump.agent_confidence is not none %}
+      <span class="text-muted small">({{ (bump.agent_confidence * 100) | int }}% confident)</span>
+      {% endif %}
+    </div>
+    {% endif %}
+    <div>
+      <span class="text-muted small">Created</span><br>
+      <span class="muted">{{ bump.created_at.strftime('%Y-%m-%d %H:%M UTC') if bump.created_at else '—' }}</span>
+    </div>
+    {% if bump.merged_at %}
+    <div>
+      <span class="text-muted small">Merged</span><br>
+      <span class="muted">{{ bump.merged_at.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Agent reasoning -->
+{% if bump.agent_reasoning %}
+<div class="card">
+  <h3 class="section-label">Agent Reasoning</h3>
+  <p style="font-size:14px;line-height:1.7;color:var(--text);">{{ bump.agent_reasoning }}</p>
+</div>
+{% endif %}
+
+<!-- Screenshot comparison -->
+{% if comparison %}
+<div class="card">
+  <h3 class="section-label">Screenshot Comparison</h3>
+  <p class="text-muted small" style="margin-bottom:12px;">
+    Analyzed {{ comparison.analyzed_at.strftime('%Y-%m-%d %H:%M UTC') if comparison.analyzed_at else '' }}
+  </p>
+  <div class="screenshot-compare">
+    <div class="screenshot-pane">
+      <p class="screenshot-label">Before ({{ bump.old_version }})</p>
+      {% if comparison.baseline_url %}
+      <img src="{{ comparison.baseline_url }}" alt="baseline screenshot" class="screenshot-img" loading="lazy">
+      {% else %}
+      <div class="screenshot-missing">No baseline screenshot</div>
+      {% endif %}
+    </div>
+    <div class="screenshot-pane">
+      <p class="screenshot-label">After ({{ bump.new_version }})</p>
+      {% if comparison.new_url %}
+      <img src="{{ comparison.new_url }}" alt="new screenshot" class="screenshot-img" loading="lazy">
+      {% else %}
+      <div class="screenshot-missing">No screenshot captured</div>
+      {% endif %}
+    </div>
+  </div>
+  {% if comparison.reasoning %}
+  <p style="margin-top:14px;font-size:13px;color:var(--text-muted);">{{ comparison.reasoning }}</p>
+  {% endif %}
+</div>
+{% else %}
+<div class="card">
+  <h3 class="section-label">Screenshot Comparison</h3>
+  <div class="empty-state small-empty">
+    <p>No screenshot comparison available yet.
+      {% if bump.status in ('yarf_running', 'ci_passed', 'ci_pending', 'open') %}
+      Waiting for YARF tests to complete.
+      {% elif bump.status in ('yarf_passed', 'yarf_failed') %}
+      Screenshot reviewer is pending.
+      {% endif %}
+    </p>
+  </div>
+</div>
+{% endif %}
+
+<!-- Actions panel -->
+<div class="card">
+  <h3 class="section-label">Actions</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% if bump.status not in ('merged', 'closed', 'agent_approved', 'needs_review') %}
+    <form method="post" action="/version-bumps/{{ bump.id }}/request-review">
+      <button type="submit" class="btn btn-secondary">Flag for Manual Review</button>
+    </form>
+    {% endif %}
+    {% if bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed') %}
+    <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
+      <button type="submit" class="btn btn-secondary">↺ Re-run YARF</button>
+    </form>
+    {% endif %}
+    {% if bump.status not in ('merged', 'closed') %}
+    <form method="post" action="/version-bumps/{{ bump.id }}/reject"
+          onsubmit="return confirm('Close PR #{{ bump.bot_pr_number }}?')">
+      <button type="submit" class="btn-danger-sm" style="font-size:13px;padding:6px 14px;">Close PR</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}

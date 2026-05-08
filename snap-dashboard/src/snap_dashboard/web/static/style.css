@@ -1242,3 +1242,142 @@ footer a:hover {
     margin-left: 0;
   }
 }
+
+/* ============================================================
+   Agentic UI additions
+   ============================================================ */
+
+/* ---- Agent type badges ----------------------------------- */
+.agent-type-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  background: var(--surface2);
+  color: var(--text-muted);
+}
+.agent-release_scanner  { background: rgba(124,106,249,0.15); color: #a89bff; }
+.agent-version_bumper   { background: rgba(56,189,130,0.15);  color: #5ecfa0; }
+.agent-pr_monitor       { background: rgba(245,166,35,0.15);  color: #f5a623; }
+.agent-screenshot_reviewer { background: rgba(82,182,255,0.15); color: #52b6ff; }
+
+/* ---- Version bump rows ----------------------------------- */
+.bump-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.bump-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.bump-row:last-child { border-bottom: none; }
+
+.bump-info {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.bump-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 100px;
+}
+
+.bump-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.bump-reasoning {
+  padding: 0 0 10px 0;
+  border-bottom: 1px solid var(--border);
+  margin-top: -4px;
+}
+
+.version-arrow {
+  font-size: 13px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.version-arrow strong { color: var(--accent); }
+
+/* ---- Screenshot comparison ------------------------------ */
+.screenshot-compare {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+@media (max-width: 680px) {
+  .screenshot-compare { grid-template-columns: 1fr; }
+}
+
+.screenshot-pane {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.screenshot-label {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  border-bottom: 1px solid var(--border);
+}
+
+.screenshot-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 480px;
+  object-fit: contain;
+}
+
+.screenshot-missing {
+  padding: 40px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ---- Toast notifications -------------------------------- */
+.toast-notification {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 13px;
+  color: var(--text);
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  z-index: 9999;
+  animation: fadeUp 0.2s ease;
+  max-width: 360px;
+}
+
+/* ---- SSE indicator / live badge ------------------------- */
+.badge-running {
+  background: rgba(245,166,35,0.15);
+  color: #f5a623;
+}

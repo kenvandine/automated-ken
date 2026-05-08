@@ -132,6 +132,106 @@
   </div>
 </div>
 
+<!-- Agents & AI -->
+<div class="card">
+  <h3 class="section-label">Agents &amp; AI</h3>
+  <form method="post" action="/settings">
+    <div class="form-row">
+      <label class="form-label" for="lemonade_server_url">Lemonade Server URL</label>
+      <input
+        type="text"
+        id="lemonade_server_url"
+        name="lemonade_server_url"
+        class="form-input"
+        value="{{ config.lemonade_server_url }}"
+        placeholder="http://localhost:8080"
+      >
+      <span class="form-hint">
+        URL of a running <a href="https://github.com/lemonade-hq/lemonade" target="_blank"
+        rel="noopener" class="link-inline">lemonade-server</a> instance.
+        Used for screenshot analysis and PR description generation.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="lemonade_model">Vision Model Name</label>
+      <input
+        type="text"
+        id="lemonade_model"
+        name="lemonade_model"
+        class="form-input"
+        value="{{ config.lemonade_model }}"
+        placeholder="llava"
+      >
+      <span class="form-hint">Model served by lemonade-server (must support vision/images).</span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="bot_github_login">Bot GitHub Login</label>
+      <input
+        type="text"
+        id="bot_github_login"
+        name="bot_github_login"
+        class="form-input"
+        value="{{ config.bot_github_login }}"
+        placeholder="my-bot-account"
+      >
+      <span class="form-hint">GitHub login of the secondary account used to open version-bump PRs.</span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="bot_github_token">Bot GitHub Token</label>
+      <input
+        type="password"
+        id="bot_github_token"
+        name="bot_github_token"
+        class="form-input"
+        placeholder="ghp_..."
+        autocomplete="off"
+      >
+      <span class="form-hint">
+        PAT for the bot account — needs <code>repo</code> scope to create branches and PRs.
+        {% if config.bot_github_login %}<span class="badge badge-ok">configured for {{ config.bot_github_login }}</span>{% endif %}
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="agent_interval_hours">Release Scan Interval</label>
+      <select id="agent_interval_hours" name="agent_interval_hours" class="form-input form-select">
+        {% for h in [1, 2, 4, 6, 12, 24] %}
+        <option value="{{ h }}" {% if h == config.agent_interval_hours %}selected{% endif %}>
+          Every {{ h }} hour{% if h != 1 %}s{% endif %}
+        </option>
+        {% endfor %}
+      </select>
+      <span class="form-hint">How often the release scanner checks packaging repos for upstream updates.</span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label checkbox-label">
+        <input
+          type="checkbox"
+          name="auto_merge"
+          value="true"
+          {% if config.auto_merge %}checked{% endif %}
+          style="margin-right: 6px;"
+        >
+        Auto-merge agent-approved PRs
+      </label>
+      <span class="form-hint">
+        Automatically merge PRs that the screenshot reviewer approves with high confidence.
+        Leave off to always require a manual merge click in the dashboard.
+      </span>
+    </div>
+
+    <div class="form-actions">
+      <a href="/agents" class="btn btn-secondary btn-sm">View Agent Activity</a>
+      <a href="/version-bumps" class="btn btn-secondary btn-sm">View Version Bumps</a>
+      <button type="submit" class="btn btn-primary">Save Agent Settings</button>
+    </div>
+  </form>
+</div>
+
 <!-- Tracked Snaps -->
 <div class="card">
   <div class="section-header-row">

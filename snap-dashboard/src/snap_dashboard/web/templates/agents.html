@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+
+{% block title %}Agent Activity — snap-dashboard{% endblock %}
+
+{% block content %}
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">Agent Activity</h2>
+    <p class="text-muted">Live background agent runs and pending upstream releases</p>
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <span id="sse-indicator" class="badge" style="font-size:11px;background:var(--surface2);color:var(--text-muted);">● connecting</span>
+    <form method="post" action="/agents/scan-now">
+      <button type="submit" class="btn btn-primary btn-sm">Scan Now</button>
+    </form>
+  </div>
+</div>
+
+<!-- Pending Upstream Releases -->
+{% if pending_releases %}
+<div class="card">
+  <h3 class="section-label">Pending Upstream Releases</h3>
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>Snap</th>
+          <th>Part</th>
+          <th>Current</th>
+          <th>Latest</th>
+          <th>Discovered</th>
+          <th>Upstream</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in pending_releases %}
+        <tr>
+          <td><a href="/snap/{{ r.snap_name }}" class="snap-link">{{ r.snap_name }}</a></td>
+          <td class="muted">{{ r.part_name }}</td>
+          <td class="muted">{{ r.current_version }}</td>
+          <td><span class="badge badge-warn">{{ r.latest_version }}</span></td>
+          <td class="muted small">{{ r.discovered_at.strftime('%Y-%m-%d %H:%M') if r.discovered_at else '—' }}</td>
+          <td>
+            {% if r.release_url %}
+            <a href="{{ r.release_url }}" target="_blank" rel="noopener" class="link-inline small">Release ↗</a>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- Live Agent Feed -->
+<div class="card">
+  <div class="section-header-row">
+    <h3 class="section-label">Agent Run History</h3>
+    <span class="text-muted small" id="live-badge" style="display:none;">
+      <span style="color:var(--accent);">●</span> live
+    </span>
+  </div>
+
+  <div id="agent-feed">
+    {% if agent_runs %}
+    <div class="table-wrapper">
+      <table class="snap-table">
+        <thead>
+          <tr>
+            <th>Agent</th>
+            <th>Snap</th>
+            <th>Status</th>
+            <th>Result</th>
+            <th>Started</th>
+            <th>Duration</th>
+          </tr>
+        </thead>
+        <tbody id="agent-rows">
+          {% for r in agent_runs %}
+          <tr id="agent-row-{{ r.id }}">
+            <td>
+              <span class="agent-type-badge agent-{{ r.agent_type }}">{{ r.agent_type | replace('_', ' ') }}</span>
+            </td>
+            <td class="muted">{{ r.snap_name or '—' }}</td>
+            <td>
+              {% if r.status == 'running' %}
+              <span class="badge badge-running">running</span>
+              {% elif r.status == 'done' %}
+              <span class="badge badge-ok">done</span>
+              {% else %}
+              <span class="badge badge-fail">error</span>
+              {% endif %}
+            </td>
+            <td class="muted small" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+              {{ r.result_summary or r.error_msg or '—' }}
+            </td>
+            <td class="muted small">{{ r.started_at.strftime('%Y-%m-%d %H:%M') if r.started_at else '—' }}</td>
+            <td class="muted small">
+              {% if r.finished_at and r.started_at %}
+              {{ ((r.finished_at - r.started_at).seconds) }}s
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state small-empty">
+      <p>No agent runs yet. Click <strong>Scan Now</strong> to start the first release scan.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const indicator = document.getElementById('sse-indicator');
+  const liveBadge = document.getElementById('live-badge');
+  const tbody = document.getElementById('agent-rows');
+
+  const es = new EventSource('/api/events');
+
+  es.addEventListener('open', () => {
+    indicator.textContent = '● live';
+    indicator.style.color = 'var(--accent)';
+    liveBadge.style.display = '';
+  });
+
+  es.addEventListener('error', () => {
+    indicator.textContent = '● disconnected';
+    indicator.style.color = 'var(--text-muted)';
+    liveBadge.style.display = 'none';
+  });
+
+  es.addEventListener('agent_status', (e) => {
+    const d = JSON.parse(e.data);
+    if (!tbody) return;
+    // Update existing row or prepend new one
+    let row = document.getElementById('agent-row-' + d.id);
+    if (!row) {
+      row = document.createElement('tr');
+      row.id = 'agent-row-' + d.id;
+      tbody.insertBefore(row, tbody.firstChild);
+    }
+    const statusBadge = d.status === 'running'
+      ? '<span class="badge badge-running">running</span>'
+      : d.status === 'done'
+        ? '<span class="badge badge-ok">done</span>'
+        : '<span class="badge badge-fail">error</span>';
+    row.innerHTML = `
+      <td><span class="agent-type-badge agent-${d.agent_type}">${d.agent_type.replace(/_/g,' ')}</span></td>
+      <td class="muted">${d.snap_name || '—'}</td>
+      <td>${statusBadge}</td>
+      <td class="muted small" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${d.summary || '—'}</td>
+      <td class="muted small">just now</td>
+      <td class="muted small">—</td>
+    `;
+  });
+
+  es.addEventListener('version_bump_update', (e) => {
+    const d = JSON.parse(e.data);
+    // Show a toast-style notification
+    const toast = document.createElement('div');
+    toast.className = 'toast-notification';
+    toast.innerHTML = `Version bump: <strong>${d.snap_name}</strong> ${d.old_version}→${d.new_version} — <em>${d.status}</em>`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 5000);
+  });
+})();
+</script>
+{% endblock %}
