@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     String,
@@ -54,6 +55,9 @@ class User(Base):
     test_runs = relationship(
         "TestRun", back_populates="user", cascade="all, delete-orphan"
     )
+    agent_runs = relationship(
+        "AgentRun", back_populates="user", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"<User login={self.github_login!r} admin={self.is_admin}>"
@@ -74,6 +78,14 @@ class UserConfig(Base):
     snapcraft_macaroon = Column(Text, nullable=True)
     auto_test = Column(Boolean, default=False, nullable=False)
     collect_interval_hours = Column(Integer, default=6, nullable=False)
+
+    # Agent / AI settings
+    lemonade_server_url = Column(String(500), nullable=True)
+    lemonade_model = Column(String(255), nullable=True)
+    bot_github_token = Column(Text, nullable=True)
+    bot_github_login = Column(String(255), nullable=True)
+    agent_interval_hours = Column(Integer, default=4, nullable=False)
+    auto_merge = Column(Boolean, default=False, nullable=False)
 
     user = relationship("User", back_populates="config")
 
@@ -123,6 +135,12 @@ class Snap(Base):
     )
     issues = relationship(
         "Issue", back_populates="snap", cascade="all, delete-orphan"
+    )
+    upstream_releases = relationship(
+        "UpstreamRelease", back_populates="snap", cascade="all, delete-orphan"
+    )
+    version_bump_prs = relationship(
+        "VersionBumpPR", back_populates="snap", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -218,3 +236,139 @@ class TestRun(Base):
 
     def __repr__(self) -> str:
         return f"<TestRun id={self.id} snap={self.snap_name!r} status={self.status!r}>"
+
+
+# ---------------------------------------------------------------------------
+# Agentic models
+# ---------------------------------------------------------------------------
+
+
+class AgentRun(Base):
+    """Tracks a single execution of a background agent."""
+
+    __tablename__ = "agent_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    # release_scanner | version_bumper | pr_monitor | screenshot_reviewer
+    agent_type = Column(String(64), nullable=False)
+    snap_name = Column(String(255), nullable=True)
+    # idle | running | done | error
+    status = Column(String(32), nullable=False, default="running")
+    result_summary = Column(Text, nullable=True)
+    error_msg = Column(Text, nullable=True)
+    started_at = Column(DateTime, default=_now, nullable=False)
+    finished_at = Column(DateTime, nullable=True)
+
+    user = relationship("User", back_populates="agent_runs")
+
+    def __repr__(self) -> str:
+        return f"<AgentRun id={self.id} type={self.agent_type!r} status={self.status!r}>"
+
+
+class UpstreamRelease(Base):
+    """A new version discovered in an upstream project for a snap part."""
+
+    __tablename__ = "upstream_releases"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snap_id = Column(Integer, ForeignKey("snaps.id", ondelete="CASCADE"), nullable=False)
+    part_name = Column(String(255), nullable=False)
+    # git | pypi | launchpad | gitlab
+    source_type = Column(String(32), nullable=True)
+    source_url = Column(Text, nullable=True)
+    current_version = Column(String(128), nullable=True)
+    latest_version = Column(String(128), nullable=False)
+    release_url = Column(Text, nullable=True)
+    release_notes = Column(Text, nullable=True)
+    discovered_at = Column(DateTime, default=_now, nullable=False)
+    acted_on = Column(Boolean, default=False, nullable=False)
+    acted_at = Column(DateTime, nullable=True)
+
+    snap = relationship("Snap", back_populates="upstream_releases")
+
+    def __repr__(self) -> str:
+        return (
+            f"<UpstreamRelease snap_id={self.snap_id} part={self.part_name!r}"
+            f" latest={self.latest_version!r}>"
+        )
+
+
+class VersionBumpPR(Base):
+    """A PR opened by the bot account to bump a snap's upstream version."""
+
+    __tablename__ = "version_bump_prs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snap_id = Column(Integer, ForeignKey("snaps.id", ondelete="CASCADE"), nullable=False)
+    upstream_release_id = Column(
+        Integer, ForeignKey("upstream_releases.id", ondelete="SET NULL"), nullable=True
+    )
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    bot_pr_url = Column(Text, nullable=True)
+    bot_pr_number = Column(Integer, nullable=True)
+    packaging_repo = Column(String(500), nullable=True)
+    branch_name = Column(String(255), nullable=True)
+    old_version = Column(String(128), nullable=True)
+    new_version = Column(String(128), nullable=True)
+    # open | ci_pending | ci_passed | ci_failed | yarf_running | yarf_passed |
+    # yarf_failed | agent_approved | agent_rejected | needs_review | merged | closed
+    status = Column(String(64), nullable=False, default="open")
+    test_run_id = Column(
+        Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    agent_decision = Column(String(32), nullable=True)  # approve | reject | needs_review
+    agent_confidence = Column(Float, nullable=True)
+    agent_reasoning = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+    merged_at = Column(DateTime, nullable=True)
+
+    snap = relationship("Snap", back_populates="version_bump_prs")
+    upstream_release = relationship("UpstreamRelease")
+    test_run = relationship("TestRun")
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return (
+            f"<VersionBumpPR id={self.id} snap_id={self.snap_id}"
+            f" {self.old_version!r}→{self.new_version!r} status={self.status!r}>"
+        )
+
+
+class ScreenshotComparison(Base):
+    """LLM vision analysis comparing before/after screenshots for a version bump."""
+
+    __tablename__ = "screenshot_comparisons"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    version_bump_pr_id = Column(
+        Integer, ForeignKey("version_bump_prs.id", ondelete="CASCADE"), nullable=False
+    )
+    test_run_id = Column(
+        Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    baseline_url = Column(Text, nullable=True)
+    baseline_image_b64 = Column(Text, nullable=True)
+    new_url = Column(Text, nullable=True)
+    new_image_b64 = Column(Text, nullable=True)
+    llm_prompt = Column(Text, nullable=True)
+    llm_response = Column(Text, nullable=True)
+    # approve | reject | needs_review
+    decision = Column(String(32), nullable=True)
+    confidence = Column(Float, nullable=True)
+    reasoning = Column(Text, nullable=True)
+    analyzed_at = Column(DateTime, default=_now, nullable=False)
+
+    version_bump_pr = relationship("VersionBumpPR")
+    test_run = relationship("TestRun")
+
+    def __repr__(self) -> str:
+        return (
+            f"<ScreenshotComparison id={self.id}"
+            f" pr_id={self.version_bump_pr_id} decision={self.decision!r}>"
+        )

@@ -57,6 +57,13 @@ def _migrate() -> None:
         "ALTER TABLE snaps ADD COLUMN user_id INTEGER REFERENCES users(id)",
         "ALTER TABLE collection_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
         "ALTER TABLE test_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
+        # Agentic phase: new UserConfig columns
+        "ALTER TABLE user_configs ADD COLUMN lemonade_server_url VARCHAR(500)",
+        "ALTER TABLE user_configs ADD COLUMN lemonade_model VARCHAR(255)",
+        "ALTER TABLE user_configs ADD COLUMN bot_github_token TEXT",
+        "ALTER TABLE user_configs ADD COLUMN bot_github_login VARCHAR(255)",
+        "ALTER TABLE user_configs ADD COLUMN agent_interval_hours INTEGER DEFAULT 4",
+        "ALTER TABLE user_configs ADD COLUMN auto_merge BOOLEAN DEFAULT 0",
     ]
     with engine.connect() as conn:
         for sql in migrations:
