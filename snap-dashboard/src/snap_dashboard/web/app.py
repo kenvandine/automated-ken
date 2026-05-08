@@ -43,9 +43,29 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    """Initialise the database on startup."""
+    """Initialise the database and start background agents on startup."""
     init_db()
     logger.info("Database initialised.")
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
+    from snap_dashboard.agents.pr_monitor import PRMonitorAgent
+    from snap_dashboard.db.models import UserConfig
+    from snap_dashboard.db.session import get_session as _gs
+
+    runner = get_runner()
+
+    # Schedule agents for every active user.
+    with _gs() as session:
+        configs = session.query(UserConfig).all()
+        for uc in configs:
+            interval = uc.agent_interval_hours or 4
+            runner.schedule_periodic(
+                ReleaseScannerAgent, interval_hours=interval, user_id=uc.user_id
+            )
+    # PR monitor runs every 5 minutes regardless of users.
+    runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
+    logger.info("Agent runner started.")
 
 
 # Import and include routers after app is created to avoid circular imports
