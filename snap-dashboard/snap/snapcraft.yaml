@@ -29,7 +29,7 @@ apps:
   serve:
     command: bin/snap-dashboard serve
     daemon: simple
-    plugs: [network-bind]
+    plugs: [network-bind, network]
 
 parts:
   snap-dashboard:
