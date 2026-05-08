@@ -17,15 +17,17 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_URL = "http://localhost:8080"
-_DEFAULT_MODEL = "llava"
+_DEFAULT_URL = "http://localhost:13305"
+_DEFAULT_MODEL = "user.Qwen3.5-35B-A3B-Q4_K_M"
 _TIMEOUT = 120  # seconds — vision inference can be slow on CPU
 
 
 class LemonadeClient:
     """Thin client for lemonade-server's OpenAI-compatible API."""
 
-    def __init__(self, base_url: str = _DEFAULT_URL, model: str = _DEFAULT_MODEL) -> None:
+    def __init__(
+        self, base_url: str = _DEFAULT_URL, model: str = _DEFAULT_MODEL
+    ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model or _DEFAULT_MODEL
 
@@ -70,7 +72,9 @@ class LemonadeClient:
                     json=payload,
                 )
             if resp.status_code != 200:
-                logger.warning("lemonade chat error %s: %s", resp.status_code, resp.text[:200])
+                logger.warning(
+                    "lemonade chat error %s: %s", resp.status_code, resp.text[:200]
+                )
                 return None
             return resp.json()["choices"][0]["message"]["content"]
         except Exception as exc:
