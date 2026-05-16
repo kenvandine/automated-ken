@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Request
@@ -182,7 +183,13 @@ async def test_lemonade(request: Request) -> JSONResponse:
 
 @router.get("/api/events")
 async def sse_events(request: Request):
-    """Server-Sent Events stream for live agent activity and version-bump updates."""
+    """Server-Sent Events stream for live agent activity and version-bump updates.
+
+    Agent activity comes from the in-memory ActivityTracker (zero DB reads).
+    Version-bump status changes are detected by comparing updated_at against
+    the last poll timestamp, so *any* transition through the pipeline triggers
+    an event — not just newly created PRs.
+    """
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -194,42 +201,47 @@ async def sse_events(request: Request):
         from snap_dashboard.agents.runner import get_tracker
         tracker = get_tracker()
         last_seq = tracker.latest_seq()
-        last_bump_id = 0
+        # Track last poll time so we stream status changes on existing PRs.
+        last_poll_ts = datetime.now(timezone.utc)
 
         try:
             while True:
                 if await request.is_disconnected():
                     break
 
-                # Activity log entries
+                # Agent activity log entries (in-memory, no DB)
                 new_entries = tracker.get_log_since(last_seq)
                 for entry in new_entries:
                     last_seq = entry["seq"]
                     yield f"event: agent_activity\ndata: {json.dumps(entry)}\n\n"
 
-                # Version bump status changes
+                # Version bump status changes since last poll.
+                # Using updated_at means both new PRs *and* status transitions
+                # on existing PRs are streamed in real time.
+                current_ts = datetime.now(timezone.utc)
                 with get_session() as session:
-                    new_bumps = (
+                    changed_bumps = (
                         session.query(VersionBumpPR)
                         .filter(
                             VersionBumpPR.user_id == user_id,
-                            VersionBumpPR.id > last_bump_id,
+                            VersionBumpPR.updated_at >= last_poll_ts,
                         )
-                        .order_by(VersionBumpPR.id)
-                        .limit(10)
+                        .order_by(VersionBumpPR.updated_at)
+                        .limit(20)
                         .all()
                     )
-                    for b in new_bumps:
-                        last_bump_id = b.id
+                    for b in changed_bumps:
+                        snap_name = b.snap.name if b.snap else ""
                         payload = json.dumps({
                             "id": b.id,
-                            "snap_name": b.snap.name if b.snap else "",
+                            "snap_name": snap_name,
                             "old_version": b.old_version or "",
                             "new_version": b.new_version or "",
                             "status": b.status,
                             "pr_url": b.bot_pr_url or "",
                         })
                         yield f"event: version_bump_update\ndata: {payload}\n\n"
+                last_poll_ts = current_ts
 
                 yield ": keepalive\n\n"
                 await asyncio.sleep(2)
