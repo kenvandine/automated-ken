@@ -71,12 +71,24 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
             def _get(ch: str, a: str = arch) -> dict:
                 return (channels.get(ch) or {}).get(a) or {}
 
-            stable_ver = _get("stable").get("version")
+            stable_info = _get("stable")
+            stable_ver = stable_info.get("version")
+            stable_rev = stable_info.get("revision")
             candidate_info = _get("candidate")
             candidate_ver = candidate_info.get("version")
+            candidate_rev = candidate_info.get("revision")
 
-            # Candidate — promotion path to stable
-            if candidate_ver and candidate_ver != stable_ver:
+            # Candidate — promotion path to stable.
+            # Include rebuilds: same version but higher revision (e.g. security rebuild).
+            _candidate_differs = candidate_ver and (
+                candidate_ver != stable_ver
+                or (
+                    candidate_rev is not None
+                    and stable_rev is not None
+                    and candidate_rev > stable_rev
+                )
+            )
+            if _candidate_differs:
                 results.append(
                     {
                         "snap": snap,

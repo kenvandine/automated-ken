@@ -1,0 +1,435 @@
+{% extends "base.html" %}
+
+{% block title %}Agent Fleet — snap-dashboard{% endblock %}
+
+{% block content %}
+
+<!-- ── Hero header ──────────────────────────────────────────── -->
+<div class="fleet-hero">
+  <div class="fleet-hero-left">
+    <h2 class="fleet-title">Agent Fleet</h2>
+    <p class="fleet-subtitle">Automated snap maintenance powered by local AI</p>
+  </div>
+  <div class="fleet-hero-right">
+    <div id="lemonade-hero" class="lemonade-hero">
+      <div class="lemonade-orb" id="lemonade-orb"></div>
+      <div>
+        <div class="lemonade-label">Lemonade AI</div>
+        <div class="lemonade-status" id="lemonade-status-text">checking…</div>
+      </div>
+    </div>
+    <div class="fleet-actions">
+      <form method="post" action="/agents/scan-now">
+        <button type="submit" class="btn btn-primary">⟳ Scan Now</button>
+      </form>
+      <button class="btn btn-secondary" onclick="testLemonade()">Test Connection</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Pipeline flow ────────────────────────────────────────── -->
+<div class="pipeline-card card">
+  <div class="pipeline-label-row">
+    <span class="section-label">Pipeline</span>
+    <span class="text-muted small">work flowing right →</span>
+  </div>
+  <div class="pipeline">
+    <div class="pipeline-stage" id="stage-releases">
+      <div class="stage-icon">🔍</div>
+      <div class="stage-count" id="count-releases">—</div>
+      <div class="stage-name">New Releases</div>
+    </div>
+    <div class="pipeline-arrow" id="arrow-0"><span class="arrow-dot"></span></div>
+    <div class="pipeline-stage" id="stage-prs">
+      <div class="stage-icon">🔀</div>
+      <div class="stage-count" id="count-prs">—</div>
+      <div class="stage-name">PRs Open</div>
+    </div>
+    <div class="pipeline-arrow" id="arrow-1"><span class="arrow-dot"></span></div>
+    <div class="pipeline-stage" id="stage-yarf">
+      <div class="stage-icon">🧪</div>
+      <div class="stage-count" id="count-yarf">—</div>
+      <div class="stage-name">YARF Tests</div>
+    </div>
+    <div class="pipeline-arrow" id="arrow-2"><span class="arrow-dot"></span></div>
+    <div class="pipeline-stage" id="stage-review">
+      <div class="stage-icon">🖼</div>
+      <div class="stage-count" id="count-review">—</div>
+      <div class="stage-name">AI Review</div>
+    </div>
+    <div class="pipeline-arrow" id="arrow-3"><span class="arrow-dot"></span></div>
+    <div class="pipeline-stage" id="stage-approved">
+      <div class="stage-icon">✅</div>
+      <div class="stage-count" id="count-approved">—</div>
+      <div class="stage-name">Approved</div>
+    </div>
+    <div class="pipeline-arrow" id="arrow-4"><span class="arrow-dot"></span></div>
+    <div class="pipeline-stage" id="stage-merged">
+      <div class="stage-icon">🚀</div>
+      <div class="stage-count" id="count-merged">—</div>
+      <div class="stage-name">Merged</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Agent cards ──────────────────────────────────────────── -->
+<div class="agent-grid">
+
+  <div class="agent-card" id="card-release_scanner" data-type="release_scanner">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">🔍</span>
+      <div>
+        <div class="agent-card-name">Release Scanner</div>
+        <div class="agent-card-desc">Checks packaging repos for new upstream versions</div>
+      </div>
+      <div class="agent-status-dot" id="dot-release_scanner"></div>
+    </div>
+    <div class="agent-card-task" id="task-release_scanner">Idle</div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-release_scanner">—</span>
+      <span class="agent-card-badge" id="badge-release_scanner">IDLE</span>
+    </div>
+  </div>
+
+  <div class="agent-card" id="card-version_bumper" data-type="version_bumper">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">🔧</span>
+      <div>
+        <div class="agent-card-name">Version Bumper</div>
+        <div class="agent-card-desc">Opens version-bump PRs via bot account</div>
+      </div>
+      <div class="agent-status-dot" id="dot-version_bumper"></div>
+    </div>
+    <div class="agent-card-task" id="task-version_bumper">Idle</div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-version_bumper">On demand</span>
+      <span class="agent-card-badge" id="badge-version_bumper">IDLE</span>
+    </div>
+  </div>
+
+  <div class="agent-card" id="card-pr_monitor" data-type="pr_monitor">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">👁</span>
+      <div>
+        <div class="agent-card-name">PR Monitor</div>
+        <div class="agent-card-desc">Tracks CI status and triggers YARF tests</div>
+      </div>
+      <div class="agent-status-dot" id="dot-pr_monitor"></div>
+    </div>
+    <div class="agent-card-task" id="task-pr_monitor">Idle</div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-pr_monitor">Every 5 min</span>
+      <span class="agent-card-badge" id="badge-pr_monitor">IDLE</span>
+    </div>
+  </div>
+
+  <div class="agent-card agent-card-lemonade" id="card-screenshot_reviewer" data-type="screenshot_reviewer">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">⚡</span>
+      <div>
+        <div class="agent-card-name">Screenshot Reviewer</div>
+        <div class="agent-card-desc">LLM vision comparison via Lemonade AI</div>
+      </div>
+      <div class="agent-status-dot" id="dot-screenshot_reviewer"></div>
+    </div>
+    <div class="agent-card-task" id="task-screenshot_reviewer">Idle</div>
+    <div class="agent-thinking" id="thinking-screenshot_reviewer" style="display:none;">
+      <span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>
+      <span style="margin-left:6px;font-size:11px;color:var(--accent);">INFERENCE</span>
+    </div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-screenshot_reviewer">On demand</span>
+      <span class="agent-card-badge" id="badge-screenshot_reviewer">IDLE</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Live activity ticker ─────────────────────────────────── -->
+<div class="card activity-card">
+  <div class="section-header-row">
+    <h3 class="section-label">Live Activity</h3>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span id="sse-dot" style="font-size:10px;color:var(--text-muted);">● connecting</span>
+      <button class="btn btn-secondary btn-sm" onclick="clearLog()">Clear</button>
+    </div>
+  </div>
+  <div class="activity-log" id="activity-log">
+    <div class="activity-empty" id="activity-empty">Waiting for agent activity…</div>
+  </div>
+</div>
+
+<!-- ── Run history ──────────────────────────────────────────── -->
+<div class="card">
+  <h3 class="section-label">Recent Runs</h3>
+  <div id="history-container">
+    <div class="text-muted small" style="padding:12px 0;">Loading…</div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+/* ── State ─────────────────────────────────────────────────── */
+let pollTimer = null;
+let logCount = 0;
+const MAX_LOG = 60;
+
+/* ── Bootstrap ─────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  connectSSE();
+  pollStatus();
+  pollTimer = setInterval(pollStatus, 4000);
+});
+
+/* ── SSE connection ─────────────────────────────────────────── */
+function connectSSE() {
+  const dot = document.getElementById('sse-dot');
+  const es = new EventSource('/api/events');
+
+  es.addEventListener('open', () => {
+    dot.textContent = '● live';
+    dot.style.color = 'var(--accent)';
+  });
+  es.addEventListener('error', () => {
+    dot.textContent = '● reconnecting…';
+    dot.style.color = 'var(--text-muted)';
+  });
+  es.addEventListener('agent_activity', e => {
+    const d = JSON.parse(e.data);
+    appendLog(d.ts, d.agent_type, d.message, d.snap_name);
+  });
+  es.addEventListener('version_bump_update', e => {
+    const d = JSON.parse(e.data);
+    appendLog(now(), 'version_bump', `${d.snap_name} ${d.old_version}→${d.new_version} — ${d.status}`, d.snap_name);
+  });
+}
+
+/* ── Poll /api/agent-status ─────────────────────────────────── */
+async function pollStatus() {
+  try {
+    const r = await fetch('/api/agent-status');
+    if (!r.ok) return;
+    const d = await r.json();
+    updatePipeline(d.pipeline);
+    updateAgentCards(d.active_agents, d.schedules);
+    updateLemonade(d.lemonade);
+    updateHistory(d.history);
+  } catch (_) {}
+}
+
+/* ── Pipeline ───────────────────────────────────────────────── */
+function updatePipeline(p) {
+  setCount('count-releases', p.new_releases);
+  setCount('count-prs',      p.prs_open);
+  setCount('count-yarf',     p.yarf_running);
+  setCount('count-review',   p.under_review);
+  setCount('count-approved', p.approved);
+  setCount('count-merged',   p.merged);
+
+  // Animate arrows when the destination stage has work
+  setArrow('arrow-0', p.prs_open > 0);
+  setArrow('arrow-1', p.yarf_running > 0);
+  setArrow('arrow-2', p.under_review > 0);
+  setArrow('arrow-3', p.approved > 0);
+  setArrow('arrow-4', p.merged > 0);
+
+  // Highlight active stages
+  highlightStage('stage-releases', p.new_releases > 0);
+  highlightStage('stage-prs',      p.prs_open > 0);
+  highlightStage('stage-yarf',     p.yarf_running > 0);
+  highlightStage('stage-review',   p.under_review > 0);
+  highlightStage('stage-approved', p.approved > 0);
+  highlightStage('stage-merged',   p.merged > 0);
+}
+
+function setCount(id, n) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = n === 0 ? '—' : n;
+}
+
+function setArrow(id, active) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('arrow-active', active);
+}
+
+function highlightStage(id, active) {
+  const el = document.getElementById(id);
+  if (el) el.classList.toggle('stage-active', active);
+}
+
+/* ── Agent cards ────────────────────────────────────────────── */
+const AGENT_COLORS = {
+  release_scanner:    '#7c6af9',
+  version_bumper:     '#38bd82',
+  pr_monitor:         '#f5a623',
+  screenshot_reviewer:'#52b6ff',
+};
+
+function updateAgentCards(active, schedules) {
+  const types = ['release_scanner','version_bumper','pr_monitor','screenshot_reviewer'];
+
+  // Build schedule lookup
+  const schedMap = {};
+  (schedules || []).forEach(s => { schedMap[s.agent_type] = s; });
+
+  types.forEach(type => {
+    const isActive = type in active;
+    const card  = document.getElementById('card-' + type);
+    const dot   = document.getElementById('dot-' + type);
+    const task  = document.getElementById('task-' + type);
+    const badge = document.getElementById('badge-' + type);
+    const sched = document.getElementById('sched-' + type);
+    const thinking = document.getElementById('thinking-' + type);
+
+    if (!card) return;
+
+    // Active state
+    card.classList.toggle('agent-running', isActive);
+    if (dot) {
+      dot.style.background = isActive ? AGENT_COLORS[type] : '#3a3f52';
+      dot.classList.toggle('dot-pulse', isActive);
+    }
+    if (task) task.textContent = isActive ? (active[type].task || 'Running…') : 'Idle';
+    if (badge) {
+      badge.textContent = isActive ? 'RUNNING' : 'IDLE';
+      badge.style.color = isActive ? AGENT_COLORS[type] : 'var(--text-muted)';
+    }
+
+    // Lemonade inference indicator
+    if (thinking) {
+      const inferencing = isActive && (active[type].task || '').includes('⚡');
+      thinking.style.display = inferencing ? 'flex' : 'none';
+    }
+
+    // Schedule countdown
+    if (sched && schedMap[type]) {
+      const sec = schedMap[type].next_run_in_seconds;
+      sched.textContent = sec < 120 ? `next run in ${sec}s` :
+                          sec < 3600 ? `next run in ${Math.round(sec/60)}m` :
+                          `next run in ${(sec/3600).toFixed(1)}h`;
+    }
+  });
+}
+
+/* ── Lemonade hero ──────────────────────────────────────────── */
+function updateLemonade(lem) {
+  const orb  = document.getElementById('lemonade-orb');
+  const text = document.getElementById('lemonade-status-text');
+  if (!orb || !text) return;
+
+  if (lem.inferencing) {
+    orb.className = 'lemonade-orb orb-inferencing';
+    text.textContent = '⚡ INFERENCE ACTIVE';
+    text.style.color = '#52b6ff';
+  } else if (lem.available) {
+    orb.className = 'lemonade-orb orb-connected';
+    text.textContent = `Connected · ${lem.model}`;
+    text.style.color = '#38bd82';
+  } else {
+    orb.className = 'lemonade-orb orb-offline';
+    text.textContent = 'Offline — start lemonade-server';
+    text.style.color = 'var(--text-muted)';
+  }
+}
+
+/* ── History table ──────────────────────────────────────────── */
+function updateHistory(history) {
+  const container = document.getElementById('history-container');
+  if (!container || !history || !history.length) return;
+
+  const rows = history.map(r => {
+    const statusClass = r.status === 'done' ? 'badge-ok' :
+                        r.status === 'error' ? 'badge-fail' : 'badge-running';
+    const dur = r.duration_s !== null ? `${r.duration_s}s` : '…';
+    return `<tr>
+      <td><span class="agent-type-badge agent-${r.agent_type}">${r.agent_type.replace(/_/g,' ')}</span></td>
+      <td class="muted">${r.snap_name || '—'}</td>
+      <td><span class="badge ${statusClass}">${r.status}</span></td>
+      <td class="muted small" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(r.summary || '—')}</td>
+      <td class="muted small">${r.started_at}</td>
+      <td class="muted small">${dur}</td>
+    </tr>`;
+  }).join('');
+
+  container.innerHTML = `<div class="table-wrapper"><table class="snap-table">
+    <thead><tr><th>Agent</th><th>Snap</th><th>Status</th><th>Result</th><th>Started</th><th>Duration</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table></div>`;
+}
+
+/* ── Activity log ───────────────────────────────────────────── */
+const AGENT_GLYPHS = {
+  release_scanner: '🔍', version_bumper: '🔧',
+  pr_monitor: '👁', screenshot_reviewer: '⚡', version_bump: '🔀',
+};
+
+function appendLog(ts, agentType, message, snapName) {
+  const log = document.getElementById('activity-log');
+  const empty = document.getElementById('activity-empty');
+  if (empty) empty.style.display = 'none';
+
+  const glyph = AGENT_GLYPHS[agentType] || '•';
+  const color = AGENT_COLORS[agentType] || 'var(--text-muted)';
+  const lemonade = message.includes('⚡') || message.includes('Lemonade');
+
+  const entry = document.createElement('div');
+  entry.className = 'log-entry log-entry-new' + (lemonade ? ' log-entry-lemonade' : '');
+  entry.innerHTML =
+    `<span class="log-ts">${ts}</span>` +
+    `<span class="log-glyph">${glyph}</span>` +
+    `<span class="log-type" style="color:${color}">${agentType.replace(/_/g,' ')}</span>` +
+    `<span class="log-msg">${escHtml(message)}</span>` +
+    (snapName ? `<span class="log-snap">${escHtml(snapName)}</span>` : '');
+
+  log.insertBefore(entry, log.firstChild);
+  logCount++;
+
+  // Remove oldest entries beyond cap
+  while (log.children.length > MAX_LOG + 1) {
+    log.removeChild(log.lastChild);
+  }
+
+  // Fade in
+  requestAnimationFrame(() => entry.classList.remove('log-entry-new'));
+}
+
+function clearLog() {
+  const log = document.getElementById('activity-log');
+  while (log.children.length > 1) log.removeChild(log.lastChild);
+  const empty = document.getElementById('activity-empty');
+  if (empty) empty.style.display = '';
+}
+
+/* ── Lemonade test button ───────────────────────────────────── */
+async function testLemonade() {
+  const text = document.getElementById('lemonade-status-text');
+  if (text) text.textContent = 'Testing…';
+  try {
+    const r = await fetch('/agents/test-lemonade', {method:'POST'});
+    const d = await r.json();
+    updateLemonade(d);
+    if (d.available && d.models && d.models.length) {
+      appendLog(now(), 'screenshot_reviewer', `Lemonade connected — models: ${d.models.join(', ')}`, '');
+    } else if (!d.available) {
+      appendLog(now(), 'screenshot_reviewer', `Lemonade unavailable at ${d.url}`, '');
+    }
+  } catch (e) {
+    if (text) text.textContent = 'Connection failed';
+  }
+}
+
+/* ── Utilities ──────────────────────────────────────────────── */
+function now() {
+  return new Date().toTimeString().slice(0,8);
+}
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+{% endblock %}

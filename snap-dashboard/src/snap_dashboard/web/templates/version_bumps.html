@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+
+{% block title %}Version Bumps — snap-dashboard{% endblock %}
+
+{% block content %}
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">Version Bumps</h2>
+    <p class="text-muted">PRs created by the version bumper agent</p>
+  </div>
+  {% if actionable_count %}
+  <span class="badge badge-warn" style="font-size:13px;">{{ actionable_count }} awaiting action</span>
+  {% endif %}
+</div>
+
+{% if not groups %}
+<div class="card">
+  <div class="empty-state">
+    <p>No version bump PRs yet. The release scanner will create them automatically when new upstream versions are found.</p>
+    <a href="/agents" class="btn btn-secondary" style="margin-top:12px;">View Agent Activity</a>
+  </div>
+</div>
+{% endif %}
+
+{% for group in groups %}
+<div class="card" id="group-{{ group.status }}">
+  <div class="section-header-row">
+    <h3 class="section-label">
+      {% if group.status == 'agent_approved' %}✅{% endif %}
+      {% if group.status == 'needs_review' %}⚠️{% endif %}
+      {% if group.status == 'agent_rejected' %}❌{% endif %}
+      {{ group.label }} ({{ group.items | length }})
+    </h3>
+    {% if group.status == 'agent_approved' %}
+    <span class="text-muted small">Agent approved with high confidence — review before merging</span>
+    {% endif %}
+  </div>
+
+  <div class="bump-list">
+    {% for b in group.items %}
+    <div class="bump-row">
+      <div class="bump-info">
+        <a href="/snap/{{ b.snap_name }}" class="snap-link">{{ b.snap_name }}</a>
+        {% if b.part_name and b.part_name != b.snap_name %}
+        <span class="muted small">({{ b.part_name }})</span>
+        {% endif %}
+        <span class="version-arrow">{{ b.old_version or '?' }} → <strong>{{ b.new_version }}</strong></span>
+        {% if b.bot_pr_url %}
+        <a href="{{ b.bot_pr_url }}" target="_blank" rel="noopener" class="link-inline small">PR #{{ b.bot_pr_number }} ↗</a>
+        {% endif %}
+      </div>
+
+      <div class="bump-meta">
+        {% if b.agent_confidence is not none %}
+        <span class="text-muted small">{{ (b.agent_confidence * 100) | int }}% confident</span>
+        {% endif %}
+        {% if b.created_at %}
+        <span class="text-muted small">{{ b.created_at.strftime('%Y-%m-%d') }}</span>
+        {% endif %}
+      </div>
+
+      <div class="bump-actions">
+        <a href="/version-bumps/{{ b.id }}" class="btn btn-secondary btn-sm">Review</a>
+
+        {% if b.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
+        <form method="post" action="/version-bumps/{{ b.id }}/merge" style="display:inline;"
+              onsubmit="return confirm('Merge PR for {{ b.snap_name }} {{ b.new_version }}?')">
+          <button type="submit" class="btn btn-primary btn-sm">Merge</button>
+        </form>
+        <form method="post" action="/version-bumps/{{ b.id }}/reject" style="display:inline;"
+              onsubmit="return confirm('Close PR for {{ b.snap_name }}?')">
+          <button type="submit" class="btn-danger-sm">Reject</button>
+        </form>
+        {% endif %}
+
+        {% if b.status in ('agent_rejected', 'yarf_failed') %}
+        <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" style="display:inline;">
+          <button type="submit" class="btn btn-secondary btn-sm">Re-run YARF</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+
+    {% if b.agent_reasoning and b.status in ('agent_approved', 'agent_rejected', 'needs_review') %}
+    <div class="bump-reasoning">
+      <span class="text-muted small">{{ b.agent_reasoning[:200] }}{% if b.agent_reasoning | length > 200 %}…{% endif %}</span>
+    </div>
+    {% endif %}
+
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const es = new EventSource('/api/events');
+  es.addEventListener('version_bump_update', (e) => {
+    // Reload the page when a bump status changes so grouping stays accurate
+    window.location.reload();
+  });
+})();
+</script>
+{% endblock %}

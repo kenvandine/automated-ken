@@ -43,14 +43,41 @@ templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 @app.on_event("startup")
 async def on_startup() -> None:
-    """Initialise the database on startup."""
+    """Initialise the database and start background agents on startup."""
     init_db()
     logger.info("Database initialised.")
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
+    from snap_dashboard.agents.pr_monitor import PRMonitorAgent
+    from snap_dashboard.db.models import UserConfig
+    from snap_dashboard.db.session import get_session as _gs
+
+    runner = get_runner()
+
+    # Schedule the release scanner for every active user.
+    # fire_immediately=True kicks off the first scan within seconds so the
+    # dashboard populates without waiting for the full interval to elapse.
+    with _gs() as session:
+        configs = session.query(UserConfig).all()
+        for uc in configs:
+            interval = uc.agent_interval_hours or 4
+            runner.schedule_periodic(
+                ReleaseScannerAgent,
+                interval_hours=interval,
+                fire_immediately=True,
+                user_id=uc.user_id,
+            )
+
+    # PR monitor runs every 5 minutes regardless of user count.
+    runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
+    logger.info("Agent runner started.")
 
 
 # Import and include routers after app is created to avoid circular imports
 from snap_dashboard.web.routes import (  # noqa: E402
     admin,
+    agents,
     auth,
     dashboard,
     docs,
@@ -58,13 +85,16 @@ from snap_dashboard.web.routes import (  # noqa: E402
     settings,
     snaps,
     testing,
+    version_bumps,
 )
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+app.include_router(agents.router)
 app.include_router(dashboard.router)
 app.include_router(docs.router)
 app.include_router(onboarding.router)
 app.include_router(snaps.router)
 app.include_router(settings.router)
 app.include_router(testing.router)
+app.include_router(version_bumps.router)

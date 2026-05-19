@@ -57,6 +57,12 @@ def get_user_config(user_id: int) -> "UserConfigView":
                 snapcraft_macaroon=uc.snapcraft_macaroon or "",
                 auto_test=uc.auto_test,
                 collect_interval_hours=uc.collect_interval_hours,
+                lemonade_server_url=uc.lemonade_server_url or "",
+                lemonade_model=uc.lemonade_model or "",
+                bot_github_token=uc.bot_github_token or "",
+                bot_github_login=uc.bot_github_login or "",
+                agent_interval_hours=uc.agent_interval_hours or 4,
+                auto_merge=uc.auto_merge or False,
             )
         return UserConfigView()
 
@@ -72,6 +78,12 @@ class UserConfigView:
         snapcraft_macaroon: str = "",
         auto_test: bool = False,
         collect_interval_hours: int = 6,
+        lemonade_server_url: str = "",
+        lemonade_model: str = "",
+        bot_github_token: str = "",
+        bot_github_login: str = "",
+        agent_interval_hours: int = 4,
+        auto_merge: bool = False,
     ) -> None:
         self.publisher = publisher
         self.github_token = github_token
@@ -79,6 +91,12 @@ class UserConfigView:
         self.snapcraft_macaroon = snapcraft_macaroon
         self.auto_test = auto_test
         self.collect_interval_hours = collect_interval_hours
+        self.lemonade_server_url = lemonade_server_url
+        self.lemonade_model = lemonade_model
+        self.bot_github_token = bot_github_token
+        self.bot_github_login = bot_github_login
+        self.agent_interval_hours = agent_interval_hours
+        self.auto_merge = auto_merge
 
     def to_config(self) -> Config:
         """Return a Config object populated from this user config."""
