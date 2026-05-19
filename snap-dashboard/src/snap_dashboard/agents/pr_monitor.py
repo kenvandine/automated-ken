@@ -1,8 +1,9 @@
-"""PR monitor agent — polls version-bump PRs for CI and YARF status."""
+"""PR monitor agent — polls version-bump PRs for CI, YARF, and auto-merge."""
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 
 import httpx
 
@@ -16,7 +17,7 @@ logger = logging.getLogger(__name__)
 _GH_API = "https://api.github.com"
 
 # Statuses that mean "still waiting for something"
-_IN_FLIGHT = {"open", "ci_pending", "ci_passed", "yarf_running"}
+_IN_FLIGHT = {"open", "ci_pending", "ci_passed", "yarf_running", "agent_approved"}
 
 
 def _gh_headers(token: str) -> dict[str, str]:
@@ -29,12 +30,18 @@ def _gh_headers(token: str) -> dict[str, str]:
 class PRMonitorAgent(BaseAgent):
     """Polls all in-flight VersionBumpPRs across all users and advances their status.
 
-    - open → ci_pending: when a CI run is found for the PR
-    - ci_pending → ci_passed/ci_failed: when the CI run concludes
-    - ci_passed → yarf_running: triggers YARF test automatically
-    - yarf_running → yarf_passed/yarf_failed: via existing TestRun sync
-    - yarf_passed/yarf_failed → agent_approved/agent_rejected/needs_review:
-        triggers ScreenshotReviewerAgent
+    State machine transitions:
+
+    - open            → ci_pending       when a CI check run appears
+    - ci_pending      → ci_passed/failed when all checks conclude
+    - ci_passed       → yarf_running     triggers YARF test automatically
+    - yarf_running    → yarf_passed/failed via existing TestRun sync
+    - yarf_*/needs_rv → agent_approved/rejected/needs_review
+                        spawns ScreenshotReviewerAgent
+    - agent_approved  → merged           when UserConfig.auto_merge is True
+
+    Also syncs PRs that were closed or merged directly on GitHub so the DB
+    never gets stuck in a stale state.
     """
 
     agent_type = "pr_monitor"
@@ -91,18 +98,54 @@ class PRMonitorAgent(BaseAgent):
             return False
 
         if status == "open":
+            # Always check whether the PR was closed/merged on GitHub first.
+            if self._check_pr_closed(pr, owner, repo, token):
+                return True
             return self._check_ci_start(pr, owner, repo, token)
         if status == "ci_pending":
+            if self._check_pr_closed(pr, owner, repo, token):
+                return True
             return self._check_ci_complete(pr, owner, repo, token)
         if status == "ci_passed":
             return self._trigger_yarf(pr, uc)
         if status == "yarf_running":
             return self._check_yarf(pr)
+        if status == "agent_approved":
+            return self._check_auto_merge(pr, uc, owner, repo, token)
         return False
 
     # ------------------------------------------------------------------
     # State transitions
     # ------------------------------------------------------------------
+
+    def _check_pr_closed(self, pr: dict, owner: str, repo: str, token: str) -> bool:
+        """Detect PRs closed or merged on GitHub and sync the DB status.
+
+        Returns True if the status was updated.
+        """
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.get(
+                    f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr['bot_pr_number']}",
+                    headers=_gh_headers(token),
+                )
+            if resp.status_code != 200:
+                return False
+            data = resp.json()
+            if data.get("merged"):
+                _update_pr_status_merged(pr["id"])
+                snap_name = _snap_name_from_id(pr["snap_id"]) or "?"
+                logger.info(
+                    "pr_monitor: PR #%s for %s was merged on GitHub — syncing",
+                    pr["bot_pr_number"], snap_name,
+                )
+                return True
+            if data.get("state") == "closed":
+                _update_pr_status(pr["id"], "closed")
+                return True
+        except Exception as exc:
+            logger.debug("_check_pr_closed failed for PR %s: %s", pr["id"], exc)
+        return False
 
     def _check_ci_start(self, pr: dict, owner: str, repo: str, token: str) -> bool:
         """open → ci_pending when a check run exists for the PR."""
@@ -174,6 +217,48 @@ class PRMonitorAgent(BaseAgent):
         self._spawn_reviewer(pr)
         return True
 
+    def _check_auto_merge(self, pr: dict, uc, owner: str, repo: str, token: str) -> bool:
+        """agent_approved → merged when UserConfig.auto_merge is enabled.
+
+        Uses the user's primary GitHub token (not the bot token) to merge,
+        so the merge appears under the maintainer's account.
+        """
+        if not uc or not getattr(uc, "auto_merge", False):
+            return False
+        if not token:
+            return False
+        if not pr["bot_pr_number"]:
+            return False
+
+        snap_name = _snap_name_from_id(pr["snap_id"]) or "?"
+        self._report(
+            f"Auto-merging {snap_name} {pr['new_version']} (agent approved)…",
+            snap_name,
+        )
+
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.put(
+                    f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr['bot_pr_number']}/merge",
+                    headers=_gh_headers(token),
+                    json={"merge_method": "squash"},
+                )
+            if resp.status_code in (200, 201):
+                _update_pr_status_merged(pr["id"])
+                logger.info(
+                    "pr_monitor: auto-merged PR #%s for %s %s→%s",
+                    pr["bot_pr_number"], snap_name,
+                    pr["old_version"], pr["new_version"],
+                )
+                return True
+            logger.warning(
+                "pr_monitor: auto-merge failed for PR %s: %s %s",
+                pr["id"], resp.status_code, resp.text[:200],
+            )
+        except Exception as exc:
+            logger.warning("pr_monitor: auto-merge error for PR %s: %s", pr["id"], exc)
+        return False
+
     def _spawn_reviewer(self, pr: dict) -> None:
         from snap_dashboard.agents.screenshot_reviewer import ScreenshotReviewerAgent
         from snap_dashboard.agents.runner import get_runner
@@ -194,6 +279,14 @@ def _update_pr_status(pr_id: int, status: str) -> None:
         bump = session.query(VersionBumpPR).get(pr_id)
         if bump:
             bump.status = status
+
+
+def _update_pr_status_merged(pr_id: int) -> None:
+    with get_session() as session:
+        bump = session.query(VersionBumpPR).get(pr_id)
+        if bump:
+            bump.status = "merged"
+            bump.merged_at = datetime.now(timezone.utc)
 
 
 def _get_pr_check_runs(owner: str, repo: str, pr_number: int, token: str) -> list[dict]:

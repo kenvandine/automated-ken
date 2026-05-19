@@ -61,7 +61,7 @@ class VersionBumperAgent(BaseAgent):
         if self._open_pr_exists():
             return (
                 f"skipped {self.snap_name}/{self.part_name}: "
-                f"open version bump PR already exists"
+                f"open version bump PR already exists for this part"
             )
 
         repo_slug = _extract_slug(self.packaging_repo)
@@ -160,16 +160,24 @@ class VersionBumperAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _open_pr_exists(self) -> bool:
+        """Return True if any in-flight PR already exists for this snap+part.
+
+        Checks via the UpstreamRelease join so we catch PRs for different
+        versions of the same part (e.g. a v1.1 PR still open when v1.2
+        arrives).
+        """
         with get_session() as session:
-            return bool(
+            existing = (
                 session.query(VersionBumpPR)
+                .join(VersionBumpPR.upstream_release)
                 .filter(
                     VersionBumpPR.snap_id == self.snap_id,
-                    VersionBumpPR.new_version == self.new_version,
                     VersionBumpPR.status.notin_(["merged", "closed"]),
+                    UpstreamRelease.part_name == self.part_name,
                 )
                 .first()
             )
+            return bool(existing)
 
     def _build_pr_text(self, uc) -> tuple[str, str]:
         default_title = f"chore: update {self.part_name} to {self.new_version}"

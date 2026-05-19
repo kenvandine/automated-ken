@@ -82,6 +82,8 @@ class AgentRunner:
         runner = get_runner()
         runner.submit(MyAgent(user_id=1))
         runner.schedule_periodic(ReleaseScannerAgent, interval_hours=4, user_id=1)
+        runner.schedule_periodic(ReleaseScannerAgent, interval_hours=4,
+                                  fire_immediately=True, user_id=1)
     """
 
     def __init__(self) -> None:
@@ -120,17 +122,35 @@ class AgentRunner:
         self,
         agent_cls: type,
         interval_hours: float,
+        fire_immediately: bool = False,
         **kwargs,
     ) -> None:
         """Register an agent class to run every ``interval_hours`` hours.
 
         ``kwargs`` are forwarded to the agent constructor on each invocation.
+        When ``fire_immediately`` is True the agent is submitted for execution
+        right away instead of waiting for the first full interval to elapse.
         """
-        job = _PeriodicJob(agent_cls=agent_cls, interval_hours=interval_hours, kwargs=kwargs)
+        job = _PeriodicJob(
+            agent_cls=agent_cls,
+            interval_hours=interval_hours,
+            kwargs=kwargs,
+            fire_immediately=fire_immediately,
+        )
         self._scheduled.append(job)
         logger.info(
-            "scheduled %s every %.1fh", agent_cls.__name__, interval_hours
+            "scheduled %s every %.1fh%s",
+            agent_cls.__name__,
+            interval_hours,
+            " (firing immediately)" if fire_immediately else "",
         )
+        if fire_immediately:
+            try:
+                agent = agent_cls(**kwargs)
+                self._executor.submit(_safe_run, agent)
+            except Exception as exc:
+                logger.error("failed to submit immediate %s: %s", agent_cls.__name__, exc)
+
         if self._scheduler_thread is None or not self._scheduler_thread.is_alive():
             self._start_scheduler()
 
@@ -176,11 +196,21 @@ class AgentRunner:
 
 
 class _PeriodicJob:
-    def __init__(self, agent_cls: type, interval_hours: float, kwargs: dict) -> None:
+    def __init__(
+        self,
+        agent_cls: type,
+        interval_hours: float,
+        kwargs: dict,
+        fire_immediately: bool = False,
+    ) -> None:
         self.agent_cls = agent_cls
         self.interval_seconds = interval_hours * 3600
         self.kwargs = kwargs
-        # Set last_run so the first execution fires after one full interval.
+        # When fire_immediately=True the first submission is done inline by
+        # schedule_periodic(); set last_run to now so the scheduler doesn't
+        # double-fire before the interval elapses.
+        # When fire_immediately=False, also start from now so the first
+        # scheduled run fires after one full interval (original behaviour).
         self.last_run = time.monotonic()
 
 

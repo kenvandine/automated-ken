@@ -55,15 +55,21 @@ async def on_startup() -> None:
 
     runner = get_runner()
 
-    # Schedule agents for every active user.
+    # Schedule the release scanner for every active user.
+    # fire_immediately=True kicks off the first scan within seconds so the
+    # dashboard populates without waiting for the full interval to elapse.
     with _gs() as session:
         configs = session.query(UserConfig).all()
         for uc in configs:
             interval = uc.agent_interval_hours or 4
             runner.schedule_periodic(
-                ReleaseScannerAgent, interval_hours=interval, user_id=uc.user_id
+                ReleaseScannerAgent,
+                interval_hours=interval,
+                fire_immediately=True,
+                user_id=uc.user_id,
             )
-    # PR monitor runs every 5 minutes regardless of users.
+
+    # PR monitor runs every 5 minutes regardless of user count.
     runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
     logger.info("Agent runner started.")
 
