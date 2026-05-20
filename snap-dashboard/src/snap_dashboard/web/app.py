@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
-app = FastAPI(title="snap-dashboard", docs_url=None, redoc_url=None)
+app = FastAPI(title="Automated Ken", docs_url=None, redoc_url=None)
 
 # Session middleware — secret read from env or auto-generated.
 # The full config.py (which reads config.env) is not used here to avoid
