@@ -23,6 +23,9 @@ _GH_API = "https://api.github.com"
 
 # Statuses in priority display order
 _STATUS_GROUPS = [
+    ("stable_promoted", "Stable Promoted"),
+    ("promoting", "Promoting to Stable"),
+    ("promotion_failed", "Promotion Failed"),
     ("agent_approved", "Agent Approved"),
     ("needs_review", "Needs Your Review"),
     ("agent_rejected", "Agent Rejected"),
@@ -64,7 +67,9 @@ async def version_bumps_page(request: Request) -> HTMLResponse:
 
     # Count summary for nav badge
     actionable = sum(
-        1 for b in bump_list if b["status"] in ("agent_approved", "needs_review")
+        1
+        for b in bump_list
+        if b["status"] in ("agent_approved", "needs_review", "promotion_failed")
     )
 
     return templates.TemplateResponse(
@@ -267,7 +272,9 @@ def _serialise_comp(c: ScreenshotComparison) -> dict:
     return {
         "id": c.id,
         "baseline_url": c.baseline_url or "",
+        "baseline_image_b64": c.baseline_image_b64 or "",
         "new_url": c.new_url or "",
+        "new_image_b64": c.new_image_b64 or "",
         "decision": c.decision or "",
         "confidence": c.confidence,
         "reasoning": c.reasoning or "",

@@ -122,7 +122,7 @@
           <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-green">passed</a>
           {% elif run.status == 'failed' %}
           <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-red">failed</a>
-          {% elif run.status in ('pending', 'triggered', 'running') %}
+          {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
           <span class="badge badge-amber js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
           {% if run.gh_run_id %}
           <a href="https://github.com/{{ config.testing_repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>

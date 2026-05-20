@@ -81,8 +81,8 @@ async def agent_status(request: Request) -> JSONResponse:
             "prs_open": _bump_count("open", "ci_pending", "ci_passed", "ci_failed"),
             "yarf_running": _bump_count("yarf_running"),
             "under_review": _bump_count("yarf_passed", "yarf_failed", "needs_review"),
-            "approved": _bump_count("agent_approved"),
-            "merged": _bump_count("merged"),
+            "approved": _bump_count("agent_approved", "promoting"),
+            "merged": _bump_count("merged", "stable_promoted"),
         }
 
         # Recent agent run history (last 20)

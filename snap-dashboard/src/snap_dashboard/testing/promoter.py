@@ -90,3 +90,42 @@ def close_test_pr(
             client.patch(pr_url, json={"state": "closed"}, headers=headers)
     except Exception as exc:
         logger.warning("Failed to close test PR #%s: %s", pr_number, exc)
+
+
+def merge_packaging_pr(packaging_repo: str, pr_number: int, token: str) -> bool:
+    """Merge a packaging PR using the maintainer's token."""
+    if not token or not packaging_repo or not pr_number:
+        return False
+
+    owner, _, repo = _extract_slug(packaging_repo).partition("/")
+    if not repo:
+        return False
+
+    import httpx
+
+    _GH_API = "https://api.github.com"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "Authorization": f"Bearer {token}",
+    }
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.put(
+                f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}/merge",
+                json={"merge_method": "squash"},
+                headers=headers,
+            )
+        return resp.status_code in (200, 201)
+    except Exception as exc:
+        logger.warning("Failed to merge packaging PR #%s: %s", pr_number, exc)
+        return False
+
+
+def _extract_slug(repo: str) -> str:
+    repo = repo.strip()
+    if repo.startswith("https://github.com/"):
+        repo = repo[len("https://github.com/"):]
+    elif repo.startswith("http://github.com/"):
+        repo = repo[len("http://github.com/"):]
+    return repo.rstrip("/").rstrip(".git")

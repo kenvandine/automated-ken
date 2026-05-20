@@ -63,6 +63,8 @@ def get_user_config(user_id: int) -> "UserConfigView":
                 bot_github_login=uc.bot_github_login or "",
                 agent_interval_hours=uc.agent_interval_hours or 4,
                 auto_merge=uc.auto_merge or False,
+                auto_promote=uc.auto_promote or False,
+                auto_promote_confidence=uc.auto_promote_confidence or 0.85,
             )
         return UserConfigView()
 
@@ -84,6 +86,8 @@ class UserConfigView:
         bot_github_login: str = "",
         agent_interval_hours: int = 4,
         auto_merge: bool = False,
+        auto_promote: bool = False,
+        auto_promote_confidence: float = 0.85,
     ) -> None:
         self.publisher = publisher
         self.github_token = github_token
@@ -97,6 +101,8 @@ class UserConfigView:
         self.bot_github_login = bot_github_login
         self.agent_interval_hours = agent_interval_hours
         self.auto_merge = auto_merge
+        self.auto_promote = auto_promote
+        self.auto_promote_confidence = auto_promote_confidence
 
     def to_config(self) -> Config:
         """Return a Config object populated from this user config."""

@@ -64,6 +64,8 @@ def _migrate() -> None:
         "ALTER TABLE user_configs ADD COLUMN bot_github_login VARCHAR(255)",
         "ALTER TABLE user_configs ADD COLUMN agent_interval_hours INTEGER DEFAULT 4",
         "ALTER TABLE user_configs ADD COLUMN auto_merge BOOLEAN DEFAULT 0",
+        "ALTER TABLE user_configs ADD COLUMN auto_promote BOOLEAN DEFAULT 0",
+        "ALTER TABLE user_configs ADD COLUMN auto_promote_confidence FLOAT DEFAULT 0.85",
         # Stale rebuild settings
         "ALTER TABLE user_configs ADD COLUMN auto_rebuild_stale BOOLEAN DEFAULT 0",
         "ALTER TABLE user_configs ADD COLUMN stale_build_days INTEGER DEFAULT 30",

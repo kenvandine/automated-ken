@@ -178,6 +178,8 @@ def trigger_workflow(
         return False, f"Invalid testing_repo format: {testing_repo!r} (expected owner/repo)", None
 
     # Persist a TestRun record first so we have a run_id to pass as an input.
+    auto_promote_run_ids: set[int] = set()
+
     with get_session() as session:
         run = TestRun(
             snap_name=snap_name,
@@ -315,6 +317,8 @@ def poll_for_gh_run_id(
                 if new_status in ("passed", "failed"):
                     db_run.finished_at = datetime.now(timezone.utc)
         if new_status in ("passed", "failed"):
+            if new_status == "passed":
+                _maybe_submit_auto_promoter(db_run_id)
             logger.info("poll_for_gh_run_id: run %s finished as %s", gh_run_id, new_status)
             return
 
@@ -417,6 +421,8 @@ def sync_test_runs(
 
             if gh_status in ("passed", "failed"):
                 run.finished_at = datetime.now(timezone.utc)
+                if gh_status == "passed" and not run.promoted:
+                    auto_promote_run_ids.add(run.id)
 
         # Create stubs for externally-triggered PRs we have no record for
         q2 = session.query(TestRun)
@@ -453,3 +459,31 @@ def sync_test_runs(
             if new_run.status in ("passed", "failed"):
                 new_run.finished_at = datetime.now(timezone.utc)
             session.add(new_run)
+            session.flush()
+            if new_run.status == "passed" and not new_run.promoted:
+                auto_promote_run_ids.add(new_run.id)
+
+    for run_id in sorted(auto_promote_run_ids):
+        _maybe_submit_auto_promoter(run_id)
+
+
+def _maybe_submit_auto_promoter(test_run_id: int) -> None:
+    """Queue candidate auto-promotion for a passed test run when configured."""
+    with get_session() as session:
+        run = session.query(TestRun).get(test_run_id)
+        if not run or run.promoted or run.status != "passed" or run.from_channel != "candidate":
+            return
+        user_id = run.user_id
+        if user_id is None:
+            return
+        run.status = "reviewing"
+
+    from snap_dashboard.auth import get_user_config
+    uc = get_user_config(user_id)
+    if not getattr(uc, "auto_promote", False):
+        return
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.test_run_auto_promoter import TestRunAutoPromoterAgent
+
+    get_runner().submit(TestRunAutoPromoterAgent(test_run_id=test_run_id, user_id=user_id))

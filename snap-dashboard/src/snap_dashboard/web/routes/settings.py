@@ -84,6 +84,8 @@ async def settings_post(
     bot_github_login: str = Form(default=""),
     agent_interval_hours: int = Form(default=4),
     auto_merge: str = Form(default=""),
+    auto_promote: str = Form(default=""),
+    auto_promote_confidence: float = Form(default=0.85),
     auto_rebuild_stale: str = Form(default=""),
     stale_build_days: int = Form(default=30),
 ) -> RedirectResponse:
@@ -95,6 +97,7 @@ async def settings_post(
     user_id = user["id"]
     _auto_test = auto_test in ("1", "true", "on", "yes")
     _auto_merge = auto_merge in ("1", "true", "on", "yes")
+    _auto_promote = auto_promote in ("1", "true", "on", "yes")
     _auto_rebuild_stale = auto_rebuild_stale in ("1", "true", "on", "yes")
 
     with get_session() as session:
@@ -120,6 +123,8 @@ async def settings_post(
             uc.bot_github_login = bot_github_login.strip()
         uc.agent_interval_hours = agent_interval_hours
         uc.auto_merge = _auto_merge
+        uc.auto_promote = _auto_promote
+        uc.auto_promote_confidence = max(0.0, min(1.0, auto_promote_confidence))
         uc.auto_rebuild_stale = _auto_rebuild_stale
         uc.stale_build_days = max(1, stale_build_days)
 

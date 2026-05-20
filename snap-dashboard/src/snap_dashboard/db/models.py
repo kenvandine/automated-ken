@@ -86,6 +86,8 @@ class UserConfig(Base):
     bot_github_login = Column(String(255), nullable=True)
     agent_interval_hours = Column(Integer, default=4, nullable=False)
     auto_merge = Column(Boolean, default=False, nullable=False)
+    auto_promote = Column(Boolean, default=False, nullable=False)
+    auto_promote_confidence = Column(Float, default=0.85, nullable=False)
     # Stale rebuild settings
     auto_rebuild_stale = Column(Boolean, default=False, nullable=False)
     stale_build_days = Column(Integer, default=30, nullable=False)
@@ -225,7 +227,7 @@ class TestRun(Base):
     from_channel = Column(String(64), nullable=False)  # 'candidate', 'edge'
     version = Column(String(128), nullable=True)
     revision = Column(Integer, nullable=True)
-    # statuses: pending, triggered, running, passed, failed, error, promoted
+    # statuses: pending, triggered, running, reviewing, passed, failed, error, promoted
     status = Column(String(32), nullable=False, default="pending")
     gh_run_id = Column(String(128), nullable=True)  # GitHub Actions run ID
     pr_number = Column(Integer, nullable=True)
@@ -247,6 +249,47 @@ class TestRun(Base):
 # ---------------------------------------------------------------------------
 # Agentic models
 # ---------------------------------------------------------------------------
+
+
+class StableScreenshotBaseline(Base):
+    """Durable last-known-good screenshots from the last promoted stable run."""
+
+    __tablename__ = "stable_screenshot_baselines"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "snap_name",
+            "architecture",
+            "image_name",
+            name="uq_stable_baseline_image",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
+    snap_name = Column(String(255), nullable=False)
+    architecture = Column(String(32), nullable=False, default="amd64")
+    image_name = Column(String(500), nullable=False)
+    image_url = Column(Text, nullable=True)
+    image_b64 = Column(Text, nullable=False)
+    source_test_run_id = Column(
+        Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    source_version = Column(String(128), nullable=True)
+    source_revision = Column(Integer, nullable=True)
+    promoted_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+    user = relationship("User")
+    source_test_run = relationship("TestRun")
+
+    def __repr__(self) -> str:
+        return (
+            f"<StableScreenshotBaseline snap={self.snap_name!r}"
+            f" arch={self.architecture!r} image={self.image_name!r}>"
+        )
 
 
 class AgentRun(Base):

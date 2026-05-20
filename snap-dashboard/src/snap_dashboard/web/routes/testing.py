@@ -391,11 +391,13 @@ async def promote_snap_route(
     user_id = user["id"]
     uc = get_user_config(user_id)
 
+    from snap_dashboard.testing.baselines import persist_stable_baseline_for_run
     from snap_dashboard.testing.promoter import close_test_pr, promote_snap
 
     ok, output = promote_snap(snap_name, revision, to_channel)
 
     version = ""
+    run_id: int | None = None
     with get_session() as session:
         run_orm = (
             session.query(TestRun)
@@ -404,6 +406,7 @@ async def promote_snap_route(
         )
         if ok:
             if run_orm:
+                run_id = run_orm.id
                 version = run_orm.version or ""
                 run_orm.status = "promoted"
                 run_orm.promoted = True
@@ -413,6 +416,14 @@ async def promote_snap_route(
                 run_orm.error_msg = output[:500]
 
     if ok:
+        if run_id and uc.testing_repo:
+            persist_stable_baseline_for_run(run_id, uc.testing_repo, uc.github_token)
+            with get_session() as session:
+                from snap_dashboard.db.models import VersionBumpPR
+
+                bump = session.query(VersionBumpPR).filter_by(test_run_id=run_id).first()
+                if bump:
+                    bump.status = "stable_promoted"
         if uc.testing_repo:
             close_test_pr(
                 uc.testing_repo,

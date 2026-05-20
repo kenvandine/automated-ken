@@ -27,6 +27,9 @@
 <div class="card" id="group-{{ group.status }}">
   <div class="section-header-row">
     <h3 class="section-label">
+      {% if group.status == 'stable_promoted' %}🚀{% endif %}
+      {% if group.status == 'promoting' %}⏳{% endif %}
+      {% if group.status == 'promotion_failed' %}🛑{% endif %}
       {% if group.status == 'agent_approved' %}✅{% endif %}
       {% if group.status == 'needs_review' %}⚠️{% endif %}
       {% if group.status == 'agent_rejected' %}❌{% endif %}
@@ -63,7 +66,7 @@
       <div class="bump-actions">
         <a href="/version-bumps/{{ b.id }}" class="btn btn-secondary btn-sm">Review</a>
 
-        {% if b.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
+        {% if b.status in ('agent_approved', 'needs_review', 'yarf_passed', 'stable_promoted') %}
         <form method="post" action="/version-bumps/{{ b.id }}/merge" style="display:inline;"
               onsubmit="return confirm('Merge PR for {{ b.snap_name }} {{ b.new_version }}?')">
           <button type="submit" class="btn btn-primary btn-sm">Merge</button>
@@ -74,7 +77,7 @@
         </form>
         {% endif %}
 
-        {% if b.status in ('agent_rejected', 'yarf_failed') %}
+        {% if b.status in ('agent_rejected', 'yarf_failed', 'promotion_failed') %}
         <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" style="display:inline;">
           <button type="submit" class="btn btn-secondary btn-sm">Re-run YARF</button>
         </form>
@@ -82,7 +85,7 @@
       </div>
     </div>
 
-    {% if b.agent_reasoning and b.status in ('agent_approved', 'agent_rejected', 'needs_review') %}
+    {% if b.agent_reasoning and b.status in ('agent_approved', 'agent_rejected', 'needs_review', 'stable_promoted', 'promoting', 'promotion_failed') %}
     <div class="bump-reasoning">
       <span class="text-muted small">{{ b.agent_reasoning[:200] }}{% if b.agent_reasoning | length > 200 %}…{% endif %}</span>
     </div>

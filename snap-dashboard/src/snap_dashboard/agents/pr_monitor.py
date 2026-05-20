@@ -36,8 +36,8 @@ class PRMonitorAgent(BaseAgent):
     - ci_pending      → ci_passed/failed when all checks conclude
     - ci_passed       → yarf_running     triggers YARF test automatically
     - yarf_running    → yarf_passed/failed via existing TestRun sync
-    - yarf_*/needs_rv → agent_approved/rejected/needs_review
-                        spawns ScreenshotReviewerAgent
+    - yarf_*/needs_rv → agent_approved/rejected/needs_review/promoting
+                         spawns ScreenshotReviewerAgent
     - agent_approved  → merged           when UserConfig.auto_merge is True
 
     Also syncs PRs that were closed or merged directly on GitHub so the DB
@@ -236,27 +236,16 @@ class PRMonitorAgent(BaseAgent):
             snap_name,
         )
 
-        try:
-            with httpx.Client(timeout=15) as client:
-                resp = client.put(
-                    f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr['bot_pr_number']}/merge",
-                    headers=_gh_headers(token),
-                    json={"merge_method": "squash"},
-                )
-            if resp.status_code in (200, 201):
-                _update_pr_status_merged(pr["id"])
-                logger.info(
-                    "pr_monitor: auto-merged PR #%s for %s %s→%s",
-                    pr["bot_pr_number"], snap_name,
-                    pr["old_version"], pr["new_version"],
-                )
-                return True
-            logger.warning(
-                "pr_monitor: auto-merge failed for PR %s: %s %s",
-                pr["id"], resp.status_code, resp.text[:200],
+        from snap_dashboard.testing.promoter import merge_packaging_pr
+
+        if merge_packaging_pr(pr["packaging_repo"], pr["bot_pr_number"], token):
+            _update_pr_status_merged(pr["id"])
+            logger.info(
+                "pr_monitor: auto-merged PR #%s for %s %s→%s",
+                pr["bot_pr_number"], snap_name,
+                pr["old_version"], pr["new_version"],
             )
-        except Exception as exc:
-            logger.warning("pr_monitor: auto-merge error for PR %s: %s", pr["id"], exc)
+            return True
         return False
 
     def _spawn_reviewer(self, pr: dict) -> None:

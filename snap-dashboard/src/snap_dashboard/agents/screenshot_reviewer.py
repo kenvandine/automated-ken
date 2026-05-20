@@ -4,27 +4,22 @@ from __future__ import annotations
 
 import logging
 
-import httpx
-
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import ScreenshotComparison, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
-from snap_dashboard.github.pr_viewer import get_pr_screenshot_urls
+from snap_dashboard.testing.baselines import (
+    ScreenshotAsset,
+    get_or_build_stable_baseline_assets,
+    load_test_run_screenshots,
+    pair_screenshots,
+)
 
 logger = logging.getLogger(__name__)
 
-_GH_API = "https://api.github.com"
-
 
 class ScreenshotReviewerAgent(BaseAgent):
-    """Compares YARF screenshots for a version bump using an LLM vision model.
-
-    Decision outcomes:
-      - approve    → sets VersionBumpPR.status = agent_approved
-      - reject     → sets VersionBumpPR.status = agent_rejected
-      - needs_review → sets VersionBumpPR.status = needs_review
-    """
+    """Compares YARF screenshots for a version bump using an LLM vision model."""
 
     agent_type = "screenshot_reviewer"
 
@@ -41,6 +36,7 @@ class ScreenshotReviewerAgent(BaseAgent):
     def _run(self) -> str:
         uc = get_user_config(self.user_id) if self.user_id else None
         token = (uc.github_token if uc else "") or ""
+        testing_repo = (uc.testing_repo if uc else "") or ""
 
         with get_session() as session:
             bump = session.query(VersionBumpPR).get(self.version_bump_pr_id)
@@ -51,58 +47,48 @@ class ScreenshotReviewerAgent(BaseAgent):
             old_version = bump.old_version or ""
             new_version = bump.new_version or ""
             test_run_id = self.test_run_id or bump.test_run_id
-            yarf_status = bump.status  # yarf_passed or yarf_failed
-
-        # Load test run details
-        pr_body = ""
-        pr_branch = ""
-        testing_repo = (uc.testing_repo if uc else "") or ""
-        with get_session() as session:
-            if test_run_id:
-                run = session.query(TestRun).get(test_run_id)
-                if run:
-                    pr_body = run.pr_body or ""
-                    pr_branch = f"test-results/{snap_name}/{run.gh_run_id}" if run.gh_run_id else ""
+            yarf_status = bump.status
+            run = session.query(TestRun).get(test_run_id) if test_run_id else None
+            architecture = (run.architecture if run and run.architecture else "amd64")
+            from_channel = (run.from_channel if run else "")
+            revision = run.revision if run else None
+            pr_number = run.pr_number if run else None
 
         self._report(f"Fetching YARF screenshots for {snap_name}…", snap_name)
-        new_screenshots: list[str] = []
-        if pr_body and testing_repo and token:
-            from snap_dashboard.github.pr_viewer import get_test_prs, parse_pr_metadata
-            try:
-                with get_session() as session:
-                    run = session.query(TestRun).get(test_run_id) if test_run_id else None
-                    if run and run.pr_number:
-                        new_screenshots = get_pr_screenshot_urls(
-                            testing_repo=testing_repo,
-                            pr_data={"number": run.pr_number, "body": pr_body},
-                            branch=pr_branch,
-                            token=token,
-                        )
-            except Exception as exc:
-                logger.warning("screenshot_reviewer: failed fetching new screenshots: %s", exc)
-
-        # Fetch baseline screenshots from the most recent passing TestRun for stable
-        baseline_screenshots: list[str] = []
-        if testing_repo and token:
-            baseline_screenshots = self._get_baseline_screenshots(
-                snap_name, testing_repo, token
+        new_screenshots = load_test_run_screenshots(testing_repo, pr_number, token)
+        baseline_screenshots: list[ScreenshotAsset] = []
+        if testing_repo:
+            baseline_screenshots = get_or_build_stable_baseline_assets(
+                self.user_id,
+                snap_name,
+                architecture,
+                testing_repo,
+                token,
             )
+        comparison_pairs = pair_screenshots(baseline_screenshots, new_screenshots)
 
-        # Decide: use LLM if available, else heuristic
         lemonade = self._get_lemonade(uc)
         decision_dict = None
 
-        if lemonade and new_screenshots and baseline_screenshots:
-            self._report(f"⚡ Lemonade AI comparing screenshots — {snap_name} {old_version}→{new_version}", snap_name)
-            decision_dict = self._llm_compare(
-                lemonade,
-                baseline_screenshots[0],
-                new_screenshots[0],
+        if lemonade and comparison_pairs:
+            self._report(
+                f"⚡ Lemonade AI comparing screenshots — {snap_name} {old_version}→{new_version}",
                 snap_name,
-                old_version,
-                new_version,
-                token,
             )
+            decisions = []
+            for baseline_asset, new_asset in comparison_pairs:
+                result = self._llm_compare(
+                    lemonade,
+                    baseline_asset,
+                    new_asset,
+                    snap_name,
+                    old_version,
+                    new_version,
+                )
+                if result:
+                    decisions.append(result)
+            if decisions:
+                decision_dict = _aggregate_decisions(decisions)
 
         if decision_dict is None:
             decision_dict = self._heuristic_decision(yarf_status, new_screenshots)
@@ -111,27 +97,45 @@ class ScreenshotReviewerAgent(BaseAgent):
         confidence = decision_dict["confidence"]
         reasoning = decision_dict["reasoning"]
 
-        # Map YARF failure to reject regardless
         if yarf_status == "yarf_failed" and decision == "approve":
             decision = "reject"
             reasoning = f"YARF tests failed. {reasoning}"
 
-        # Persist comparison record
+        representative_baseline = comparison_pairs[0][0] if comparison_pairs else (
+            baseline_screenshots[0] if baseline_screenshots else None
+        )
+        representative_new = comparison_pairs[0][1] if comparison_pairs else (
+            new_screenshots[0] if new_screenshots else None
+        )
+
         with get_session() as session:
             comp = ScreenshotComparison(
                 version_bump_pr_id=self.version_bump_pr_id,
                 test_run_id=test_run_id,
-                baseline_url=baseline_screenshots[0] if baseline_screenshots else None,
-                new_url=new_screenshots[0] if new_screenshots else None,
+                baseline_url=representative_baseline.image_url if representative_baseline else None,
+                baseline_image_b64=representative_baseline.image_b64 if representative_baseline else None,
+                new_url=representative_new.image_url if representative_new else None,
+                new_image_b64=representative_new.image_b64 if representative_new else None,
                 decision=decision,
                 confidence=confidence,
                 reasoning=reasoning,
-                llm_prompt="vision_compare" if lemonade and decision_dict else None,
+                llm_prompt="vision_compare" if lemonade and comparison_pairs else None,
             )
             session.add(comp)
 
-        # Update VersionBumpPR
         final_status = _decision_to_status(decision)
+        should_auto_promote = (
+            decision == "approve"
+            and yarf_status == "yarf_passed"
+            and bool(getattr(uc, "auto_promote", False))
+            and confidence >= float(getattr(uc, "auto_promote_confidence", 0.85) or 0.85)
+            and from_channel == "candidate"
+            and revision is not None
+            and test_run_id is not None
+        )
+        if should_auto_promote:
+            final_status = "promoting"
+
         with get_session() as session:
             bump = session.query(VersionBumpPR).get(self.version_bump_pr_id)
             if bump:
@@ -140,39 +144,44 @@ class ScreenshotReviewerAgent(BaseAgent):
                 bump.agent_reasoning = reasoning
                 bump.status = final_status
 
+        if should_auto_promote and test_run_id is not None:
+            from snap_dashboard.agents.runner import get_runner
+            from snap_dashboard.agents.stable_promoter import StablePromoterAgent
+
+            get_runner().submit(
+                StablePromoterAgent(
+                    version_bump_pr_id=self.version_bump_pr_id,
+                    test_run_id=test_run_id,
+                    user_id=self.user_id,
+                )
+            )
+
         logger.info(
             "screenshot_reviewer: %s → %s (confidence=%.2f)",
-            snap_name, decision, confidence,
+            snap_name,
+            decision,
+            confidence,
         )
         return f"{snap_name}: {decision} (confidence={confidence:.0%})"
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     def _llm_compare(
         self,
         lemonade,
-        baseline_url: str,
-        new_url: str,
+        baseline_asset: ScreenshotAsset,
+        new_asset: ScreenshotAsset,
         snap_name: str,
         old_version: str,
         new_version: str,
-        token: str,
     ) -> dict | None:
-        baseline_bytes = _download_image(baseline_url, token)
-        new_bytes = _download_image(new_url, token)
-        if not baseline_bytes or not new_bytes:
-            return None
         return lemonade.vision_compare(
-            baseline_bytes=baseline_bytes,
-            new_bytes=new_bytes,
+            baseline_bytes=baseline_asset.image_bytes,
+            new_bytes=new_asset.image_bytes,
             snap_name=snap_name,
             old_version=old_version,
             new_version=new_version,
         )
 
-    def _heuristic_decision(self, yarf_status: str, screenshots: list[str]) -> dict:
+    def _heuristic_decision(self, yarf_status: str, screenshots: list[ScreenshotAsset]) -> dict:
         """Rule-based fallback when LLM is unavailable."""
         if yarf_status == "yarf_passed" and screenshots:
             return {
@@ -198,39 +207,6 @@ class ScreenshotReviewerAgent(BaseAgent):
             "reasoning": "YARF tests failed.",
         }
 
-    def _get_baseline_screenshots(
-        self, snap_name: str, testing_repo: str, token: str
-    ) -> list[str]:
-        """Return screenshot URLs from the most recent passing stable test run."""
-        with get_session() as session:
-            from snap_dashboard.db.models import TestRun
-            run = (
-                session.query(TestRun)
-                .filter_by(snap_name=snap_name, status="passed", from_channel="stable")
-                .order_by(TestRun.finished_at.desc())
-                .first()
-            )
-            if not run or not run.pr_body or not run.pr_number:
-                return []
-            pr_body = run.pr_body
-            pr_number = run.pr_number
-            gh_run_id = run.gh_run_id or ""
-
-        branch = f"test-results/{snap_name}/{gh_run_id}" if gh_run_id else ""
-        try:
-            return get_pr_screenshot_urls(
-                testing_repo=testing_repo,
-                pr_data={"number": pr_number, "body": pr_body},
-                branch=branch,
-                token=token,
-            )
-        except Exception:
-            return []
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _decision_to_status(decision: str) -> str:
     return {
@@ -240,16 +216,32 @@ def _decision_to_status(decision: str) -> str:
     }.get(decision, "needs_review")
 
 
-def _download_image(url: str, token: str = "") -> bytes | None:
-    """Download a PNG from a GitHub raw URL."""
-    headers: dict[str, str] = {}
-    if token and "github.com" in url:
-        headers["Authorization"] = f"Bearer {token}"
-    try:
-        with httpx.Client(timeout=30, follow_redirects=True) as client:
-            resp = client.get(url, headers=headers)
-        if resp.status_code == 200:
-            return resp.content
-    except Exception as exc:
-        logger.debug("_download_image failed for %s: %s", url, exc)
-    return None
+def _aggregate_decisions(decisions: list[dict]) -> dict:
+    """Collapse multiple screenshot comparisons into one conservative decision."""
+    rejects = [d for d in decisions if d["decision"] == "reject"]
+    if rejects:
+        confidence = max(float(d["confidence"]) for d in rejects)
+        reasoning = " ".join(d["reasoning"] for d in rejects if d.get("reasoning"))
+        return {
+            "decision": "reject",
+            "confidence": confidence,
+            "reasoning": reasoning or "One or more screenshots showed a regression.",
+        }
+
+    reviews = [d for d in decisions if d["decision"] == "needs_review"]
+    if reviews:
+        confidence = min(float(d["confidence"]) for d in reviews)
+        reasoning = " ".join(d["reasoning"] for d in reviews if d.get("reasoning"))
+        return {
+            "decision": "needs_review",
+            "confidence": confidence,
+            "reasoning": reasoning or "Screenshot comparison needs manual review.",
+        }
+
+    confidence = min(float(d["confidence"]) for d in decisions)
+    reasoning = " ".join(d["reasoning"] for d in decisions if d.get("reasoning"))
+    return {
+        "decision": "approve",
+        "confidence": confidence,
+        "reasoning": reasoning or "Compared screenshots are consistent with the stored stable baseline.",
+    }
