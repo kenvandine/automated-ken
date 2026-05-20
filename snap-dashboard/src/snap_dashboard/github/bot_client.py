@@ -140,6 +140,65 @@ class BotGitHubClient:
             logger.warning("create_pr failed: %s", exc)
         return None
 
+    def file_exists(self, owner: str, repo: str, path: str) -> bool:
+        """Return True if the file exists in the repo's default branch."""
+        url = f"{_GH_API}/repos/{owner}/{repo}/contents/{path}"
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.head(url, headers=_headers(self.token))
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    def create_file(
+        self,
+        owner: str,
+        repo: str,
+        path: str,
+        content: str,
+        commit_message: str,
+        branch: str = "main",
+    ) -> bool:
+        """Create a new file in the repo (fails if the file already exists)."""
+        url = f"{_GH_API}/repos/{owner}/{repo}/contents/{path}"
+        payload = {
+            "message": commit_message,
+            "content": base64.b64encode(content.encode()).decode(),
+            "branch": branch,
+        }
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.put(url, json=payload, headers=_headers(self.token))
+            return resp.status_code in (200, 201)
+        except Exception as exc:
+            logger.warning("create_file %s failed: %s", path, exc)
+            return False
+
+    def dispatch_workflow(
+        self,
+        owner: str,
+        repo: str,
+        workflow_file: str,
+        ref: str = "main",
+        inputs: dict | None = None,
+    ) -> tuple[bool, str]:
+        """Dispatch a workflow_dispatch event.
+
+        Returns (success, error_message).
+        """
+        url = f"{_GH_API}/repos/{owner}/{repo}/actions/workflows/{workflow_file}/dispatches"
+        payload: dict = {"ref": ref}
+        if inputs:
+            payload["inputs"] = inputs
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.post(url, json=payload, headers=_headers(self.token))
+            if resp.status_code == 204:
+                return True, ""
+            return False, f"GitHub API returned {resp.status_code}: {resp.text[:300]}"
+        except Exception as exc:
+            return False, str(exc)
+
     def branch_exists(self, owner: str, repo: str, branch: str) -> bool:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{branch}"
         try:

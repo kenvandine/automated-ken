@@ -1,188 +1,146 @@
-# Getting Started with automated-ken
+# Getting Started with snap-dashboard
 
-A step-by-step guide to setting up automated-ken and running tests from the automated-ken-tests repository.
+A step-by-step guide to setting up snap-dashboard in development mode and running automated snap tests.
 
 ---
 
-## 1. Set up the snap-dashboard (development mode)
+## 1. Clone and install
 
 ```bash
-cd ~/src/github/kenvandine/automated-ken/snap-dashboard
+cd ~/src/github/kenvandine
+git clone git@github.com:kenvandine/automated-ken.git
+cd automated-ken/snap-dashboard
+
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
 
-## 2. Create a GitHub Personal Access Token
+## 2. Create a GitHub OAuth App
 
-You need a token with these scopes:
-- **`repo`** — to read issues/PRs and dispatch workflows
-- **`actions`** — to trigger and monitor GitHub Actions runs
+snap-dashboard uses GitHub OAuth for authentication. You need an OAuth App registered at **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**.
 
-Create one at: **GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens** (or classic).
+| Field | Value |
+|-------|-------|
+| Application name | `snap-dashboard (dev)` |
+| Homepage URL | `http://127.0.0.1:8080` |
+| Authorization callback URL | `http://127.0.0.1:8080/auth/callback` |
 
-## 3. Configure snap-dashboard
+Copy the **Client ID** and generate a **Client Secret**.
 
-Create the config file:
+## 3. Create a GitHub Personal Access Token
+
+You need a PAT with these scopes for full functionality:
+- **`repo`** — read issues/PRs, create branches and files, dispatch workflows
+- **`actions`** — trigger and monitor GitHub Actions runs
+
+Create one at: **GitHub → Settings → Developer settings → Personal access tokens**.
+
+## 4. Start the server
 
 ```bash
-mkdir -p ~/.local/share/snap-dashboard
-cat > ~/.local/share/snap-dashboard/config.env << 'EOF'
-PUBLISHER=ken-vandine
-GITHUB_TOKEN=ghp_YOUR_TOKEN_HERE
-TESTING_REPO=kenvandine/automated-ken-tests
-AUTO_TEST=false
+export GITHUB_CLIENT_ID=your_client_id
+export GITHUB_CLIENT_SECRET=your_client_secret
+
+snap-dashboard serve --port 9080
+```
+
+Or put them in `~/.local/share/snap-dashboard/config.env`:
+
+```
+GITHUB_CLIENT_ID=your_client_id
+GITHUB_CLIENT_SECRET=your_client_secret
 PORT=9080
-EOF
-```
-
-Key settings for testing:
-- **`TESTING_REPO`** — points to `kenvandine/automated-ken-tests` (the `owner/repo` format)
-- **`AUTO_TEST`** — set to `true` later if you want tests triggered automatically; keep `false` to start with manual triggers
-
-## 4. Run the initial data collection
-
-```bash
-snap-dashboard collect
-```
-
-This populates the SQLite database (`~/.local/share/snap-dashboard/snap-dashboard.db`) with your snaps, their channel versions, and issue/PR data from GitHub/GitLab.
-
-## 5. Start the web server
-
-```bash
-snap-dashboard serve
 ```
 
 The dashboard is now at **http://127.0.0.1:9080**.
 
-## 6. Set up the automated-ken-tests repository
+## 5. First-run onboarding
 
-Clone it (if you haven't already):
+Open the dashboard and click **Sign in with GitHub**. After authenticating, the onboarding wizard asks for:
+
+1. **Publisher name** — your Snap Store publisher account (e.g. `ken-vandine`). A verification step confirms the account exists and shows how many snaps were found.
+2. **GitHub token** — the PAT from step 3. Used for fetching issues/PRs and dispatching workflows.
+3. **Testing repo** — the `owner/repo` of your YARF test repository (e.g. `kenvandine/automated-ken-tests`).
+
+After completing onboarding, the initial data collection runs automatically in the background.
+
+## 6. Configure agent settings (optional)
+
+Go to **Settings → Agents & AI** to configure:
+
+- **Bot GitHub token** — a PAT for a secondary bot account used to open version bump PRs. If not set, the primary token is used instead.
+- **Lemonade server URL** — URL of a local [lemonade-server](https://github.com/amd/lemonade) instance for LLM vision analysis of screenshots.
+- **Release scan interval** — how often the release scanner checks packaging repos (default: 4 hours).
+- **Auto-merge** — automatically merge agent-approved version bump PRs.
+- **Auto-rebuild stale snaps** — trigger rebuilds for snaps not published in N days (see below).
+
+## 7. Set up the YARF testing repository
+
+Clone your testing repo:
 
 ```bash
 cd ~/src/github/kenvandine
 git clone git@github.com:kenvandine/automated-ken-tests.git
 ```
 
-The repo structure looks like:
+The repo should contain YARF test suites at `suites/<snap_name>/suite/` and the YARF workflow at `.github/workflows/snap-test.yml`. snap-dashboard provides the workflow template — see **Settings → Docs** in the web UI for the latest version.
+
+The repo structure:
 
 ```
 automated-ken-tests/
-├── .github/workflows/snap-test.yml   # GitHub Actions workflow
+├── .github/workflows/snap-test.yml
 └── suites/
-    ├── ask-ubuntu/suite/
+    ├── lemonade/suite/
     │   ├── __init__.robot
-    │   └── test_askubuntu.robot
-    └── lemonade/suite/
+    │   └── test_lemonade.robot
+    └── <snap-name>/suite/
         ├── __init__.robot
-        └── test_lemonade.robot
+        └── test_<snap>.robot
 ```
 
-## 7. Install the GitHub Actions workflow
+Required secret in the testing repo:
+- `SNAP_DASHBOARD_GITHUB_TOKEN` — a token with `repo` and `pull-requests: write` scope
 
-The workflow file at `.github/workflows/snap-test.yml` should already exist (generated from snap-dashboard's built-in template). Ensure it's pushed to the `main` branch of automated-ken-tests so GitHub Actions can find it.
-
-The workflow is triggered via `workflow_dispatch` — snap-dashboard calls the GitHub API to start it.
-
-## 8. Write a test suite for a snap
-
-To add tests for a new snap (e.g., `my-snap`), create:
-
-```
-automated-ken-tests/suites/my-snap/suite/__init__.robot
-automated-ken-tests/suites/my-snap/suite/test_mysnap.robot
-```
-
-Use the existing suites as reference. A minimal `__init__.robot`:
-
-```robot
-*** Settings ***
-Library    Process
-Suite Setup    Start Xvfb
-Suite Teardown    Stop Xvfb
-
-*** Keywords ***
-Start Xvfb
-    Start Process    Xvfb    :99    -screen    0    1280x800x24
-    Set Environment Variable    DISPLAY    :99
-
-Stop Xvfb
-    Terminate All Processes
-```
-
-And a minimal test file:
-
-```robot
-*** Settings ***
-Library    Process
-Library    OperatingSystem
-
-*** Test Cases ***
-Snap Is Installed
-    ${result}=    Run Process    snap    list    my-snap
-    Should Be Equal As Integers    ${result.rc}    0
-```
-
-Push the new suite to the tests repo.
-
-## 9. Trigger a test from the dashboard
+## 8. Trigger a YARF test
 
 1. Open **http://127.0.0.1:9080/testing**
-2. The page shows snaps with versions in candidate/beta/edge that differ from stable
-3. Click **Trigger** next to a snap that has a test suite in the tests repo
-4. This dispatches the GitHub Actions workflow with the snap name, channel, version, and revision
+2. The page shows snaps with versions in candidate/edge that differ from stable
+3. Click **Trigger** next to a snap with a test suite in the testing repo
+4. snap-dashboard dispatches the GitHub Actions workflow and starts polling for results
 
-## 10. Sync test results
+After the workflow completes, test status updates automatically. If the test passed, click **Promote** to release to stable.
 
-After the workflow runs:
+## 9. Enable auto-testing (optional)
 
-1. Click **Sync** on the testing page (or POST `/testing/sync`)
-2. snap-dashboard polls GitHub for open PRs labeled with test results
-3. Test status updates: pending → running → passed/failed
-4. If passed, you can click **Promote** to run `snapcraft release <snap> <revision> stable`
+In **Settings**, toggle **Auto-test** on. snap-dashboard will automatically trigger YARF tests whenever a new version is detected in candidate or edge during a collection run.
 
-## 11. (Optional) Enable auto-testing
+## 10. Set up automated stale rebuilds (optional)
 
-Once you're comfortable with the workflow:
+To automatically rebuild snaps that haven't published a new revision recently:
 
-```bash
-# In config.env
-AUTO_TEST=true
-```
+1. Generate a Snapcraft credentials file:
+   ```bash
+   snapcraft export-login --snaps '*' --channels candidate --acls package_upload creds.txt
+   ```
 
-Or via snap config:
+2. Set `SNAPCRAFT_STORE_CREDENTIALS` in every snap packaging repo using the bundled helper:
+   ```bash
+   cd ~/src/github/kenvandine/automated-ken
+   ./set-snapcraft-secret.sh creds.txt
+   ```
 
-```bash
-snap set snap-dashboard auto-test=true
-```
+3. In **Settings**, enable **Auto-rebuild stale snaps** and set the **Staleness window** (default: 30 days).
 
-This makes snap-dashboard automatically trigger tests when it detects new versions in non-stable channels during collection.
+When triggered, the agent creates `.github/workflows/automated-snap-build.yml` in each packaging repo (if absent) and dispatches a build that publishes to the `candidate` channel.
 
-## 12. (Optional) Run tests locally
+## Quick reference
 
-For local debugging without GitHub Actions:
-
-```bash
-pip install canonical-yarf
-Xvfb :99 -screen 0 1280x800x24 &
-export DISPLAY=:99
-cd ~/src/github/kenvandine/automated-ken-tests
-yarf --platform Mir suites/ask-ubuntu/suite/
-```
-
----
-
-## Quick Reference
-
-| Action | Command / URL |
-|--------|--------------|
-| Collect data | `snap-dashboard collect` |
-| Start server | `snap-dashboard serve` |
+| Action | URL |
+|--------|-----|
 | Dashboard | http://127.0.0.1:9080 |
 | Testing page | http://127.0.0.1:9080/testing |
-| Trigger test | POST `/testing/trigger/{snap_name}` |
-| Sync results | POST `/testing/sync` |
-| Add a snap | `snap-dashboard add <name> --packaging-repo URL` |
-
-The key requirement for a snap to be testable is that it has a matching suite directory in `automated-ken-tests/suites/<snap_name>/suite/` with an `__init__.robot` file. The orchestrator checks for this before allowing a test to be triggered.
+| Agent activity | http://127.0.0.1:9080/agents |
+| Version bump PRs | http://127.0.0.1:9080/version-bumps |
+| Settings | http://127.0.0.1:9080/settings |

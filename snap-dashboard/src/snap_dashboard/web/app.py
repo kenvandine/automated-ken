@@ -50,6 +50,7 @@ async def on_startup() -> None:
     from snap_dashboard.agents.runner import get_runner
     from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
     from snap_dashboard.agents.pr_monitor import PRMonitorAgent
+    from snap_dashboard.agents.stale_build_scanner import StaleSnapScannerAgent
     from snap_dashboard.db.models import UserConfig
     from snap_dashboard.db.session import get_session as _gs
 
@@ -71,6 +72,17 @@ async def on_startup() -> None:
 
     # PR monitor runs every 5 minutes regardless of user count.
     runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
+
+    # Stale build scanner runs every 24h per user.
+    with _gs() as session:
+        configs = session.query(UserConfig).all()
+        for uc in configs:
+            runner.schedule_periodic(
+                StaleSnapScannerAgent,
+                interval_hours=24,
+                user_id=uc.user_id,
+            )
+
     logger.info("Agent runner started.")
 
 

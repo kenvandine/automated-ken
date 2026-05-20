@@ -84,6 +84,8 @@ async def settings_post(
     bot_github_login: str = Form(default=""),
     agent_interval_hours: int = Form(default=4),
     auto_merge: str = Form(default=""),
+    auto_rebuild_stale: str = Form(default=""),
+    stale_build_days: int = Form(default=30),
 ) -> RedirectResponse:
     """Save per-user settings to UserConfig in the database."""
     user = get_current_user(request)
@@ -93,6 +95,7 @@ async def settings_post(
     user_id = user["id"]
     _auto_test = auto_test in ("1", "true", "on", "yes")
     _auto_merge = auto_merge in ("1", "true", "on", "yes")
+    _auto_rebuild_stale = auto_rebuild_stale in ("1", "true", "on", "yes")
 
     with get_session() as session:
         uc = session.query(UserConfig).filter_by(user_id=user_id).first()
@@ -117,12 +120,17 @@ async def settings_post(
             uc.bot_github_login = bot_github_login.strip()
         uc.agent_interval_hours = agent_interval_hours
         uc.auto_merge = _auto_merge
+        uc.auto_rebuild_stale = _auto_rebuild_stale
+        uc.stale_build_days = max(1, stale_build_days)
 
-    # Reschedule the release scanner with the new interval
+    # Reschedule agents with the new settings
     try:
         from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
+        from snap_dashboard.agents.stale_build_scanner import StaleSnapScannerAgent
         from snap_dashboard.agents.runner import get_runner
-        get_runner().reschedule(ReleaseScannerAgent, interval_hours=agent_interval_hours, user_id=user_id)
+        runner = get_runner()
+        runner.reschedule(ReleaseScannerAgent, interval_hours=agent_interval_hours, user_id=user_id)
+        runner.reschedule(StaleSnapScannerAgent, interval_hours=24, user_id=user_id)
     except Exception as exc:
         logger.warning("failed to reschedule agents: %s", exc)
 

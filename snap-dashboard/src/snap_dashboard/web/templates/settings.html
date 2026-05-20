@@ -224,6 +224,40 @@
       </span>
     </div>
 
+    <div class="form-row">
+      <label class="form-label checkbox-label">
+        <input
+          type="checkbox"
+          name="auto_rebuild_stale"
+          value="true"
+          {% if config.auto_rebuild_stale %}checked{% endif %}
+          style="margin-right: 6px;"
+        >
+        Auto-trigger builds for stale snaps
+      </label>
+      <span class="form-hint">
+        Automatically dispatch a snap-build workflow for snaps that haven't published a new
+        revision within the staleness window. Requires <code>SNAPCRAFT_STORE_CREDENTIALS</code>
+        to be set in each packaging repo (or at the org level if repos are in a GitHub org).
+        The workflow file (<code>.github/workflows/snap-build.yml</code>) will be created
+        automatically if it doesn't exist.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="stale_build_days">Staleness Window (days)</label>
+      <select id="stale_build_days" name="stale_build_days" class="form-input form-select">
+        {% for d in [7, 14, 30, 60, 90] %}
+        <option value="{{ d }}" {% if d == (config.stale_build_days or 30) %}selected{% endif %}>
+          {{ d }} days
+        </option>
+        {% endfor %}
+      </select>
+      <span class="form-hint">
+        Snaps with no new publication older than this threshold will have a rebuild triggered.
+      </span>
+    </div>
+
     <div class="form-actions">
       <a href="/agents" class="btn btn-secondary btn-sm">View Agent Activity</a>
       <a href="/version-bumps" class="btn btn-secondary btn-sm">View Version Bumps</a>

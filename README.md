@@ -1,25 +1,30 @@
 # snap-dashboard
 
-A personal maintenance dashboard for snap publishers. Tracks channel versions,
-open issues, and pull requests across all snaps you publish or maintain — served
-as a self-hosted web application and packaged as a snap with a built-in scheduler.
+An agentic snap maintenance platform for snap publishers. Monitors channel versions, automates version bump PRs, triggers YARF tests, rebuilds stale snaps, and presents everything in a live web dashboard — all running as a self-hosted snap.
 
 ## Features
 
-- **Channel comparison** — see `stable`, `candidate`, `beta`, and `edge` versions
-  side-by-side for every snap, colour-coded so promotable updates stand out
-- **Attention-needed highlights** — snaps where edge/beta is ahead of stable are
-  surfaced at the top of the dashboard so nothing falls through the cracks
-- **Issue & PR tracking** — open issues and pull requests are fetched from GitHub
-  and GitLab packaging repos and shown per snap
-- **Auto-discovery** — on first run, all snaps published by the configured
-  publisher account are discovered automatically via the Snap Store API
-- **Manual additions** — add snaps you maintain but don't publish yourself via
-  the web UI or CLI; the web UI can search the Store to auto-populate repo URLs
-- **Scheduled collection** — a `systemd` timer (provided by the snap) refreshes
-  data every 6 hours by default, configurable via `snap set`
-- **LinuxGroove-inspired UI** — dark glassmorphic design with animated gradients,
-  responsive layout, and mobile support
+### Monitoring
+- **Channel comparison** — `stable`, `candidate`, `beta`, and `edge` side-by-side for every snap, colour-coded so promotable updates stand out
+- **Attention-needed highlights** — snaps where a newer revision is waiting in candidate/edge are surfaced at the top of the dashboard
+- **Issue & PR tracking** — open issues and pull requests fetched from GitHub and GitLab packaging repos, shown per snap
+- **Auto-discovery** — on first run, all snaps published by the configured publisher account are discovered via the Snap Store API
+
+### Agents
+A pool of background agents runs continuously and reports live to the dashboard:
+
+| Agent | What it does |
+|-------|-------------|
+| **Release Scanner** | Checks packaging repos for new upstream releases; spawns a Version Bumper when found |
+| **Version Bumper** | Opens a version bump PR on the packaging repo via a bot GitHub account (no git clone — uses GitHub Contents API) |
+| **PR Monitor** | Polls open version bump PRs; triggers YARF tests when build CI passes |
+| **Screenshot Reviewer** | Uses a local Lemonade LLM (vision model) to compare before/after screenshots and approve or reject the PR |
+| **Stale Build Scanner** | Finds snaps with no new publication in N days; creates `automated-snap-build.yml` in the packaging repo if absent and dispatches a rebuild to the `candidate` channel |
+
+### YARF Testing
+- Trigger YARF snap tests against a GitHub Actions–based testing repository
+- Test results (including screenshots) are committed back as a PR
+- Passed tests can be promoted to stable from the dashboard
 
 ## Quick start (development)
 
@@ -31,15 +36,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 
-# Run a first collection (discovers all snaps by the given publisher)
-PUBLISHER=ken-vandine snap-dashboard collect
+# Set a GitHub OAuth app client ID/secret in the environment
+export GITHUB_CLIENT_ID=...
+export GITHUB_CLIENT_SECRET=...
 
-# Start the web server
 snap-dashboard serve          # http://127.0.0.1:8080
 ```
 
-Open `http://127.0.0.1:8080` in a browser. If no publisher is configured you
-will be taken through a short onboarding wizard.
+Open `http://127.0.0.1:8080` and log in with your GitHub account. The first-run onboarding wizard guides you through configuring your publisher name, GitHub token, and (optionally) bot account details.
 
 ## Snap installation
 
@@ -47,49 +51,33 @@ will be taken through a short onboarding wizard.
 sudo snap install snap-dashboard
 ```
 
-After install, configure your publisher account and optionally a GitHub token:
+Configure OAuth credentials and start the server:
 
 ```sh
-snap set snap-dashboard publisher=ken-vandine
-snap set snap-dashboard github-token=ghp_YOUR_TOKEN
+snap set snap-dashboard github-client-id=...
+snap set snap-dashboard github-client-secret=...
 ```
 
 The `serve` daemon starts automatically. Open `http://127.0.0.1:8080`.
 
-### Configuration via `snap set`
+## Configuration
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `publisher` | _(empty)_ | Snap Store publisher account to auto-discover |
-| `github-token` | _(empty)_ | GitHub personal access token (increases rate limits) |
-| `bind` | `127.0.0.1` | Bind address; set to `0.0.0.0` to expose on all interfaces |
-| `port` | `8080` | HTTP port for the web dashboard |
-| `interval` | `6` | Collection interval in hours |
+All per-user settings are managed through the **Settings** page in the web UI. The available settings are:
 
-```sh
-# Expose on all interfaces (e.g. behind a reverse proxy)
-snap set snap-dashboard bind=0.0.0.0 port=8080
-```
-
-Any `snap set` change triggers the `configure` hook which rewrites the runtime
-config and restarts the `serve` daemon automatically.
-
-## CLI reference
-
-```
-snap-dashboard collect          Run the data collector once
-snap-dashboard serve            Start the web server (honours BIND / PORT env)
-  --port  N                     Override listen port
-  --bind  HOST                  Override bind address
-
-snap-dashboard add <name>       Track a snap not published under your account
-  --packaging-repo URL          URL of the snap packaging repository
-  --upstream-repo  URL          URL of the upstream project repository
-  --notes          TEXT         Free-form notes
-
-snap-dashboard list             Print all tracked snaps with current channel versions
-snap-dashboard remove <name>    Stop tracking a snap
-```
+| Setting | Purpose |
+|---------|---------|
+| Publisher | Snap Store publisher account for auto-discovery |
+| GitHub token | Primary PAT — read issues/PRs, dispatch workflows |
+| Bot GitHub token | Secondary PAT for a bot account that opens version bump PRs |
+| Bot GitHub login | Display name of the bot account |
+| Testing repo | `owner/repo` of the YARF test repository |
+| Auto-test | Automatically trigger YARF tests when new versions land in candidate/edge |
+| Lemonade server URL | Base URL of a local lemonade-server for LLM vision analysis |
+| Lemonade model | Vision-capable model name (e.g. `llava`) |
+| Release scan interval | How often the release scanner runs (1–24 h) |
+| Auto-merge | Automatically merge agent-approved version bump PRs |
+| Auto-rebuild stale snaps | Dispatch rebuilds for snaps with no recent publication |
+| Staleness window | How many days without a publish before a snap is considered stale (default 30) |
 
 ## Web dashboard
 
@@ -97,57 +85,95 @@ snap-dashboard remove <name>    Stop tracking a snap
 
 | Path | Description |
 |------|-------------|
-| `/` | Summary dashboard — channel comparison table + attention-needed cards |
+| `/` | Summary dashboard — channel comparison + attention-needed cards |
 | `/snap/<name>` | Snap detail — full channel map, issue/PR list, edit repo URLs |
-| `/snaps/add` | Add a snap — search the Store, auto-populate repo URLs, save |
-| `/settings` | Publisher, GitHub token, collection interval, manual snap list |
-| `/onboarding` | First-run wizard (shown automatically when no publisher is set) |
+| `/snaps/add` | Add a snap — Store search, auto-populate repo URLs |
+| `/testing` | YARF test runs — trigger, monitor, promote to stable |
+| `/agents` | Live agent activity feed |
+| `/version-bumps` | Version bump PRs grouped by status (approved / needs review / rejected) |
+| `/version-bumps/<id>` | PR detail — screenshots, agent reasoning, merge/reject actions |
+| `/settings` | Per-user configuration |
+| `/onboarding` | First-run wizard |
+| `/docs` | In-app workflow documentation |
 
-### Adding a snap manually
+## Automated snap builds (stale rebuild)
 
-1. Go to **Settings → Add snap** (or navigate to `/snaps/add`)
-2. Enter the snap name and click **Search** — the Store is queried and
-   `packaging_repo` / `upstream_repo` are auto-populated from the snap's
-   `source` and `website` links
-3. Review or override the URLs, add optional notes, click **Save**
-4. Click **Refresh now** on the dashboard to collect issue/PR data immediately
+When **Auto-rebuild stale snaps** is enabled, the Stale Build Scanner agent:
+
+1. Identifies snaps where the most recent channel map publication is older than the configured staleness window.
+2. Creates `.github/workflows/automated-snap-build.yml` in the snap's packaging repo if it doesn't exist (via GitHub Contents API — no clone needed).
+3. Dispatches a `workflow_dispatch` event to trigger the workflow, which builds and publishes to the `candidate` channel.
+4. Records the trigger to avoid re-firing within the same window.
+
+The build workflow requires a `SNAPCRAFT_STORE_CREDENTIALS` secret in each packaging repo. Use the bundled helper script to set it across all repos at once:
+
+```sh
+snapcraft export-login --snaps '*' --channels candidate --acls package_upload creds.txt
+./set-snapcraft-secret.sh creds.txt
+```
+
+> **Note:** GitHub personal accounts don't support account-level secrets. Either add the secret to each repo individually (the script handles this), or create a GitHub Organisation and use org-level secrets.
 
 ## Project structure
 
 ```
 snap-dashboard/
 ├── src/snap_dashboard/
-│   ├── cli.py              Click CLI entry point
-│   ├── collector.py        Data collection pipeline
-│   ├── config.py           Config loader (env → config.env → defaults)
+│   ├── cli.py                   Click CLI entry point
+│   ├── collector.py             Snap Store + GitHub data collection pipeline
+│   ├── config.py                Config loader (env → config.env → defaults)
+│   ├── auth.py                  GitHub OAuth + session helpers
+│   ├── agents/
+│   │   ├── base.py              BaseAgent abstract class
+│   │   ├── runner.py            Thread pool + periodic scheduler
+│   │   ├── release_scanner.py   Upstream release detection
+│   │   ├── version_bumper.py    Version bump PR creation
+│   │   ├── pr_monitor.py        CI status polling + YARF trigger
+│   │   ├── screenshot_reviewer.py  LLM vision comparison
+│   │   └── stale_build_scanner.py  Stale snap rebuild trigger
 │   ├── db/
-│   │   ├── models.py       SQLAlchemy ORM models
-│   │   └── session.py      DB session factory + init_db()
-│   ├── store/
-│   │   └── client.py       Snap Store API v2 client
+│   │   ├── models.py            SQLAlchemy ORM models
+│   │   └── session.py           Session factory + init_db() + migrations
 │   ├── github/
-│   │   └── client.py       GitHub + GitLab issues/PR client
+│   │   ├── client.py            Issues/PR fetching (GitHub + GitLab)
+│   │   ├── bot_client.py        Bot account: branches, files, PRs, workflow dispatch
+│   │   └── pr_viewer.py         Test result PR parsing
+│   ├── lemonade/
+│   │   └── client.py            OpenAI-compatible client for lemonade-server
+│   ├── snapcraft/
+│   │   ├── fetcher.py           Fetch snapcraft.yaml via GitHub Contents API
+│   │   ├── parser.py            Parse snapcraft.yaml source parts
+│   │   ├── upstream.py          Latest-version detection (GitHub/PyPI/GitLab)
+│   │   └── build_workflow_template.py  automated-snap-build.yml template
+│   ├── store/
+│   │   └── client.py            Snap Store API v2 client
+│   ├── testing/
+│   │   ├── orchestrator.py      YARF workflow dispatch + status polling
+│   │   ├── promoter.py          Snap Store channel promotion
+│   │   └── workflow_template.py snap-test.yml YARF workflow template
 │   └── web/
-│       ├── app.py          FastAPI application
-│       ├── routes/         Route handlers (dashboard, snaps, settings, onboarding)
-│       ├── templates/      Jinja2 HTML templates
-│       └── static/         CSS + JS assets
+│       ├── app.py               FastAPI application + agent startup
+│       ├── routes/              Route handlers
+│       ├── templates/           Jinja2 HTML templates
+│       └── static/              CSS + JS assets
+├── set-snapcraft-secret.sh      Helper: set SNAPCRAFT_STORE_CREDENTIALS across all repos
 ├── snap/
-│   ├── snapcraft.yaml      Snap package definition
-│   └── hooks/configure     snap set handler
-└── bin/snap-dashboard      Wrapper script for the snap
+│   ├── snapcraft.yaml           Snap package definition
+│   └── hooks/configure          snap set handler
+└── bin/snap-dashboard           Wrapper script for the snap
 ```
 
-## Data collected
+## Data storage
 
-All data is stored locally in SQLite at:
+All data is stored locally in SQLite:
 - **Snap (runtime):** `$SNAP_DATA/snap-dashboard.db`
 - **Dev mode:** `~/.local/share/snap-dashboard/snap-dashboard.db`
 
-No data is ever sent to a third party. The tool only reads from:
+No data is sent to any third party. The tool only reads from:
 - `https://api.snapcraft.io` — public snap metadata and channel maps
-- `https://api.github.com` — public or token-authenticated repository data
-- `https://gitlab.com/api/v4` — public GitLab repository data (optional)
+- `https://api.github.com` — repository data (token optional but recommended)
+- `https://gitlab.com/api/v4` — GitLab repository data (optional)
+- Local lemonade-server — LLM vision analysis (optional, self-hosted)
 
 ## Building the snap
 
@@ -165,9 +191,10 @@ sudo snap install snap-dashboard_*.snap --dangerous
 | `uvicorn` | ASGI server |
 | `sqlalchemy` | ORM / SQLite |
 | `click` | CLI framework |
-| `httpx` | HTTP client for Store + GitHub APIs |
+| `httpx` | HTTP client (Store, GitHub, Lemonade) |
 | `jinja2` | HTML templating |
 | `python-multipart` | Form parsing |
+| `pyyaml` | snapcraft.yaml parsing |
 
 ## License
 

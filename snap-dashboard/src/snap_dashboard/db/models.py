@@ -86,6 +86,9 @@ class UserConfig(Base):
     bot_github_login = Column(String(255), nullable=True)
     agent_interval_hours = Column(Integer, default=4, nullable=False)
     auto_merge = Column(Boolean, default=False, nullable=False)
+    # Stale rebuild settings
+    auto_rebuild_stale = Column(Boolean, default=False, nullable=False)
+    stale_build_days = Column(Integer, default=30, nullable=False)
 
     user = relationship("User", back_populates="config")
 
@@ -141,6 +144,9 @@ class Snap(Base):
     )
     version_bump_prs = relationship(
         "VersionBumpPR", back_populates="snap", cascade="all, delete-orphan"
+    )
+    stale_build_triggers = relationship(
+        "StaleBuildTrigger", back_populates="snap", cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
@@ -337,6 +343,32 @@ class VersionBumpPR(Base):
         return (
             f"<VersionBumpPR id={self.id} snap_id={self.snap_id}"
             f" {self.old_version!r}→{self.new_version!r} status={self.status!r}>"
+        )
+
+
+class StaleBuildTrigger(Base):
+    """Records a workflow_dispatch trigger sent for a snap that hasn't published in N days."""
+
+    __tablename__ = "stale_build_triggers"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snap_id = Column(Integer, ForeignKey("snaps.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    packaging_repo = Column(String(500), nullable=True)
+    channel = Column(String(64), nullable=False, default="edge")
+    days_since_publish = Column(Integer, nullable=True)
+    # triggered | skipped (workflow missing) | failed
+    status = Column(String(32), nullable=False, default="triggered")
+    error_msg = Column(Text, nullable=True)
+    triggered_at = Column(DateTime, default=_now, nullable=False)
+
+    snap = relationship("Snap", back_populates="stale_build_triggers")
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return (
+            f"<StaleBuildTrigger id={self.id} snap_id={self.snap_id}"
+            f" status={self.status!r}>"
         )
 
 

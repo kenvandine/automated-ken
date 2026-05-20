@@ -282,16 +282,62 @@ merge or reject.
 
 ---
 
+---
+
+## Phase 13: Stale Snap Rebuild
+
+**Goal:** Automatically rebuild snaps that have gone stale (no new publication in N days).
+
+### New files
+- `snap_dashboard/agents/stale_build_scanner.py` — `StaleSnapScannerAgent`
+- `snap_dashboard/snapcraft/build_workflow_template.py` — `automated-snap-build.yml` template
+
+### New DB model: `stale_build_triggers`
+```
+id, snap_id, user_id, packaging_repo, channel,
+days_since_publish, status (triggered|skipped|failed),
+error_msg, triggered_at
+```
+
+### New `UserConfig` columns
+| Column | Default | Purpose |
+|--------|---------|---------|
+| `auto_rebuild_stale` | `False` | Enable/disable the agent per user |
+| `stale_build_days` | `30` | Days without publication before a snap is considered stale |
+
+### Flow
+1. Agent runs every 24h per user (scheduled at startup alongside the release scanner)
+2. For each snap with a GitHub `packaging_repo`:
+   - Query `ChannelMap` for the most recent `released_at` across all channels/architectures
+   - Skip if published within `stale_build_days`
+   - Skip if a `StaleBuildTrigger` with `status=triggered` already exists within the window
+3. For qualifying (stale) snaps:
+   - Create `.github/workflows/automated-snap-build.yml` in the packaging repo via GitHub Contents API if not already present
+   - Dispatch `workflow_dispatch` on `automated-snap-build.yml`; the workflow always publishes to the `candidate` channel
+   - Record the outcome in `StaleBuildTrigger`
+
+### Build workflow
+`automated-snap-build.yml` is managed entirely by snap-dashboard:
+- No channel input — always releases to `candidate`
+- Triggered via `workflow_dispatch` with a `dashboard_trigger_id` input for correlation
+- Requires `SNAPCRAFT_STORE_CREDENTIALS` secret in the packaging repo
+
+### Helper script
+`set-snapcraft-secret.sh <creds-file>` — iterates all GitHub repos owned by the authenticated user, identifies snap packaging repos, and sets `SNAPCRAFT_STORE_CREDENTIALS` in each one.
+
+---
+
 ## Phase Summary
 
 | Phase | Scope | Key New Files | DB Changes |
 |-------|-------|--------------|------------|
-| **7** | Agent infra + Lemonade client | `agents/base.py`, `agents/runner.py`, `lemonade/client.py` | `agents` table; 6 new `user_config` columns |
+| **7** | Agent infra + Lemonade client | `agents/base.py`, `agents/runner.py`, `lemonade/client.py` | `agent_runs` table; 6 new `user_config` columns |
 | **8** | Release scanner | `agents/release_scanner.py`, `snapcraft/parser.py`, `snapcraft/fetcher.py` | `upstream_releases` table |
 | **9** | Version bumper | `agents/version_bumper.py`, `github/bot_client.py` | `version_bump_prs` table |
 | **10** | CI integration | `snapcraft/build_workflow_template.py`, `agents/pr_monitor.py` | `version_bump_prs.test_run_id` FK |
 | **11** | Screenshot reviewer | `agents/screenshot_reviewer.py` | `screenshot_comparisons` table |
 | **12** | Live dashboard | `routes/agents.py`, `routes/version_bumps.py`, `routes/api.py` | — |
+| **13** | Stale snap rebuild | `agents/stale_build_scanner.py`, `snapcraft/build_workflow_template.py`, `set-snapcraft-secret.sh` | `stale_build_triggers` table; 2 new `user_config` columns |
 
 ---
 
