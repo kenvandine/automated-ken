@@ -63,7 +63,7 @@ async def version_bumps_page(request: Request) -> HTMLResponse:
     for status_key, label in _STATUS_GROUPS:
         items = [b for b in bump_list if b["status"] == status_key]
         if items:
-            groups.append({"status": status_key, "label": label, "items": items})
+            groups.append({"status": status_key, "label": label, "bumps": items})
 
     # Count summary for nav badge
     actionable = sum(

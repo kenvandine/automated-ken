@@ -33,7 +33,7 @@
       {% if group.status == 'agent_approved' %}✅{% endif %}
       {% if group.status == 'needs_review' %}⚠️{% endif %}
       {% if group.status == 'agent_rejected' %}❌{% endif %}
-      {{ group.label }} ({{ group.items | length }})
+      {{ group.label }} ({{ group.bumps | length }})
     </h3>
     {% if group.status == 'agent_approved' %}
     <span class="text-muted small">Agent approved with high confidence — review before merging</span>
@@ -41,7 +41,7 @@
   </div>
 
   <div class="bump-list">
-    {% for b in group.items %}
+    {% for b in group.bumps %}
     <div class="bump-row">
       <div class="bump-info">
         <a href="/snap/{{ b.snap_name }}" class="snap-link">{{ b.snap_name }}</a>
