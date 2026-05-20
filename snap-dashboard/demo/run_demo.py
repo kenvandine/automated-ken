@@ -82,11 +82,20 @@ class GnomeScreencast:
             sys.exit(1)
         self._dbus = dbus
         self._bus = dbus.SessionBus()
+        # introspect=False prevents dbus-python from caching the unique bus name
+        # at proxy-creation time — the message is addressed to the well-known name
+        # on every call, so a stale unique-name never causes ServiceUnknown errors.
         shell = self._bus.get_object(
-            "org.gnome.Shell.Screencast", "/org/gnome/Shell/Screencast"
+            "org.gnome.Shell.Screencast", "/org/gnome/Shell/Screencast",
+            introspect=False,
         )
         self._iface = dbus.Interface(shell, "org.gnome.Shell.Screencast")
         self._filename: str | None = None
+        # Clear any lingering screencast from a previous run
+        try:
+            self._iface.StopScreencast()
+        except Exception:
+            pass
 
     def start_area(
         self,
