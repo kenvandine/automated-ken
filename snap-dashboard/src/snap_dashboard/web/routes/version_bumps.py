@@ -63,7 +63,7 @@ async def version_bumps_page(request: Request) -> HTMLResponse:
     for status_key, label in _STATUS_GROUPS:
         items = [b for b in bump_list if b["status"] == status_key]
         if items:
-            groups.append({"status": status_key, "label": label, "items": items})
+            groups.append({"status": status_key, "label": label, "bumps": items})
 
     # Count summary for nav badge
     actionable = sum(
@@ -133,6 +133,17 @@ async def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
             return RedirectResponse(url="/version-bumps", status_code=302)
         repo_slug = _extract_slug(bump.packaging_repo)
         pr_number = bump.bot_pr_number
+
+    import os
+    if os.environ.get("SNAP_DASHBOARD_DEMO"):
+        # Demo mode: skip GitHub API call, just mark as merged locally
+        with get_session() as session:
+            bump = session.query(VersionBumpPR).get(bump_id)
+            if bump:
+                from datetime import datetime, timezone
+                bump.status = "merged"
+                bump.merged_at = datetime.now(timezone.utc)
+        return RedirectResponse(url="/version-bumps", status_code=303)
 
     owner, _, repo = repo_slug.partition("/")
     url = f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}/merge"

@@ -85,6 +85,13 @@ async def on_startup() -> None:
 
     logger.info("Agent runner started.")
 
+    # Demo mode: start the background simulator and register the demo-login bypass
+    if os.environ.get("SNAP_DASHBOARD_DEMO"):
+        from snap_dashboard.demo.simulator import DemoSimulator
+        _demo_sim = DemoSimulator()
+        _demo_sim.start()
+        logger.info("Demo simulator started.")
+
 
 # Import and include routers after app is created to avoid circular imports
 from snap_dashboard.web.routes import (  # noqa: E402
@@ -102,6 +109,16 @@ from snap_dashboard.web.routes import (  # noqa: E402
 
 app.include_router(auth.router)
 app.include_router(admin.router)
+
+# Demo-mode login bypass — sets session to user 1 without GitHub OAuth
+if os.environ.get("SNAP_DASHBOARD_DEMO"):
+    from fastapi import Request as _Request
+    from fastapi.responses import RedirectResponse as _DemoRedir
+
+    @app.get("/demo-login")
+    async def _demo_login(request: _Request):
+        request.session["user_id"] = 1
+        return _DemoRedir(url="/", status_code=302)
 app.include_router(agents.router)
 app.include_router(dashboard.router)
 app.include_router(docs.router)
