@@ -6,6 +6,8 @@ import logging
 import shutil
 import subprocess
 
+from snap_dashboard.github.utils import parse_owner_repo
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,9 +99,10 @@ def merge_packaging_pr(packaging_repo: str, pr_number: int, token: str) -> bool:
     if not token or not packaging_repo or not pr_number:
         return False
 
-    owner, _, repo = _extract_slug(packaging_repo).partition("/")
-    if not repo:
+    owner_repo = parse_owner_repo(packaging_repo)
+    if not owner_repo:
         return False
+    owner, repo = owner_repo
 
     import httpx
 
@@ -120,12 +123,3 @@ def merge_packaging_pr(packaging_repo: str, pr_number: int, token: str) -> bool:
     except Exception as exc:
         logger.warning("Failed to merge packaging PR #%s: %s", pr_number, exc)
         return False
-
-
-def _extract_slug(repo: str) -> str:
-    repo = repo.strip()
-    if repo.startswith("https://github.com/"):
-        repo = repo[len("https://github.com/"):]
-    elif repo.startswith("http://github.com/"):
-        repo = repo[len("http://github.com/"):]
-    return repo.rstrip("/").rstrip(".git")

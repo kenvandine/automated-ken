@@ -14,6 +14,7 @@ from snap_dashboard.github.bot_client import (
     find_snapcraft_yaml,
     patch_snapcraft_yaml,
 )
+from snap_dashboard.github.utils import parse_owner_repo
 
 logger = logging.getLogger(__name__)
 
@@ -64,17 +65,17 @@ class VersionBumperAgent(BaseAgent):
                 f"open version bump PR already exists for this part"
             )
 
-        repo_slug = _extract_slug(self.packaging_repo)
-        if not repo_slug:
+        owner_repo = parse_owner_repo(self.packaging_repo)
+        if not owner_repo:
             return f"skipped {self.snap_name}: cannot parse packaging_repo URL"
-        owner, _, repo = repo_slug.partition("/")
+        owner, repo = owner_repo
 
         client = BotGitHubClient(bot_token)
 
         # Find snapcraft.yaml
         found = find_snapcraft_yaml(client, owner, repo)
         if not found:
-            return f"skipped {self.snap_name}: snapcraft.yaml not found in {repo_slug}"
+            return f"skipped {self.snap_name}: snapcraft.yaml not found in {owner}/{repo}"
         yaml_path, yaml_content, yaml_sha = found
 
         self._report(f"Patching snapcraft.yaml — {self.snap_name} → {self.new_version}", self.snap_name)
@@ -206,15 +207,3 @@ class VersionBumperAgent(BaseAgent):
                 return result.get("title", default_title), result.get("body", default_body)
 
         return default_title, default_body
-
-
-def _extract_slug(repo: str) -> str | None:
-    repo = repo.strip()
-    if repo.startswith("https://github.com/"):
-        repo = repo[len("https://github.com/"):]
-    elif repo.startswith("http://github.com/"):
-        repo = repo[len("http://github.com/"):]
-    repo = repo.rstrip("/").rstrip(".git")
-    if "/" not in repo:
-        return None
-    return repo

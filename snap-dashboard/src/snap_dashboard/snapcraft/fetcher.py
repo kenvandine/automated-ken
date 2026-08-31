@@ -6,6 +6,8 @@ import logging
 
 import httpx
 
+from snap_dashboard.github.utils import parse_owner_repo
+
 logger = logging.getLogger(__name__)
 
 _GH_API = "https://api.github.com"
@@ -25,12 +27,10 @@ def fetch_snapcraft_yaml(packaging_repo: str, token: str = "") -> str | None:
     if not packaging_repo:
         return None
     # Accept full URLs or bare owner/repo
-    repo_slug = _extract_slug(packaging_repo)
-    if not repo_slug:
+    owner_repo = parse_owner_repo(packaging_repo)
+    if not owner_repo:
         return None
-    owner, _, repo = repo_slug.partition("/")
-    if not repo:
-        return None
+    owner, repo = owner_repo
 
     headers: dict[str, str] = {"Accept": "application/vnd.github.raw+json"}
     if token:
@@ -48,18 +48,3 @@ def fetch_snapcraft_yaml(packaging_repo: str, token: str = "") -> str | None:
 
     logger.debug("no snapcraft.yaml found in %s/%s", owner, repo)
     return None
-
-
-def _extract_slug(repo: str) -> str:
-    """Convert a GitHub URL or owner/repo string to owner/repo."""
-    repo = repo.strip()
-    if repo.startswith("https://github.com/"):
-        repo = repo[len("https://github.com/"):]
-    elif repo.startswith("http://github.com/"):
-        repo = repo[len("http://github.com/"):]
-    # Strip trailing .git
-    if repo.endswith(".git"):
-        repo = repo[:-4]
-    # Strip trailing slash
-    repo = repo.rstrip("/")
-    return repo

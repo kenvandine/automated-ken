@@ -11,6 +11,7 @@ from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import UserConfig, VersionBumpPR
 from snap_dashboard.db.session import get_session
+from snap_dashboard.github.utils import parse_owner_repo
 
 logger = logging.getLogger(__name__)
 
@@ -93,9 +94,10 @@ class PRMonitorAgent(BaseAgent):
         if not pkg_repo or not pr_number:
             return False
 
-        owner, _, repo = _extract_slug(pkg_repo).partition("/") if pkg_repo else ("", "/", "")
-        if not repo:
+        owner_repo = parse_owner_repo(pkg_repo) if pkg_repo else None
+        if not owner_repo:
             return False
+        owner, repo = owner_repo
 
         if status == "open":
             # Always check whether the PR was closed/merged on GitHub first.
@@ -309,12 +311,3 @@ def _snap_name_from_id(snap_id: int) -> str | None:
     with get_session() as session:
         snap = session.query(Snap).get(snap_id)
         return snap.name if snap else None
-
-
-def _extract_slug(repo: str) -> str:
-    repo = repo.strip()
-    if repo.startswith("https://github.com/"):
-        repo = repo[len("https://github.com/"):]
-    elif repo.startswith("http://github.com/"):
-        repo = repo[len("http://github.com/"):]
-    return repo.rstrip("/").rstrip(".git")
