@@ -178,7 +178,6 @@ def trigger_workflow(
         return False, f"Invalid testing_repo format: {testing_repo!r} (expected owner/repo)", None
 
     # Persist a TestRun record first so we have a run_id to pass as an input.
-    auto_promote_run_ids: set[int] = set()
 
     with get_session() as session:
         run = TestRun(
@@ -385,6 +384,10 @@ def sync_test_runs(
             pr_map[(snap, version)] = pr
 
     with get_session() as session:
+        # Track TestRuns whose status just flipped to "passed" so we can
+        # queue auto-promotion for them once the session below is closed.
+        auto_promote_run_ids: set[int] = set()
+
         # Update runs that are still in-flight
         q = session.query(TestRun).filter(
             TestRun.status.in_(["pending", "triggered", "running"])
