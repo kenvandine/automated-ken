@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from snap_dashboard.config import get_config, save_config
 from snap_dashboard.db.session import init_db
 
 logger = logging.getLogger(__name__)
@@ -21,16 +21,21 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 app = FastAPI(title="Automated Ken", docs_url=None, redoc_url=None)
 
-# Session middleware — secret read from env or auto-generated.
-# The full config.py (which reads config.env) is not used here to avoid
-# circular import issues and to ensure middleware is registered before startup.
-_session_secret = os.environ.get("SESSION_SECRET", "")
+# Session middleware — secret comes from config.env / SESSION_SECRET env var
+# (for a snap install, snap/hooks/configure generates and persists this via
+# `snapctl set session-secret=...` the first time it runs, so it survives
+# daemon restarts). If neither is set (e.g. a brand-new dev-mode checkout),
+# generate one now and persist it to config.env so it's stable across
+# restarts here too, instead of silently minting a new throwaway secret
+# every time the process starts and logging everyone out.
+_config = get_config()
+_session_secret = _config.session_secret
 if not _session_secret:
     _session_secret = secrets.token_hex(32)
-    logger.warning(
-        "SESSION_SECRET not set — using a random key. "
-        "Sessions will not persist across restarts. "
-        "Set SESSION_SECRET in your config for production use."
+    save_config({"SESSION_SECRET": _session_secret})
+    logger.info(
+        "No SESSION_SECRET configured — generated and persisted a new one "
+        "to config.env so sessions survive restarts."
     )
 app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 

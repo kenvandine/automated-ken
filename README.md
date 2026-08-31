@@ -15,6 +15,7 @@ A pool of background agents runs continuously and reports live to the dashboard:
 
 | Agent | What it does |
 |-------|-------------|
+| **Collector** | Refreshes Snap Store channel maps and GitHub/GitLab issue/PR counts on a per-user interval, so the dashboard stays current without manual refreshes |
 | **Release Scanner** | Checks packaging repos for new upstream releases; spawns a Version Bumper when found |
 | **Version Bumper** | Opens a version bump PR on the packaging repo via a bot GitHub account (no git clone — uses GitHub Contents API) |
 | **PR Monitor** | Polls open version bump PRs; triggers YARF tests when build CI passes |
@@ -40,25 +41,44 @@ pip install -e .
 export GITHUB_CLIENT_ID=...
 export GITHUB_CLIENT_SECRET=...
 
-snap-dashboard serve          # http://127.0.0.1:8080
+snap-dashboard serve          # http://127.0.0.1:9080
 ```
 
-Open `http://127.0.0.1:8080` and log in with your GitHub account. The first-run onboarding wizard guides you through configuring your publisher name, GitHub token, and (optionally) bot account details.
+Open `http://127.0.0.1:9080` and log in with your GitHub account. The first-run onboarding wizard guides you through configuring your publisher name, GitHub token, and (optionally) bot account details.
 
 ## Snap installation
+
+This snap isn't tied to any particular publisher account — anyone can
+install it and point it at their own snaps.
 
 ```sh
 sudo snap install snap-dashboard
 ```
 
-Configure OAuth credentials and start the server:
+Create a GitHub OAuth App (**GitHub → Settings → Developer settings → OAuth
+Apps → New OAuth App**) with callback URL `http://<host>:9080/auth/callback`,
+then configure it and start the server:
 
 ```sh
 snap set snap-dashboard github-client-id=...
 snap set snap-dashboard github-client-secret=...
 ```
 
-The `serve` daemon starts automatically. Open `http://127.0.0.1:8080`.
+The `serve` daemon starts (and restarts itself to pick up the new config)
+automatically. Open `http://127.0.0.1:9080`, sign in with GitHub, and the
+onboarding wizard walks you through the rest (Snap Store publisher account,
+personal access token, etc.) — all stored per-account in the local database,
+so multiple people can run their own independent setups against the same
+snap-dashboard instance if they want to.
+
+A session-signing secret is generated automatically on first run and
+persisted (`snap get snap-dashboard session-secret`), so logins survive
+daemon restarts without any extra configuration. To bind to a non-default
+address/port:
+
+```sh
+snap set snap-dashboard bind=0.0.0.0 port=8080
+```
 
 ## Configuration
 
@@ -126,6 +146,8 @@ snap-dashboard/
 │   ├── agents/
 │   │   ├── base.py              BaseAgent abstract class
 │   │   ├── runner.py            Thread pool + periodic scheduler
+│   │   ├── scheduling.py        Per-user agent scheduling (single source of truth)
+│   │   ├── collector_agent.py   Periodic Store/GitHub data refresh
 │   │   ├── release_scanner.py   Upstream release detection
 │   │   ├── version_bumper.py    Version bump PR creation
 │   │   ├── pr_monitor.py        CI status polling + YARF trigger
@@ -136,6 +158,7 @@ snap-dashboard/
 │   │   └── session.py           Session factory + init_db() + migrations
 │   ├── github/
 │   │   ├── client.py            Issues/PR fetching (GitHub + GitLab)
+│   │   ├── utils.py             Repo URL/slug parsing helpers
 │   │   ├── bot_client.py        Bot account: branches, files, PRs, workflow dispatch
 │   │   └── pr_viewer.py         Test result PR parsing
 │   ├── lemonade/

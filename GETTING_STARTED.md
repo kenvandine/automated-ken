@@ -23,8 +23,8 @@ snap-dashboard uses GitHub OAuth for authentication. You need an OAuth App regis
 | Field | Value |
 |-------|-------|
 | Application name | `snap-dashboard (dev)` |
-| Homepage URL | `http://127.0.0.1:8080` |
-| Authorization callback URL | `http://127.0.0.1:8080/auth/callback` |
+| Homepage URL | `http://127.0.0.1:9080` |
+| Authorization callback URL | `http://127.0.0.1:9080/auth/callback` |
 
 Copy the **Client ID** and generate a **Client Secret**.
 

@@ -1,30 +1,42 @@
 name: snap-dashboard
 base: core24
-version: git
-summary: Personal snap maintenance dashboard
+adopt-info: snap-dashboard
+title: Automated Ken
+summary: Self-hosted agentic snap maintenance dashboard
 description: |
-  Tracks channel versions, open issues, and PRs for snaps you maintain.
-  Provides a web dashboard and scheduled background collection.
+  Monitors channel versions, automates version-bump PRs, triggers YARF
+  tests, and rebuilds stale snaps for the publisher account you configure.
+  Provides a live multi-user web dashboard (GitHub OAuth login) and a pool
+  of background agents. Anyone can install this snap and point it at their
+  own GitHub OAuth App to run it for their own snaps — see README.md.
+contact: https://github.com/kenvandine/automated-ken/issues
+issues: https://github.com/kenvandine/automated-ken/issues
+source-code: https://github.com/kenvandine/automated-ken
 grade: stable
 confinement: strict
 
-# User-configurable snap options (snap set snap-dashboard <key>=<value>)
-# bind:         bind address (default: 127.0.0.1)
-# port:         listen port   (default: 9080)
-# github-token: GitHub PAT    (default: "")
-# publisher:    Store account  (default: "")
-# interval:     collect interval in hours (default: 6)
+# Required snap options (snap set snap-dashboard <key>=<value>):
+#   github-client-id:     OAuth App client ID (create one at
+#                          GitHub → Settings → Developer settings → OAuth Apps)
+#   github-client-secret: OAuth App client secret
+#
+# Optional snap options:
+#   bind:            bind address                        (default: 127.0.0.1)
+#   port:            listen port                          (default: 9080)
+#   session-secret:  cookie-signing secret — auto-generated and persisted
+#                    on first run if left unset; only set this yourself if
+#                    you need multiple replicas to share sessions.
+#
+# Legacy/optional single-user bootstrap values, mostly superseded by the
+# web UI's Settings/onboarding pages after you log in:
+#   github-token:    GitHub PAT used as a fallback by the CLI
+#   publisher:       default Snap Store publisher account for the CLI
+#   interval:        legacy `snap-dashboard collect` CLI default (hours)
 
 apps:
   snap-dashboard:
     command: bin/snap-dashboard
     plugs: [network, home]
-
-  collect:
-    command: bin/snap-dashboard collect
-    daemon: oneshot
-    timer: 00:00~24:00/4
-    plugs: [network]
 
   serve:
     command: bin/snap-dashboard serve
@@ -36,3 +48,12 @@ parts:
     plugin: python
     source: .
     python-requirements: [requirements.txt]
+    # `version: git` doesn't work here: snapcraft.yaml lives in a
+    # subdirectory (snap-dashboard/) of the git repo, which has no .git of
+    # its own, and this repo has no version tags anyway. Pull the version
+    # straight out of pyproject.toml instead, so there's exactly one place
+    # (pyproject.toml) to bump it.
+    override-pull: |
+      craftctl default
+      version="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
+      craftctl set version="${version:-0.0.0}"

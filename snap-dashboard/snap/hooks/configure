@@ -1,18 +1,50 @@
 #!/bin/sh
+# Called automatically by snapd:
+#   - once right after install (with whatever defaults are set below)
+#   - every time `snap set snap-dashboard <key>=<value>` is run
+#
+# Translates snapd's own config store (accessed via snapctl) into
+# $SNAP_DATA/config.env, which is what snap_dashboard.config.get_config()
+# actually reads at runtime. Anyone deploying this snap for themselves
+# only needs `snap set snap-dashboard github-client-id=... github-client-secret=...`
+# (see README.md) — everything else has a sane default.
 set -e
-bind=$(snapctl get bind 2>/dev/null || echo "127.0.0.1")
-port=$(snapctl get port 2>/dev/null || echo "9080")
-token=$(snapctl get github-token 2>/dev/null || echo "")
-publisher=$(snapctl get publisher 2>/dev/null || echo "")
-interval=$(snapctl get interval 2>/dev/null || echo "6")
+
+bind=$(snapctl get bind 2>/dev/null || true)
+port=$(snapctl get port 2>/dev/null || true)
+session_secret=$(snapctl get session-secret 2>/dev/null || true)
+github_client_id=$(snapctl get github-client-id 2>/dev/null || true)
+github_client_secret=$(snapctl get github-client-secret 2>/dev/null || true)
+
+# Legacy/optional single-user bootstrap values — most setups now configure
+# everything through the web UI (Settings / onboarding) after logging in,
+# but these are still honoured as fallbacks for `snap-dashboard collect`
+# and the `snap-dashboard add` CLI.
+github_token=$(snapctl get github-token 2>/dev/null || true)
+publisher=$(snapctl get publisher 2>/dev/null || true)
+interval=$(snapctl get interval 2>/dev/null || true)
+
+# Sessions are signed with SESSION_SECRET. Without a stable secret, every
+# restart of the serve daemon invalidates every logged-in session. Generate
+# one automatically on first run and persist it in snapd's own config store
+# (via snapctl set) so it survives reinstalls/refreshes and is visible via
+# `snap get snap-dashboard session-secret`, instead of silently regenerating
+# a new throwaway secret on every process start.
+if [ -z "$session_secret" ]; then
+    session_secret=$(head -c32 /dev/urandom | base64 | tr -d '\n')
+    snapctl set session-secret="$session_secret"
+fi
 
 mkdir -p "$SNAP_DATA"
 cat > "$SNAP_DATA/config.env" <<EOF
-BIND=${bind}
-PORT=${port}
-GITHUB_TOKEN=${token}
-PUBLISHER=${publisher}
-COLLECT_INTERVAL_HOURS=${interval}
+BIND=${bind:-127.0.0.1}
+PORT=${port:-9080}
+SESSION_SECRET=${session_secret}
+GITHUB_CLIENT_ID=${github_client_id:-}
+GITHUB_CLIENT_SECRET=${github_client_secret:-}
+GITHUB_TOKEN=${github_token:-}
+PUBLISHER=${publisher:-}
+COLLECT_INTERVAL_HOURS=${interval:-6}
 EOF
 
 snapctl restart snap-dashboard.serve 2>/dev/null || true
