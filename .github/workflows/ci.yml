@@ -6,16 +6,15 @@ on:
   pull_request:
     branches: [main]
 
-defaults:
-  run:
-    working-directory: snap-dashboard
-
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: snap-dashboard
     steps:
       - uses: actions/checkout@v4
 
