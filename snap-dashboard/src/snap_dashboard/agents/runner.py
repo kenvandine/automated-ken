@@ -105,6 +105,7 @@ class AgentRunner:
             next_in = max(0.0, job.interval_seconds - elapsed)
             result.append({
                 "agent_type": job.agent_cls.agent_type,
+                "user_id": job.user_id,
                 "interval_hours": job.interval_seconds / 3600,
                 "next_run_in_seconds": int(next_in),
             })
@@ -113,6 +114,13 @@ class AgentRunner:
     def submit(self, agent: "BaseAgent") -> None:
         """Submit an agent for immediate background execution."""
         self._executor.submit(_safe_run, agent)
+
+    def is_scheduled(self, agent_cls: type, user_id: int | None = None) -> bool:
+        """Return True if a periodic job already exists for (agent_cls, user_id)."""
+        return any(
+            job.agent_cls is agent_cls and job.user_id == user_id
+            for job in self._scheduled
+        )
 
     # ------------------------------------------------------------------
     # Periodic scheduling
@@ -155,12 +163,21 @@ class AgentRunner:
             self._start_scheduler()
 
     def reschedule(self, agent_cls: type, interval_hours: float, **kwargs) -> None:
-        """Update or add a periodic schedule for the given agent class."""
+        """Update or add a periodic schedule for the given agent class + user.
+
+        Jobs are matched by ``(agent_cls, user_id)`` — not agent_cls alone —
+        so that changing one user's settings can never overwrite another
+        user's scheduled job in a multi-tenant deployment.
+        """
+        user_id = kwargs.get("user_id")
         for job in self._scheduled:
-            if job.agent_cls is agent_cls:
+            if job.agent_cls is agent_cls and job.user_id == user_id:
                 job.interval_seconds = interval_hours * 3600
                 job.kwargs = kwargs
-                logger.info("rescheduled %s every %.1fh", agent_cls.__name__, interval_hours)
+                logger.info(
+                    "rescheduled %s (user_id=%s) every %.1fh",
+                    agent_cls.__name__, user_id, interval_hours,
+                )
                 return
         self.schedule_periodic(agent_cls, interval_hours, **kwargs)
 
@@ -206,6 +223,11 @@ class _PeriodicJob:
         self.agent_cls = agent_cls
         self.interval_seconds = interval_hours * 3600
         self.kwargs = kwargs
+        # user_id (if any) is tracked separately so jobs can be matched by
+        # (agent_cls, user_id) instead of agent_cls alone — otherwise
+        # rescheduling one user's agent could silently hijack another
+        # user's job in a multi-tenant deployment.
+        self.user_id = kwargs.get("user_id")
         # When fire_immediately=True the first submission is done inline by
         # schedule_periodic(); set last_run to now so the scheduler doesn't
         # double-fire before the interval elapses.

@@ -47,41 +47,26 @@ async def on_startup() -> None:
     init_db()
     logger.info("Database initialised.")
 
-    from snap_dashboard.agents.runner import get_runner
-    from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
     from snap_dashboard.agents.pr_monitor import PRMonitorAgent
-    from snap_dashboard.agents.stale_build_scanner import StaleSnapScannerAgent
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.scheduling import schedule_user_agents
+    from snap_dashboard.auth import get_user_config
     from snap_dashboard.db.models import UserConfig
     from snap_dashboard.db.session import get_session as _gs
 
     runner = get_runner()
 
-    # Schedule the release scanner for every active user.
-    # fire_immediately=True kicks off the first scan within seconds so the
+    # Schedule the per-user agents (release scanner, collector, stale build
+    # scanner) for every user that already has a UserConfig row.
+    # fire_immediately=True kicks off the first run within seconds so the
     # dashboard populates without waiting for the full interval to elapse.
     with _gs() as session:
-        configs = session.query(UserConfig).all()
-        for uc in configs:
-            interval = uc.agent_interval_hours or 4
-            runner.schedule_periodic(
-                ReleaseScannerAgent,
-                interval_hours=interval,
-                fire_immediately=True,
-                user_id=uc.user_id,
-            )
+        user_ids = [uc.user_id for uc in session.query(UserConfig).all()]
+    for uid in user_ids:
+        schedule_user_agents(runner, uid, get_user_config(uid), fire_immediately=True)
 
     # PR monitor runs every 5 minutes regardless of user count.
     runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
-
-    # Stale build scanner runs every 24h per user.
-    with _gs() as session:
-        configs = session.query(UserConfig).all()
-        for uc in configs:
-            runner.schedule_periodic(
-                StaleSnapScannerAgent,
-                interval_hours=24,
-                user_id=uc.user_id,
-            )
 
     logger.info("Agent runner started.")
 
