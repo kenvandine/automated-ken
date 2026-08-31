@@ -9,7 +9,7 @@ import httpx
 
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import UserConfig, VersionBumpPR
+from snap_dashboard.db.models import VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_owner_repo
 
