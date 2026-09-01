@@ -227,7 +227,7 @@ real logged-in session (no synthetic compositor needed — the runner
    extraction + brightness-validity heuristic already proven in the
    production workflow — factor that Python snippet out of the inline
    workflow script into a small shared module
-   (`snap_dashboard_runner/screenshots.py`) so it has one implementation
+   (`automated_ken_runner/screenshots.py`) so it has one implementation
    instead of drifting between CI and the runner.
 5. Clean up: close the app under test so the desktop returns to a clean
    idle state for the human. `snap remove` is a configurable option
@@ -270,20 +270,165 @@ machine.
   `error` and — if `prefer_remote_runner` — automatically retries via
   GitHub Actions.
 
-## Phase R7 — Packaging + UX polish
+## Phase R7 — Packaging: a Debian package
 
 **Goal:** Make installing this as easy as installing a GitHub self-
-hosted runner.
+hosted runner, shipped as a `.deb` — matching the exact packaging
+convention already established in [`ailab`](https://github.com/lemonade-sdk/ailab)
+(same author, same target platform: Ubuntu + snapd + systemd `--user`
+services), rather than inventing a new one.
 
-- Ship `automated-ken-runner` as its own small Python package/daemon,
-  separate from `snap-dashboard` (different machine, different
-  lifecycle, different trust boundary). **Packaging format is an open
-  question — see below.**
-- `/runners` "Add runner" flow shows a single copy-pasteable command,
-  e.g.:
+### Layout
+
+New top-level directory in this repo, `runner/`, sibling to
+`snap-dashboard/` — same monorepo, different install target:
+
+```
+runner/
+├── pyproject.toml              setuptools + setuptools-scm, dynamic version
+├── automated_ken_runner/
+│   ├── __init__.py
+│   ├── cli.py                  click CLI: enroll, run, install-service, status
+│   ├── config.py               reads/writes ~/.config/automated-ken-runner/
+│   ├── idle.py                 loginctl / logind idle+lock detection
+│   ├── client.py                httpx client for /api/runners/* (bearer auth)
+│   ├── executor.py              snap install/run + yarf invocation
+│   └── screenshots.py            zlib/base64 log.html extraction (shared with
+│                                  the CI workflow's inline script — see below)
+├── debian/
+│   ├── control                  debhelper-compat (=13), dh-python,
+│   │                            pybuild-plugin-pyproject, python3-all, +
+│   │                            Depends: snapd, systemd, python3-click,
+│   │                            python3-httpx, python3-pil
+│   ├── rules                     dh $@ --buildsystem=pybuild --with python3;
+│   │                             SETUPTOOLS_SCM_PRETEND_VERSION from changelog
+│   ├── changelog
+│   ├── copyright
+│   ├── automated-ken-runner.install     -> ships the systemd user unit
+│   ├── automated-ken-runner.service     systemd --user unit (see below)
+│   └── automated-ken-runner.postinst    snapd presence check + enable hint
+└── README.md
+```
+
+### systemd unit (`debian/automated-ken-runner.service`)
+
+```ini
+[Unit]
+Description=Automated Ken remote test runner
+Documentation=https://github.com/kenvandine/automated-ken
+After=network.target graphical-session.target
+
+[Service]
+ExecStart=/usr/bin/automated-ken-runner run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+A `systemd --user` unit (not system-wide) is the right call here, not
+just convention-matching: the runner needs to `snap run` GUI apps into
+the *logged-in graphical session* it's checking idle-state for, and
+needs that session's `WAYLAND_DISPLAY`/`DBUS_SESSION_BUS_ADDRESS` — a
+system service would need to fight its way into the user session anyway
+(`machinectl shell`, manual bus address plumbing) for no benefit.
+
+### `debian/control`
+
+```
+Source: automated-ken-runner
+Section: utils
+Priority: optional
+Maintainer: Ken VanDine <ken@vandine.org>
+Build-Depends:
+ debhelper-compat (= 13),
+ dh-python,
+ pybuild-plugin-pyproject,
+ python3-all,
+ python3-setuptools,
+ python3-setuptools-scm
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://github.com/kenvandine/automated-ken
+
+Package: automated-ken-runner
+Architecture: all
+Depends:
+ ${misc:Depends},
+ ${python3:Depends},
+ python3-click,
+ python3-httpx,
+ python3-pil,
+ snapd,
+ systemd,
+ util-linux-extra
+Description: Private test runner for Automated Ken
+ Registers this machine as a private test-execution resource for an
+ Automated Ken dashboard instance. Polls for queued YARF test jobs,
+ installs and runs the snap under test in the real logged-in desktop
+ session (not a headless/faked compositor), captures and validates
+ screenshots, and reports results back — comparable to installing a
+ self-hosted GitHub Actions runner.
+ .
+ Only claims jobs while the desktop is unlocked and idle, so it never
+ interrupts active use of the machine.
+```
+
+### `debian/automated-ken-runner.postinst`
+
+Mirrors `ailab.postinst`'s style: check for `snapd` (hard requirement,
+since job execution is entirely `snap install`/`snap run`), print the
+enable-service hint rather than auto-enabling (a `systemd --user` unit
+can't be usefully enabled from a root postinst script running outside
+any user session anyway):
+
+```sh
+#!/bin/sh
+set -eu
+case "$1" in
+    configure)
+        if ! command -v snap >/dev/null 2>&1; then
+            echo "automated-ken-runner: snapd is required." >&2
+            exit 1
+        fi
+        echo ""
+        echo "automated-ken-runner installed. Next steps:"
+        echo "  automated-ken-runner enroll --server <url> --token <token>"
+        echo "  systemctl --user enable --now automated-ken-runner"
+        echo ""
+        ;;
+esac
+#DEBHELPER#
+```
+
+### CI (mirrors `ailab/.github/workflows/ci.yml`)
+
+Add jobs to the existing `.github/workflows/ci.yml` in this repo (or a
+new workflow scoped to `runner/`, triggered on paths):
+- `ruff check runner/automated_ken_runner/`
+- smoke test: `pip install -e runner/`, import the package, `automated-ken-runner --help`
+- `lintian` on an unsigned source build (`debuild -us -uc -S -d` from
+  `runner/`, then `lintian --fail-on error ../*.changes`)
+
+### Release (mirrors `ailab/.github/workflows/release-ppa.yml`)
+
+Same pattern: a `release: [published]`-triggered workflow that stamps
+`debian/changelog` per target distro (noble/questing/resolute), builds a
+signed source package with `debuild`, and `dput`s to a Launchpad PPA
+(e.g. `ppa:ken-vandine/automated-ken-runner`) — reusing the same
+`GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` org secrets already set
+up for `ailab`, if this repo has access to them, otherwise new ones
+scoped to this repo.
+
+### `/runners` UX
+
+- "Add runner" flow shows the exact install + enroll commands, e.g.:
   ```sh
+  sudo add-apt-repository ppa:ken-vandine/automated-ken-runner
+  sudo apt install automated-ken-runner
   automated-ken-runner enroll --server https://dashboard.example.com --token r_AbC123...
-  automated-ken-runner install-service   # sets up a systemd --user unit, starts it
+  systemctl --user enable --now automated-ken-runner
   ```
 - `/runners/{id}` detail page: recent jobs run on that machine, last
   screenshots, revoke button — same shape as `/version-bumps/{id}`.
@@ -294,23 +439,10 @@ hosted runner.
 
 ## Open Questions (need a decision before/while implementing)
 
-1. **Packaging format for `automated-ken-runner`.** A snap would be
-   consistent with the rest of this project and gives easy
-   `sudo snap install`, but it would need broad, manually-connected
-   interfaces (`snapd-control` to install/refresh arbitrary snaps on the
-   host, `desktop`/`wayland`/`x11`, `screen-inhibit-control` maybe) and
-   likely wouldn't pass Snap Store review as a *strict* confinement snap
-   doing this — it'd effectively want classic confinement or dangerous
-   sideloading. Given this is a private tool (not meant for the Store),
-   options are: (a) classic-confinement snap, sideloaded with
-   `--dangerous`/`--classic` on each runner machine — consistent
-   tooling, more friction per install; (b) a plain pip package + systemd
-   `--user` unit, installed via a one-line `curl | sh` installer script
-   or `pipx install` — simplest to build, no confinement fights, matches
-   how most self-hosted CI runners (GitHub, GitLab, Buildkite) actually
-   ship. **My inclination is (b)** given it's not going to the Store and
-   needs to freely `snap install`/`snap run` arbitrary other snaps — but
-   this is your call, and it changes Phase R7 meaningfully.
+1. ~~Packaging format for `automated-ken-runner`.~~ **Resolved: `.deb`**,
+   matching the `ailab` convention exactly (debhelper + pybuild +
+   setuptools-scm + systemd `--user` unit + Launchpad PPA release flow).
+   See Phase R7 above for the concrete layout.
 2. **Desktop environment scope for v1.** `loginctl`-based idle/lock
    detection works generically via logind; the GNOME Mutter D-Bus
    idle-monitor fallback is GNOME-specific. Fine to scope v1 to
@@ -330,6 +462,11 @@ hosted runner.
    token, and re-clones/pulls the whole repo instead of just the one
    suite). Proxying is my default recommendation (keeps runner
    credential-free), but flagging the tradeoff.
+5. **PPA access.** Does this repo's GitHub Actions have access to the
+   same `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` secrets used for
+   `ailab`'s release-ppa.yml, or does a new Launchpad PPA + GPG key need
+   to be set up for `automated-ken-runner` specifically? Not blocking
+   for R1–R6 (only matters once we get to actually cutting a release).
 
 ## Also Worth Doing (adjacent, smaller, not blocking this plan)
 
