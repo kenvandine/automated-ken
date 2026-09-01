@@ -24,8 +24,9 @@ A pool of background agents runs continuously and reports live to the dashboard:
 
 ### YARF Testing
 - Trigger YARF snap tests against a GitHub Actions–based testing repository
-- Test results (including screenshots) are committed back as a PR
+- Test results are polled from the Actions run status and reflected on the dashboard
 - Passed tests can be promoted to stable from the dashboard
+- **Planned:** a private remote test runner lets you register idle desktop/laptop machines as test-execution resources — see [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md) (not implemented yet)
 
 ## Quick start (development)
 

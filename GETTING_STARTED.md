@@ -1,8 +1,15 @@
-# Getting Started with snap-dashboard
+# Getting Started with Automated Ken
 
-A step-by-step guide to setting up snap-dashboard in development mode and running automated snap tests.
+A step-by-step guide to setting up the dashboard server and, once
+enrolled, running automated snap tests against real runner machines.
+
+This guide has two parts:
+- **[Part 1: The dashboard server](#part-1-the-dashboard-server)** — works today, in either dev mode (below) or as a snap (see [`README.md`](README.md#snap-installation)).
+- **[Part 2: Runner machines](#part-2-runner-machines)** — describes the private remote test runner. **Not implemented yet** — this documents the intended install/enroll flow from [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md) so it's ready to go the moment Phases R1–R7 land; nothing in Part 2 will work until then.
 
 ---
+
+# Part 1: The dashboard server
 
 ## 1. Clone and install
 
@@ -135,6 +142,120 @@ To automatically rebuild snaps that haven't published a new revision recently:
 
 When triggered, the agent creates `.github/workflows/automated-snap-build.yml` in each packaging repo (if absent) and dispatches a build that publishes to the `candidate` channel.
 
+---
+
+# Part 2: Runner machines
+
+> **Not implemented yet.** This section documents the intended
+> install/enroll flow for the private remote test runner described in
+> [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md) (Phases R1–R7).
+> Commands below (`automated-ken-runner ...`, the `/runners` page) don't
+> exist in the dashboard yet — treat this as a preview of what setting
+> up a fleet of runner laptops will look like once it ships, so this
+> doc doesn't need to be rewritten from scratch at that point.
+
+A runner is a physical desktop or laptop, sitting idle with its screen
+unlocked, registered against your dashboard as a private test-execution
+resource — similar to installing a self-hosted GitHub Actions runner.
+Instead of a faked headless compositor, YARF tests run in the machine's
+real logged-in desktop session, and screenshots are captured from the
+real screen.
+
+You'll typically want **more than one** runner registered: different
+architectures, different desktop environments, or just enough capacity
+that one busy/offline machine doesn't block testing. Each runner handles
+one job at a time; the dashboard picks any idle, unlocked runner that
+matches (or a specific one you choose on the `/testing` page), and falls
+back to GitHub Actions automatically if none are available.
+
+## 11. Pick a dedicated machine
+
+Any spare desktop or laptop works, but **use a machine dedicated to this
+purpose** — Part 2's setup disables screen-lock and auto-suspend
+entirely (step 13), which means anyone with physical access to the
+machine has full access to whatever's logged into it. Don't do this on
+your daily-driver laptop.
+
+Requirements:
+- Ubuntu (or another distro with `systemd-logind` and, ideally, GNOME —
+  see [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md#open-questions-need-a-decision-beforewhile-implementing) open question #2 on desktop-environment scope)
+- `snapd` installed (used to install/run the snaps under test)
+- Logged into a real graphical desktop session (not just SSH'd in — YARF
+  needs an actual compositor to render into)
+- Plugged into power, or otherwise not going to run out of battery
+  mid-fleet
+
+## 12. Install `automated-ken-runner`
+
+```bash
+sudo add-apt-repository ppa:ken-vandine/automated-ken-runner
+sudo apt update
+sudo apt install automated-ken-runner
+```
+
+## 13. Enroll the machine
+
+On the dashboard, go to **Runners → Add runner** to generate a one-time
+enrollment token (expires in ~15 minutes), then on the runner machine:
+
+```bash
+automated-ken-runner enroll --server https://your-dashboard-host:9080 --token <token>
+```
+
+This also runs the machine-preparation step automatically, which:
+- disables the screen lock and idle-suspend timeouts
+- keeps the display powered on (so screenshots don't capture a blanked screen)
+- disables lid-close suspend, if it's a laptop
+
+You'll see a warning printed to confirm you understand the tradeoff:
+
+```
+⚠️  This machine's screen will no longer lock or auto-suspend. Only do
+this on a dedicated test device with no sensitive data logged in, in a
+physically secured location — anyone with physical access now has full
+access to whatever's logged in.
+```
+
+If you'd rather manage those power settings yourself (e.g. via a `dconf`
+policy across a fleet), pass `--skip-power-settings` and set them up on
+your own — see the exact `gsettings` commands in
+[`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md#runner-machine-preparation-disabling-screen-lock-and-auto-suspend).
+
+## 14. Start the runner service
+
+```bash
+systemctl --user enable --now automated-ken-runner
+```
+
+It's a `systemd --user` service (not system-wide) — it needs the real
+logged-in graphical session's display and D-Bus session to launch GUI
+apps into, so it has to run as your user, in your session, not as root.
+
+## 15. Verify it shows up
+
+Back on the dashboard's **Runners** page, the machine should appear
+within a few seconds, reporting `idle` (unlocked, no recent input). If
+it shows `offline`, check `systemctl --user status automated-ken-runner`
+and `journalctl --user -u automated-ken-runner -f` on the runner machine.
+
+## 16. Add more runners
+
+Repeat steps 11–15 on each additional machine — a fresh enrollment token
+per machine, generated from the same **Runners** page. There's no limit
+on how many you register; more idle runners just means more test
+capacity and less waiting on GitHub Actions.
+
+## 17. Send a test to a specific runner (or "any available")
+
+On the **Testing** page, the "Run on" control next to each snap lets you
+pick **GitHub Actions**, a specific runner by name, or **Any available
+runner**. Triggering a test with a runner selected dispatches it the
+same way as today's GitHub Actions flow, except results (including
+screenshots captured on the real screen) come back from that machine
+directly.
+
+---
+
 ## Quick reference
 
 | Action | URL |
@@ -144,3 +265,4 @@ When triggered, the agent creates `.github/workflows/automated-snap-build.yml` i
 | Agent activity | http://127.0.0.1:9080/agents |
 | Version bump PRs | http://127.0.0.1:9080/version-bumps |
 | Settings | http://127.0.0.1:9080/settings |
+| Runners *(planned)* | http://127.0.0.1:9080/runners |
