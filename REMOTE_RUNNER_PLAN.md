@@ -179,6 +179,27 @@ they're actually available (idle + unlocked) without disturbing anyone.
   `/api/events`) to push status changes instead of polling, consistent
   with how the Agents page already works.
 
+### Idle detection vs. "allowed to lock/suspend at all" — these are two different knobs
+
+`LockedHint`/`IdleHint`/keyboard-and-mouse-idle-seconds answer "is a
+human actively using this machine right now" — that's the right signal
+for "don't steal the machine out from under someone." It says nothing
+about whether the *OS* is configured to auto-lock the screen or suspend
+after its own inactivity timeout, which is a completely separate GNOME
+power/screensaver setting.
+
+For a machine that's meant to sit there as a **dedicated, always-
+available test device**, the OS-level auto-lock/auto-suspend timeouts
+need to be **disabled entirely** (see "Runner machine preparation"
+under Phase R7) — otherwise the machine locks itself or suspends after
+N idle minutes and becomes permanently unavailable for dispatch the
+moment nobody's touched it in a while, which defeats the entire point.
+The runner's own idle/lock heartbeat still matters on a machine
+configured this way — it's the difference between "nobody's touched
+this in 3 minutes, safe to run tests" and "someone just sat down and
+is actively using it, don't interrupt them" — but it should very rarely
+observe `locked=true` if the machine is prepared correctly.
+
 ## Phase R4 — Job queue + dispatch
 
 **Goal:** A queued `TestRun` can be claimed and picked up by an eligible
@@ -288,7 +309,7 @@ runner/
 ├── pyproject.toml              setuptools + setuptools-scm, dynamic version
 ├── automated_ken_runner/
 │   ├── __init__.py
-│   ├── cli.py                  click CLI: enroll, run, install-service, status
+│   ├── cli.py                  click CLI: enroll, run, prepare-machine, status
 │   ├── config.py               reads/writes ~/.config/automated-ken-runner/
 │   ├── idle.py                 loginctl / logind idle+lock detection
 │   ├── client.py                httpx client for /api/runners/* (bearer auth)
@@ -420,6 +441,47 @@ signed source package with `debuild`, and `dput`s to a Launchpad PPA
 `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` org secrets already set
 up for `ailab`, if this repo has access to them, otherwise new ones
 scoped to this repo.
+
+### Runner machine preparation: disabling screen-lock and auto-suspend
+
+A machine dedicated to this purpose needs GNOME's own idle-lock and
+auto-suspend timeouts turned off — otherwise it locks or suspends itself
+after N idle minutes and permanently disqualifies itself from dispatch
+(see the "Idle detection vs. allowed to lock/suspend at all" note under
+Phase R3). Doing this by hand across several laptops is exactly the kind
+of fiddly, easy-to-forget setup step that should be automated rather
+than left as a manual checklist — add it as a CLI subcommand:
+
+```sh
+automated-ken-runner prepare-machine
+```
+
+which runs (and is idempotent/safe to re-run):
+
+```sh
+# Never blank/lock the screen or suspend due to inactivity
+gsettings set org.gnome.desktop.session idle-delay 0
+gsettings set org.gnome.desktop.screensaver lock-enabled false
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-ac-type 'nothing'
+gsettings set org.gnome.settings-daemon.plugins.power sleep-inactive-battery-type 'nothing'
+# Keep the display itself powered on too — DPMS-off would break screenshot capture
+gsettings set org.gnome.settings-daemon.plugins.power idle-dim false
+# If it's a laptop: don't suspend on lid-close either (assumes it stays
+# plugged in and open, or docked/lid-open on a stand)
+gsettings set org.gnome.settings-daemon.plugins.power lid-close-ac-action 'nothing'
+```
+
+`enroll` should call `prepare-machine` automatically (with a `--skip-power-settings`
+escape hatch for anyone who wants to manage this themselves, e.g. via
+`dconf` policy on a fleet), and print a clear warning either way:
+
+> ⚠️  This machine's screen will no longer lock or auto-suspend. Only do
+> this on a dedicated test device with no sensitive data logged in, in a
+> physically secured location — anyone with physical access now has full
+> access to whatever's logged in.
+
+That last point is a genuine security tradeoff, not just a courtesy
+note — worth stating plainly in both the CLI output and the docs.
 
 ### `/runners` UX
 
