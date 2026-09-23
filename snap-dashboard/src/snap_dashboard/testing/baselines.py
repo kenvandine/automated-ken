@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import httpx
 
-from snap_dashboard.db.models import StableScreenshotBaseline, TestRun
+from snap_dashboard.db.models import StableScreenshotBaseline, TestRun, TestRunScreenshot
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.pr_viewer import get_pr_details
 
@@ -29,8 +29,22 @@ def load_test_run_screenshots(
     testing_repo: str,
     pr_number: int | None,
     token: str = "",
+    test_run_id: int | None = None,
 ) -> list[ScreenshotAsset]:
-    """Load screenshots for a test PR and return them with durable image bytes."""
+    """Load screenshots captured by a YARF test run.
+
+    Tries the ``TestRunScreenshot`` table first (populated by
+    :func:`snap_dashboard.testing.orchestrator.ingest_run_screenshots` from the
+    GitHub Actions artifact — the model actually used by the deployed
+    ``snap-test.yml`` workflow). Falls back to the legacy PR-embedded-PNG model
+    for anyone still using an older testing-repo workflow that commits
+    screenshots to a branch/PR instead of uploading an artifact.
+    """
+    if test_run_id:
+        ingested = get_ingested_screenshot_assets(test_run_id)
+        if ingested:
+            return ingested
+
     if not testing_repo or not pr_number:
         return []
 
@@ -62,6 +76,21 @@ def load_test_run_screenshots(
     return assets
 
 
+def get_ingested_screenshot_assets(test_run_id: int) -> list[ScreenshotAsset]:
+    """Return screenshots already ingested from a GitHub Actions artifact for this run."""
+    with get_session() as session:
+        rows = (
+            session.query(TestRunScreenshot)
+            .filter_by(test_run_id=test_run_id)
+            .order_by(TestRunScreenshot.image_name.asc())
+            .all()
+        )
+        return [
+            ScreenshotAsset(image_name=row.image_name, image_url="", image_b64=row.image_b64)
+            for row in rows
+        ]
+
+
 def persist_stable_baseline_for_run(
     test_run_id: int,
     testing_repo: str,
@@ -79,7 +108,7 @@ def persist_stable_baseline_for_run(
         revision = run.revision
         pr_number = run.pr_number
 
-    assets = load_test_run_screenshots(testing_repo, pr_number, token)
+    assets = load_test_run_screenshots(testing_repo, pr_number, token, test_run_id=test_run_id)
     if not assets:
         return 0
 

@@ -11,7 +11,7 @@
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <form method="post" action="/testing/sync">
-      <button type="submit" class="btn btn-secondary btn-sm">Sync from GitHub</button>
+      <button type="submit" class="p-button is-small">Sync from GitHub</button>
     </form>
   </div>
 </div>
@@ -25,8 +25,8 @@
     and a GitHub Actions workflow.
   </p>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
-    <a href="/settings" class="btn btn-primary btn-sm">Configure in Settings</a>
-    <a href="/testing/workflow-template" class="btn btn-secondary btn-sm" download="snap-test.yml">
+    <a href="/settings" class="p-button--positive is-small">Configure in Settings</a>
+    <a href="/testing/workflow-template" class="p-button is-small" download="snap-test.yml">
       Download Workflow Template
     </a>
   </div>
@@ -64,8 +64,8 @@
         <input type="hidden" name="revision" value="{{ run.revision or 0 }}">
         <input type="hidden" name="to_channel" value="stable">
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="btn btn-secondary btn-sm">View PR</a>
-          <button type="submit" class="btn btn-primary btn-sm"
+          <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="p-button is-small">View PR</a>
+          <button type="submit" class="p-button--positive is-small"
             onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')">
             Promote to Stable
           </button>
@@ -104,33 +104,33 @@
         </td>
         <td class="muted small">{{ item.architecture }}</td>
         <td>
-          <span class="channel-badge {% if item.can_promote %}badge-amber{% else %}badge-gray{% endif %}">{{ item.from_channel }}</span>
+          <span class="p-status-label {% if item.can_promote %}p-status-label--caution{% else %}p-status-label{% endif %}">{{ item.from_channel }}</span>
         </td>
         <td class="muted small">{{ item.version or '—' }}</td>
         <td class="muted small">{{ item.stable_ver or 'none' }}</td>
         <td>
           {% if item.has_suite %}
-          <span class="badge badge-green">yes</span>
+          <span class="p-status-label p-status-label--positive">yes</span>
           {% else %}
-          <span class="badge badge-gray" title="No suite found in testing repo">no suite</span>
+          <span class="p-status-label" title="No suite found in testing repo">no suite</span>
           {% endif %}
         </td>
         <td>
           {% if item.existing_run %}
           {% set run = item.existing_run %}
           {% if run.status == 'passed' %}
-          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-green">passed</a>
+          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="p-status-label p-status-label--positive">passed</a>
           {% elif run.status == 'failed' %}
-          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="badge badge-red">failed</a>
+          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="p-status-label p-status-label--negative">failed</a>
           {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
-          <span class="badge badge-amber js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
+          <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
           {% if run.gh_run_id %}
           <a href="https://github.com/{{ config.testing_repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
           {% else %}
           <a href="https://github.com/{{ config.testing_repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow">↗</a>
           {% endif %}
           {% elif run.status == 'error' %}
-          <span class="badge badge-red">error</span>
+          <span class="p-status-label p-status-label--negative">error</span>
           {% else %}
           <span class="muted small">{{ run.status }}</span>
           {% endif %}
@@ -145,7 +145,7 @@
             <input type="hidden" name="architecture" value="{{ item.architecture }}">
             <input type="hidden" name="version" value="{{ item.version }}">
             <input type="hidden" name="revision" value="{{ item.revision or '' }}">
-            <button type="submit" class="btn btn-secondary btn-sm">Run Tests</button>
+            <button type="submit" class="p-button is-small">Run Tests</button>
           </form>
           {% else %}
           <span class="muted small">No suite</span>
@@ -219,20 +219,20 @@
           </td>
           <td class="muted small">{{ run.architecture or 'amd64' }}</td>
           <td>
-            <span class="channel-badge badge-gray">{{ run.from_channel }}</span>
+            <span class="p-status-label">{{ run.from_channel }}</span>
           </td>
           <td class="muted small">{{ run.version or '—' }}</td>
           <td>
             {% if run.status == 'passed' %}
-            <span class="badge badge-green">passed</span>
+            <span class="p-status-label p-status-label--positive">passed</span>
             {% elif run.status == 'failed' %}
-            <span class="badge badge-red">failed</span>
+            <span class="p-status-label p-status-label--negative">failed</span>
             {% elif run.status == 'promoted' %}
-            <span class="badge badge-green">promoted</span>
+            <span class="p-status-label p-status-label--positive">promoted</span>
             {% elif run.status == 'error' %}
-            <span class="badge badge-red" title="{{ run.error_msg }}">error</span>
+            <span class="p-status-label p-status-label--negative" title="{{ run.error_msg }}">error</span>
             {% elif run.status in ('pending', 'triggered', 'running') %}
-            <span class="badge badge-amber js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
+            <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
 
             {% else %}
             <span class="muted small">{{ run.status }}</span>
@@ -256,7 +256,7 @@
             {{ run.triggered_by or '—' }}
             {% if run.status in ('pending', 'triggered', 'running') %}
             <form method="post" action="/testing/runs/{{ run.id }}/fail" style="display:inline; margin-left:6px;">
-              <button type="submit" class="btn btn-sm" style="font-size:11px; padding:1px 6px; opacity:0.5;"
+              <button type="submit" class="p-button is-small" style="font-size:11px; padding:1px 6px; opacity:0.5;"
                 title="Mark as failed" onclick="return confirm('Mark run #{{ run.id }} as failed?')">✕</button>
             </form>
             {% endif %}
@@ -294,9 +294,9 @@
   const TERMINAL  = new Set(['passed', 'failed', 'error', 'promoted']);
 
   function badgeClass(status) {
-    if (status === 'passed' || status === 'promoted') return 'badge badge-green';
-    if (status === 'failed' || status === 'error')   return 'badge badge-red';
-    return 'badge badge-amber';
+    if (status === 'passed' || status === 'promoted') return 'p-status-label p-status-label--positive';
+    if (status === 'failed' || status === 'error')   return 'p-status-label p-status-label--negative';
+    return 'p-status-label p-status-label--caution';
   }
 
   function poll() {

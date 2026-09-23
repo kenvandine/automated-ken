@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}Runners — Automated Ken{% endblock %}
+
+{% block content %}
+
+<div class="fleet-hero">
+  <div class="fleet-hero-left">
+    <h2 class="fleet-title">Remote Runners</h2>
+    <p class="fleet-subtitle">Dedicated test laptops running YARF against real desktops</p>
+  </div>
+  <div class="fleet-hero-right">
+    <div class="fleet-actions">
+      <button class="p-button--positive" onclick="newRunner()">+ Enroll a runner</button>
+    </div>
+  </div>
+</div>
+
+<div id="enroll-result" class="card" style="display:none; border-left: 3px solid var(--accent);">
+  <h3 class="section-label">Run this on the new machine</h3>
+  <pre id="enroll-command" style="white-space: pre-wrap; word-break: break-all; background: var(--bg-code, #1a1a1a); padding: 10px; border-radius: 6px;"></pre>
+  <p class="text-muted small">Token expires in <span id="enroll-ttl"></span> minutes — one-time use.</p>
+</div>
+
+<div class="card">
+  <h3 class="section-label">Runners</h3>
+  {% if not runners %}
+  <p class="text-muted">No runners enrolled yet. Install the <code>automate-ken-runner</code> classic
+     snap on a dedicated test laptop, then click "Enroll a runner" above.</p>
+  {% else %}
+  <table class="snap-table">
+    <thead>
+      <tr>
+        <th>Name</th><th>Status</th><th>Idle</th><th>Last heartbeat</th>
+        <th>Current job</th><th>Arch / OS</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in runners %}
+      <tr>
+        <td>{{ r.name }}</td>
+        <td><span class="p-status-label {{ 'p-status-label--positive' if r.status == 'idle' else 'p-status-label--caution' if r.status in ('busy','enrolling') else 'p-status-label--negative' if r.status in ('offline','revoked','locked') else 'p-status-label' }}">{{ r.status }}</span></td>
+        <td>{{ r.idle_seconds if r.idle_seconds is not none else '—' }}s</td>
+        <td>{{ r.last_heartbeat_at or '—' }}</td>
+        <td>{{ r.current_test_run_id or '—' }}</td>
+        <td class="text-muted small">{{ r.arch }} {{ r.os_name }} {{ r.desktop_env }}</td>
+        <td>
+          {% if r.status != 'revoked' %}
+          <form method="post" action="/runners/{{ r.id }}/revoke" onsubmit="return confirm('Revoke this runner? It will need to re-enroll.');">
+            <button type="submit" class="p-button is-small">Revoke</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="section-label">Queue</h3>
+  <p class="text-muted small">Pending and in-flight remote-runner jobs. Reorder with the arrows or kick out a stuck job.</p>
+  {% if not queue %}
+  <p class="text-muted">Queue is empty.</p>
+  {% else %}
+  <table class="snap-table">
+    <thead>
+      <tr><th>Snap</th><th>Status</th><th>Runner</th><th>Priority</th><th>Queued at</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for j in queue %}
+      <tr>
+        <td>{{ j.snap_name }}</td>
+        <td><span class="p-status-label {{ 'p-status-label--positive' if j.status == 'passed' else 'p-status-label--negative' if j.status in ('failed','error','cancelled') else 'p-status-label--caution' }}">{{ j.status }}{% if j.cancel_requested %} (cancelling…){% endif %}</span></td>
+        <td>{{ j.runner_id or 'any' }}</td>
+        <td>
+          {{ j.priority }}
+          <form method="post" action="/runners/jobs/{{ j.id }}/priority" style="display:inline;">
+            <input type="hidden" name="delta" value="1">
+            <button type="submit" class="p-button is-small" title="Bump up">▲</button>
+          </form>
+          <form method="post" action="/runners/jobs/{{ j.id }}/priority" style="display:inline;">
+            <input type="hidden" name="delta" value="-1">
+            <button type="submit" class="p-button is-small" title="Bump down">▼</button>
+          </form>
+        </td>
+        <td>{{ j.started_at }}</td>
+        <td>
+          <form method="post" action="/runners/jobs/{{ j.id }}/cancel" onsubmit="return confirm('Cancel/kick this job?');">
+            <button type="submit" class="p-button is-small">Cancel</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="section-label">Recent Runner Jobs</h3>
+  {% if not recent %}
+  <p class="text-muted">No remote-runner jobs yet.</p>
+  {% else %}
+  <table class="snap-table">
+    <thead><tr><th>Snap</th><th>Status</th><th>Runner</th><th>Started</th><th>Duration</th></tr></thead>
+    <tbody>
+      {% for r in recent %}
+      <tr>
+        <td>{{ r.snap_name }}</td>
+        <td><span class="p-status-label {{ 'p-status-label--positive' if r.status in ('passed','promoted') else 'p-status-label--negative' if r.status in ('failed','error','cancelled') else 'p-status-label--caution' }}">{{ r.status }}</span></td>
+        <td>{{ r.runner_id or '—' }}</td>
+        <td>{{ r.started_at }}</td>
+        <td>{{ (r.duration_s ~ 's') if r.duration_s is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function newRunner() {
+  const name = prompt('Name for this runner (e.g. its hostname):', '');
+  if (name === null) return;
+  const form = new FormData();
+  form.append('name', name);
+  const r = await fetch('/runners/new', { method: 'POST', body: form });
+  if (!r.ok) { alert('Failed to create enrollment token'); return; }
+  const d = await r.json();
+  document.getElementById('enroll-command').textContent = d.command;
+  document.getElementById('enroll-ttl').textContent = d.expires_in_minutes;
+  document.getElementById('enroll-result').style.display = 'block';
+}
+
+// Live-refresh runner/queue status without a full page reload.
+setInterval(() => { location.reload(); }, 15000);
+</script>
+{% endblock %}

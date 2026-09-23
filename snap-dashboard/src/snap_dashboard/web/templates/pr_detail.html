@@ -11,27 +11,27 @@
     <h2 class="page-heading">{{ run.snap_name }}</h2>
     <p class="text-muted">
       YARF test results &mdash;
-      <span class="channel-badge badge-amber">{{ run.from_channel }}</span>
+      <span class="p-status-label p-status-label--caution">{{ run.from_channel }}</span>
       {{ run.version or '' }}
       {% if run.revision %}&nbsp;(rev {{ run.revision }}){% endif %}
     </p>
   </div>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     {% if run.status == 'passed' %}
-    <span class="badge badge-green" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
+    <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
     {% elif run.status == 'failed' %}
-    <span class="badge badge-red" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
+    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
     {% elif run.status == 'promoted' %}
-    <span class="badge badge-green" style="font-size:13px; padding: 4px 12px;">Promoted to stable</span>
+    <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">Promoted to stable</span>
     {% elif run.status == 'error' %}
-    <span class="badge badge-red" style="font-size:13px; padding: 4px 12px;">Error</span>
+    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">Error</span>
     {% elif run.status in ('pending', 'triggered', 'running') %}
-    <span class="badge badge-amber" style="font-size:13px; padding: 4px 12px;">{{ run.status | capitalize }}</span>
+    <span class="p-status-label p-status-label--caution" style="font-size:13px; padding: 4px 12px;">{{ run.status | capitalize }}</span>
     {% else %}
-    <span class="badge badge-gray" style="font-size:13px; padding: 4px 12px;">{{ run.status }}</span>
+    <span class="p-status-label" style="font-size:13px; padding: 4px 12px;">{{ run.status }}</span>
     {% endif %}
     {% if pr_url %}
-    <a href="{{ pr_url }}" target="_blank" rel="noopener" class="btn btn-secondary btn-sm">
+    <a href="{{ pr_url }}" target="_blank" rel="noopener" class="p-button is-small">
       View on GitHub &rarr;
     </a>
     {% endif %}
@@ -86,7 +86,7 @@
     <input type="hidden" name="to_channel" value="stable">
     <button
       type="submit"
-      class="btn btn-primary"
+      class="p-button--positive"
       onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')"
     >
       Promote {{ run.snap_name }} to Stable
@@ -163,11 +163,11 @@
           </td>
           <td>
             {% if f.status == 'added' %}
-            <span class="badge badge-green">added</span>
+            <span class="p-status-label p-status-label--positive">added</span>
             {% elif f.status == 'removed' %}
-            <span class="badge badge-red">removed</span>
+            <span class="p-status-label p-status-label--negative">removed</span>
             {% elif f.status == 'modified' %}
-            <span class="badge badge-amber">modified</span>
+            <span class="p-status-label p-status-label--caution">modified</span>
             {% else %}
             <span class="muted small">{{ f.status }}</span>
             {% endif %}

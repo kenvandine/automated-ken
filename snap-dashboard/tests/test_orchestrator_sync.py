@@ -79,7 +79,7 @@ def test_sync_test_runs_promotes_newly_passed_run_without_crashing(monkeypatch, 
     monkeypatch.setattr("snap_dashboard.github.pr_viewer.parse_pr_metadata", _fake_parse_pr_metadata)
 
     promoted_ids: list[int] = []
-    monkeypatch.setattr(orchestrator, "_maybe_submit_auto_promoter", promoted_ids.append)
+    monkeypatch.setattr(orchestrator, "maybe_submit_auto_promoter", promoted_ids.append)
 
     # This used to raise NameError: name 'auto_promote_run_ids' is not defined.
     orchestrator.sync_test_runs(testing_repo="kenvandine/gedit-tests", github_token="tok")

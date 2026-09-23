@@ -69,6 +69,13 @@ def _migrate() -> None:
         # Stale rebuild settings
         "ALTER TABLE user_configs ADD COLUMN auto_rebuild_stale BOOLEAN DEFAULT 0",
         "ALTER TABLE user_configs ADD COLUMN stale_build_days INTEGER DEFAULT 30",
+        # Remote runner phase (R1+)
+        "ALTER TABLE user_configs ADD COLUMN prefer_remote_runner BOOLEAN DEFAULT 0",
+        "ALTER TABLE user_configs ADD COLUMN runner_job_timeout_minutes INTEGER DEFAULT 10",
+        "ALTER TABLE test_runs ADD COLUMN dispatch_target VARCHAR(32) DEFAULT 'github_actions'",
+        "ALTER TABLE test_runs ADD COLUMN runner_id INTEGER REFERENCES runners(id)",
+        "ALTER TABLE test_runs ADD COLUMN priority INTEGER DEFAULT 0",
+        "ALTER TABLE test_runs ADD COLUMN cancel_requested BOOLEAN DEFAULT 0",
     ]
     with engine.connect() as conn:
         for sql in migrations:

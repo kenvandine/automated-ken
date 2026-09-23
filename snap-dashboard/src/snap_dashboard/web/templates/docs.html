@@ -138,10 +138,10 @@
 
       <h3 class="docs-h3">Channel version badges</h3>
       <ul class="docs-list">
-        <li><span class="badge badge-green">green</span> — same as stable (or is stable)</li>
-        <li><span class="badge badge-amber">amber</span> — different from stable (newer)</li>
-        <li><span class="badge badge-gray">—</span> — not published in this channel</li>
-        <li><span class="badge badge-red">—</span> — not published in stable at all</li>
+        <li><span class="p-status-label p-status-label--positive">green</span> — same as stable (or is stable)</li>
+        <li><span class="p-status-label p-status-label--caution">amber</span> — different from stable (newer)</li>
+        <li><span class="p-status-label">—</span> — not published in this channel</li>
+        <li><span class="p-status-label p-status-label--negative">—</span> — not published in stable at all</li>
       </ul>
 
       <h3 class="docs-h3">Refresh All</h3>
@@ -316,9 +316,9 @@ Capture App Screenshot
       <h3 class="docs-h3">From the dashboard</h3>
       <p>The <a href="/testing">Testing</a> page lists all snaps with a newer version in candidate or edge than stable. Click <strong>Run Tests</strong> next to any snap with a suite configured.</p>
 
-      <p>The run status updates live (polling every 15 seconds): <span class="badge badge-amber">pending</span> → <span class="badge badge-amber">running</span> → <span class="badge badge-green">passed</span> or <span class="badge badge-red">failed</span>.</p>
+      <p>The run status updates live (polling every 15 seconds): <span class="p-status-label p-status-label--caution">pending</span> → <span class="p-status-label p-status-label--caution">running</span> → <span class="p-status-label p-status-label--positive">passed</span> or <span class="p-status-label p-status-label--negative">failed</span>.</p>
 
-      <p>Click the <strong>↗</strong> link next to a running badge to open the GitHub Actions log directly.</p>
+      <p>Click the <strong>↗</strong> link next to a running p-status-label to open the GitHub Actions log directly.</p>
 
       <h3 class="docs-h3">Stuck runs</h3>
       <p>If a run gets stuck in <em>pending</em> or <em>running</em> state (e.g. the workflow was cancelled externally), click the <strong>✕</strong> button in the Triggered By column to mark it failed and unblock the UI.</p>
@@ -460,7 +460,7 @@ Capture App Screenshot
       <ul class="docs-list">
         <li>Check that your GitHub token has <code>repo</code> scope and has not expired</li>
         <li>Check that <code>.github/workflows/snap-test.yml</code> exists in your testing repository and has a <code>workflow_dispatch</code> trigger</li>
-        <li>Click the <strong>↗</strong> link next to the pending badge to check if a run appeared in GitHub Actions</li>
+        <li>Click the <strong>↗</strong> link next to the pending p-status-label to check if a run appeared in GitHub Actions</li>
         <li>Use the <strong>✕</strong> button to manually mark the run failed and try again</li>
       </ul>
 

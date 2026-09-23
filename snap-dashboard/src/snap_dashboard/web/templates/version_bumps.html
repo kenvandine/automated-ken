@@ -10,7 +10,7 @@
     <p class="text-muted">PRs created by the version bumper agent</p>
   </div>
   {% if actionable_count %}
-  <span class="badge badge-warn" style="font-size:13px;">{{ actionable_count }} awaiting action</span>
+  <span class="p-status-label p-status-label--caution" style="font-size:13px;">{{ actionable_count }} awaiting action</span>
   {% endif %}
 </div>
 
@@ -18,7 +18,7 @@
 <div class="card">
   <div class="empty-state">
     <p>No version bump PRs yet. The release scanner will create them automatically when new upstream versions are found.</p>
-    <a href="/agents" class="btn btn-secondary" style="margin-top:12px;">View Agent Activity</a>
+    <a href="/agents" class="p-button" style="margin-top:12px;">View Agent Activity</a>
   </div>
 </div>
 {% endif %}
@@ -64,22 +64,22 @@
       </div>
 
       <div class="bump-actions">
-        <a href="/version-bumps/{{ b.id }}" class="btn btn-secondary btn-sm">Review</a>
+        <a href="/version-bumps/{{ b.id }}" class="p-button is-small">Review</a>
 
         {% if b.status in ('agent_approved', 'needs_review', 'yarf_passed', 'stable_promoted') %}
         <form method="post" action="/version-bumps/{{ b.id }}/merge" style="display:inline;"
               onsubmit="return confirm('Merge PR for {{ b.snap_name }} {{ b.new_version }}?')">
-          <button type="submit" class="btn btn-primary btn-sm">Merge</button>
+          <button type="submit" class="p-button--positive is-small">Merge</button>
         </form>
         <form method="post" action="/version-bumps/{{ b.id }}/reject" style="display:inline;"
               onsubmit="return confirm('Close PR for {{ b.snap_name }}?')">
-          <button type="submit" class="btn-danger-sm">Reject</button>
+          <button type="submit" class="p-button--negative is-small">Reject</button>
         </form>
         {% endif %}
 
         {% if b.status in ('agent_rejected', 'yarf_failed', 'promotion_failed') %}
         <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" style="display:inline;">
-          <button type="submit" class="btn btn-secondary btn-sm">Re-run YARF</button>
+          <button type="submit" class="p-button is-small">Re-run YARF</button>
         </form>
         {% endif %}
       </div>

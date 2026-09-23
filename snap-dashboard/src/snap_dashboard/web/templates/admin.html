@@ -40,9 +40,9 @@
           <td class="muted small">{{ u.display_name or '—' }}</td>
           <td>
             {% if u.is_admin %}
-            <span class="badge badge-green">admin</span>
+            <span class="p-status-label p-status-label--positive">admin</span>
             {% else %}
-            <span class="badge badge-gray">user</span>
+            <span class="p-status-label">user</span>
             {% endif %}
           </td>
           <td class="muted small">
@@ -54,7 +54,7 @@
           <td>
             {% if u.id != current_user.id %}
             <form method="post" action="/admin/users/{{ u.id }}/toggle-admin">
-              <button type="submit" class="btn btn-sm btn-secondary">
+              <button type="submit" class="p-button is-small">
                 {% if u.is_admin %}Remove Admin{% else %}Make Admin{% endif %}
               </button>
             </form>
@@ -84,7 +84,7 @@
   <form method="post" action="/admin/allowlist/add" style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px;">
     <input type="text" name="github_login" placeholder="GitHub username" class="form-input" style="width:200px;" required>
     <input type="text" name="note" placeholder="Note (optional)" class="form-input" style="width:200px;">
-    <button type="submit" class="btn btn-primary btn-sm">Add to Allowlist</button>
+    <button type="submit" class="p-button--positive is-small">Add to Allowlist</button>
   </form>
 
   {% if allowlist %}
@@ -113,7 +113,7 @@
           <td>
             <form method="post" action="/admin/allowlist/remove/{{ a.id }}"
                   onsubmit="return confirm('Remove {{ a.github_login }} from allowlist?')">
-              <button type="submit" class="btn btn-sm" style="color:var(--error);">Remove</button>
+              <button type="submit" class="p-button is-small" style="color:var(--error);">Remove</button>
             </form>
           </td>
         </tr>

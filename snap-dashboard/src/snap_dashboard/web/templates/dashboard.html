@@ -10,7 +10,7 @@
     <p class="text-muted">{{ rows|length }} tracked</p>
   </div>
   <form method="post" action="/refresh" class="refresh-form">
-    <button type="submit" class="btn btn-primary btn-sm">Refresh All</button>
+    <button type="submit" class="p-button--positive is-small">Refresh All</button>
   </form>
 </div>
 
@@ -42,10 +42,10 @@
       {% if item.label == 'has_open_items' %}
       <div class="attention-counts">
         {% if item.issue_count %}
-        <span class="badge badge-orange">{{ item.issue_count }} issues</span>
+        <span class="p-status-label p-status-label--caution">{{ item.issue_count }} issues</span>
         {% endif %}
         {% if item.pr_count %}
-        <span class="badge badge-purple">{{ item.pr_count }} PRs</span>
+        <span class="p-status-label p-status-label--information">{{ item.pr_count }} PRs</span>
         {% endif %}
       </div>
       {% endif %}
@@ -53,13 +53,13 @@
       {% if snap_run %}
       <div class="attention-test-status">
         {% if snap_run.status == 'passed' %}
-        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="badge badge-green">Tests passed</a>
+        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="p-status-label p-status-label--positive">Tests passed</a>
         {% elif snap_run.status == 'failed' %}
-        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="badge badge-red">Tests failed</a>
+        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="p-status-label p-status-label--negative">Tests failed</a>
         {% elif snap_run.status in ('pending', 'triggered', 'running') %}
-        <span class="badge badge-amber">Tests running…</span>
+        <span class="p-status-label p-status-label--caution">Tests running…</span>
         {% elif snap_run.status == 'promoted' %}
-        <span class="badge badge-green">Promoted</span>
+        <span class="p-status-label p-status-label--positive">Promoted</span>
         {% endif %}
       </div>
       {% elif config.testing_repo %}
@@ -67,7 +67,7 @@
         <input type="hidden" name="from_channel" value="edge">
         <input type="hidden" name="version" value="{{ item.edge_ver }}">
         <input type="hidden" name="revision" value="">
-        <button type="submit" class="btn btn-secondary btn-sm">Run Tests</button>
+        <button type="submit" class="p-button is-small">Run Tests</button>
       </form>
       {% endif %}
     </div>
@@ -104,54 +104,54 @@
           </td>
           <td>
             {% if row.stable %}
-            <span class="channel-badge badge-green">{{ row.stable }}</span>
+            <span class="p-status-label p-status-label--positive">{{ row.stable }}</span>
             {% else %}
-            <span class="channel-badge badge-red">—</span>
+            <span class="p-status-label p-status-label--negative">—</span>
             {% endif %}
           </td>
           <td>
             {% if row.candidate %}
             {% if row.candidate == row.stable %}
-            <span class="channel-badge badge-green">{{ row.candidate }}</span>
+            <span class="p-status-label p-status-label--positive">{{ row.candidate }}</span>
             {% else %}
-            <span class="channel-badge badge-amber">{{ row.candidate }}</span>
+            <span class="p-status-label p-status-label--caution">{{ row.candidate }}</span>
             {% endif %}
             {% else %}
-            <span class="channel-badge badge-gray">—</span>
+            <span class="p-status-label">—</span>
             {% endif %}
           </td>
           <td>
             {% if row.beta %}
             {% if row.beta == row.stable %}
-            <span class="channel-badge badge-green">{{ row.beta }}</span>
+            <span class="p-status-label p-status-label--positive">{{ row.beta }}</span>
             {% else %}
-            <span class="channel-badge badge-amber">{{ row.beta }}</span>
+            <span class="p-status-label p-status-label--caution">{{ row.beta }}</span>
             {% endif %}
             {% else %}
-            <span class="channel-badge badge-gray">—</span>
+            <span class="p-status-label">—</span>
             {% endif %}
           </td>
           <td>
             {% if row.edge %}
             {% if row.edge == row.stable %}
-            <span class="channel-badge badge-green">{{ row.edge }}</span>
+            <span class="p-status-label p-status-label--positive">{{ row.edge }}</span>
             {% elif row.edge != row.stable %}
-            <span class="channel-badge badge-amber">{{ row.edge }}</span>
+            <span class="p-status-label p-status-label--caution">{{ row.edge }}</span>
             {% endif %}
             {% else %}
-            <span class="channel-badge badge-gray">—</span>
+            <span class="p-status-label">—</span>
             {% endif %}
           </td>
           <td>
             {% if row.issue_count > 0 %}
-            <span class="badge badge-orange">{{ row.issue_count }}</span>
+            <span class="p-status-label p-status-label--caution">{{ row.issue_count }}</span>
             {% else %}
             <span class="muted">0</span>
             {% endif %}
           </td>
           <td>
             {% if row.pr_count > 0 %}
-            <span class="badge badge-purple">{{ row.pr_count }}</span>
+            <span class="p-status-label p-status-label--information">{{ row.pr_count }}</span>
             {% else %}
             <span class="muted">0</span>
             {% endif %}
@@ -174,9 +174,9 @@
     <p>Run a collection to discover your snaps, or add one manually.</p>
     <div class="empty-actions">
       <form method="post" action="/refresh" style="display:inline">
-        <button type="submit" class="btn btn-primary">Run Collection</button>
+        <button type="submit" class="p-button--positive">Run Collection</button>
       </form>
-      <a href="/snaps/add" class="btn btn-secondary">Add Snap</a>
+      <a href="/snaps/add" class="p-button">Add Snap</a>
     </div>
   </div>
   {% endif %}

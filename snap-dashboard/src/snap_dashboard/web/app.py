@@ -73,7 +73,31 @@ async def on_startup() -> None:
     # PR monitor runs every 5 minutes regardless of user count.
     runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
 
+    # Runner watchdog — clears stalled remote-runner jobs every 2 minutes.
+    from snap_dashboard.agents.runner_watchdog import RunnerWatchdogAgent
+    runner.schedule_periodic(RunnerWatchdogAgent, interval_hours=2 / 60)
+
     logger.info("Agent runner started.")
+
+    # Start the bundled/embedded Lemonade server in the background so it
+    # doesn't delay web server readiness (first-run installs a ~10MB binary
+    # and warms up a multi-GB vision model). Agents will simply see it as
+    # "not yet available" and fall back to heuristics until it's ready.
+    import threading
+
+    from snap_dashboard.lemonade.embedded import get_embedded_manager
+
+    threading.Thread(
+        target=get_embedded_manager().ensure_started, daemon=True
+    ).start()
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    """Stop the embedded Lemonade subprocess cleanly."""
+    from snap_dashboard.lemonade.embedded import get_embedded_manager
+
+    get_embedded_manager().stop()
 
 
 # Import and include routers after app is created to avoid circular imports
@@ -84,6 +108,8 @@ from snap_dashboard.web.routes import (  # noqa: E402
     dashboard,
     docs,
     onboarding,
+    runner_api,
+    runners,
     settings,
     snaps,
     testing,
@@ -96,6 +122,8 @@ app.include_router(agents.router)
 app.include_router(dashboard.router)
 app.include_router(docs.router)
 app.include_router(onboarding.router)
+app.include_router(runner_api.router)
+app.include_router(runners.router)
 app.include_router(snaps.router)
 app.include_router(settings.router)
 app.include_router(testing.router)

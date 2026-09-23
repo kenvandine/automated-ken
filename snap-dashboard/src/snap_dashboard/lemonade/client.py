@@ -26,10 +26,16 @@ class LemonadeClient:
     """Thin client for lemonade-server's OpenAI-compatible API."""
 
     def __init__(
-        self, base_url: str = _DEFAULT_URL, model: str = _DEFAULT_MODEL
+        self, base_url: str = _DEFAULT_URL, model: str = _DEFAULT_MODEL, api_key: str = ""
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model or _DEFAULT_MODEL
+        self.api_key = api_key
+
+    def _headers(self) -> dict[str, str]:
+        if self.api_key:
+            return {"Authorization": f"Bearer {self.api_key}"}
+        return {}
 
     # ------------------------------------------------------------------
     # Availability check
@@ -39,7 +45,7 @@ class LemonadeClient:
         """Return True if lemonade-server is reachable."""
         try:
             with httpx.Client(timeout=5) as client:
-                resp = client.get(f"{self.base_url}/v1/models")
+                resp = client.get(f"{self.base_url}/v1/models", headers=self._headers())
                 return resp.status_code == 200
         except Exception:
             return False
@@ -70,6 +76,7 @@ class LemonadeClient:
                 resp = client.post(
                     f"{self.base_url}/v1/chat/completions",
                     json=payload,
+                    headers=self._headers(),
                 )
             if resp.status_code != 200:
                 logger.warning(
@@ -142,6 +149,7 @@ class LemonadeClient:
                 resp = client.post(
                     f"{self.base_url}/v1/chat/completions",
                     json=payload,
+                    headers=self._headers(),
                 )
             if resp.status_code != 200:
                 logger.warning(
@@ -215,10 +223,36 @@ def _parse_vision_response(content: str) -> dict | None:
         return None
 
 
-def get_lemonade_client(user_config) -> LemonadeClient | None:
-    """Return a LemonadeClient if the user has a lemonade URL configured."""
+def get_lemonade_client(user_config, ensure_started: bool = False) -> LemonadeClient | None:
+    """Return a LemonadeClient for this user.
+
+    If the user has explicitly configured ``lemonade_server_url`` (Settings ->
+    Agents & AI), that external/self-hosted instance is used as-is (advanced
+    override, e.g. a beefier GPU box). Otherwise this returns a client
+    pointed at our private, bundled "Embedded Lemonade" instance — see
+    ``snap_dashboard.lemonade.embedded`` — which snap-dashboard downloads,
+    runs, and authenticates to on its own, with no host lemonade-server
+    dependency.
+
+    When ``ensure_started`` is True (safe from background agent threads,
+    NOT from request-handling code paths) this will block briefly to start
+    the embedded server on first use — on a cold machine this can take a
+    while (binary download), so only pass True where blocking is acceptable.
+    """
     url = getattr(user_config, "lemonade_server_url", "") or ""
-    model = getattr(user_config, "lemonade_model", "") or _DEFAULT_MODEL
-    if not url:
-        url = _DEFAULT_URL
-    return LemonadeClient(base_url=url, model=model)
+    model = getattr(user_config, "lemonade_model", "") or ""
+
+    if url:
+        # Explicit external override — behave exactly as before.
+        return LemonadeClient(base_url=url, model=model or _DEFAULT_MODEL)
+
+    from snap_dashboard.lemonade.embedded import DEFAULT_EMBEDDED_MODEL, get_embedded_manager
+
+    manager = get_embedded_manager()
+    if ensure_started:
+        manager.ensure_started()
+    return LemonadeClient(
+        base_url=manager.base_url,
+        model=model or DEFAULT_EMBEDDED_MODEL,
+        api_key=manager.api_key,
+    )

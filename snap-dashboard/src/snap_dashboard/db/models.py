@@ -91,6 +91,9 @@ class UserConfig(Base):
     # Stale rebuild settings
     auto_rebuild_stale = Column(Boolean, default=False, nullable=False)
     stale_build_days = Column(Integer, default=30, nullable=False)
+    # Remote runner settings
+    prefer_remote_runner = Column(Boolean, default=False, nullable=False)
+    runner_job_timeout_minutes = Column(Integer, default=10, nullable=False)
 
     user = relationship("User", back_populates="config")
 
@@ -234,6 +237,17 @@ class TestRun(Base):
     pr_url = Column(Text, nullable=True)
     pr_body = Column(Text, nullable=True)
     triggered_by = Column(String(64), nullable=True)  # 'auto', 'manual', or 'external'
+    # 'github_actions' (default) or 'remote_runner' — see Runner model.
+    dispatch_target = Column(String(32), nullable=False, default="github_actions")
+    runner_id = Column(
+        Integer, ForeignKey("runners.id", ondelete="SET NULL"), nullable=True
+    )
+    # Manual queue ordering for remote-runner jobs — higher runs first;
+    # ties broken by started_at (FIFO). Adjustable from the /runners page.
+    priority = Column(Integer, nullable=False, default=0)
+    # Set from the dashboard to ask an in-flight remote-runner job to stop;
+    # the runner checks this on its next heartbeat/status report.
+    cancel_requested = Column(Boolean, nullable=False, default=False)
     started_at = Column(DateTime, default=_now, nullable=False)
     finished_at = Column(DateTime, nullable=True)
     promoted = Column(Boolean, default=False, nullable=False)
@@ -241,6 +255,7 @@ class TestRun(Base):
     error_msg = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="test_runs")
+    runner = relationship("Runner", foreign_keys=[runner_id])
 
     def __repr__(self) -> str:
         return f"<TestRun id={self.id} snap={self.snap_name!r} status={self.status!r}>"
@@ -292,8 +307,90 @@ class StableScreenshotBaseline(Base):
         )
 
 
+class TestRunScreenshot(Base):
+    """Persistent, source-agnostic screenshot storage for a test run.
+
+    Populated from either dispatch target:
+    - GitHub Actions: :func:`snap_dashboard.testing.orchestrator.ingest_run_screenshots`
+      downloads the ``yarf-results-*`` artifact via the Actions API.
+    - Remote runner: uploaded directly by ``automate-ken-runner`` via
+      ``POST /api/runners/{id}/jobs/{job_id}/screenshots``.
+
+    :func:`snap_dashboard.testing.baselines.load_test_run_screenshots` reads
+    this table first for any ``TestRun``, regardless of ``dispatch_target``.
+    """
+
+    __tablename__ = "test_run_screenshots"
+    __table_args__ = (
+        UniqueConstraint(
+            "test_run_id",
+            "image_name",
+            name="uq_test_run_screenshot_image",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    test_run_id = Column(
+        Integer, ForeignKey("test_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    image_name = Column(String(500), nullable=False)
+    image_b64 = Column(Text, nullable=False)
+    width = Column(Integer, nullable=True)
+    height = Column(Integer, nullable=True)
+    brightness_mean = Column(Float, nullable=True)
+    is_valid = Column(Boolean, nullable=True)
+    captured_at = Column(DateTime, default=_now, nullable=False)
+
+    test_run = relationship("TestRun")
+
+    def __repr__(self) -> str:
+        return f"<TestRunScreenshot test_run_id={self.test_run_id} image={self.image_name!r}>"
+
+
+class Runner(Base):
+    """A registered remote test-runner machine (real desktop, physical hardware).
+
+    Runners poll the dashboard for queued jobs (outbound-only HTTPS, so they
+    work from behind NAT/home routers with no inbound port needed) rather
+    than being dispatched to directly, mirroring a self-hosted CI runner.
+    """
+
+    __tablename__ = "runners"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    name = Column(String(255), nullable=False)
+    # sha256 hex digest of the long-lived bearer secret issued at enrollment.
+    secret_hash = Column(String(64), nullable=True)
+    # sha256 hex digest of the short-lived, one-time enrollment token.
+    enrollment_token_hash = Column(String(64), nullable=True)
+    enrollment_expires_at = Column(DateTime, nullable=True)
+    arch = Column(String(32), nullable=True)
+    os_name = Column(String(255), nullable=True)
+    desktop_env = Column(String(64), nullable=True)
+    # enrolling | idle | locked | busy | offline
+    status = Column(String(32), nullable=False, default="enrolling")
+    idle_seconds = Column(Integer, nullable=True)
+    idle_threshold_seconds = Column(Integer, nullable=False, default=120)
+    last_heartbeat_at = Column(DateTime, nullable=True)
+    current_test_run_id = Column(
+        Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime, default=_now, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user = relationship("User")
+    current_test_run = relationship("TestRun", foreign_keys=[current_test_run_id])
+
+    def __repr__(self) -> str:
+        return f"<Runner id={self.id} name={self.name!r} status={self.status!r}>"
+
+
 class AgentRun(Base):
     """Tracks a single execution of a background agent."""
+
 
     __tablename__ = "agent_runs"
 

@@ -55,7 +55,9 @@ class ScreenshotReviewerAgent(BaseAgent):
             pr_number = run.pr_number if run else None
 
         self._report(f"Fetching YARF screenshots for {snap_name}…", snap_name)
-        new_screenshots = load_test_run_screenshots(testing_repo, pr_number, token)
+        new_screenshots = load_test_run_screenshots(
+            testing_repo, pr_number, token, test_run_id=test_run_id
+        )
         baseline_screenshots: list[ScreenshotAsset] = []
         if testing_repo:
             baseline_screenshots = get_or_build_stable_baseline_assets(

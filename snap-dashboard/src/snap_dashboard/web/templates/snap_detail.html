@@ -28,7 +28,7 @@
     </a>
     {% endif %}
     <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
-      <button type="submit" class="btn btn-secondary btn-sm">Refresh</button>
+      <button type="submit" class="p-button is-small">Refresh</button>
     </form>
   </div>
 </div>
@@ -58,17 +58,17 @@
             {% if info %}
             {% set ver = info.version %}
             {% if ch == 'stable' %}
-            <span class="channel-badge badge-green">{{ ver or '?' }}</span>
+            <span class="p-status-label p-status-label--positive">{{ ver or '?' }}</span>
             {% elif ver == stable_ver and stable_ver %}
-            <span class="channel-badge badge-green">{{ ver }}</span>
+            <span class="p-status-label p-status-label--positive">{{ ver }}</span>
             {% elif ver and ver != stable_ver %}
-            <span class="channel-badge badge-amber">{{ ver }}</span>
+            <span class="p-status-label p-status-label--caution">{{ ver }}</span>
             {% else %}
-            <span class="channel-badge badge-gray">{{ ver or '?' }}</span>
+            <span class="p-status-label">{{ ver or '?' }}</span>
             {% endif %}
             <div class="channel-rev">r{{ info.revision }}</div>
             {% else %}
-            <span class="channel-badge badge-gray">—</span>
+            <span class="p-status-label">—</span>
             {% endif %}
           </td>
           {% endfor %}
@@ -81,7 +81,7 @@
   <div class="empty-state small-empty">
     <p>No channel data collected yet.
       <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
-        <button type="submit" class="link-btn">Run collection</button>
+        <button type="submit" class="p-button--link">Run collection</button>
       </form>
     </p>
   </div>
@@ -200,7 +200,7 @@
           >{{ snap.notes or '' }}</textarea>
         </div>
         <div class="form-actions">
-          <button type="submit" class="btn btn-primary">Save Changes</button>
+          <button type="submit" class="p-button--positive">Save Changes</button>
         </div>
       </form>
     </div>

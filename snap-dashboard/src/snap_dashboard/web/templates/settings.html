@@ -41,7 +41,7 @@
     </div>
 
     <div class="form-actions">
-      <button type="submit" class="btn btn-primary">Save Settings</button>
+      <button type="submit" class="p-button--positive">Save Settings</button>
     </div>
   </form>
 </div>
@@ -67,7 +67,7 @@
       </span>
     </div>
     <div class="form-actions">
-      <button type="submit" class="btn btn-primary">Save Token</button>
+      <button type="submit" class="p-button--positive">Save Token</button>
     </div>
   </form>
 </div>
@@ -112,10 +112,10 @@
     </div>
 
     <div class="form-actions">
-      <a href="/testing/workflow-template" class="btn btn-secondary btn-sm" download="snap-test.yml">
+      <a href="/testing/workflow-template" class="p-button is-small" download="snap-test.yml">
         Download Workflow Template
       </a>
-      <button type="submit" class="btn btn-primary">Save Testing Config</button>
+      <button type="submit" class="p-button--positive">Save Testing Config</button>
     </div>
   </form>
 
@@ -191,7 +191,7 @@
       >
       <span class="form-hint">
         PAT for the bot account — needs <code>repo</code> scope to create branches and PRs.
-        {% if config.bot_github_login %}<span class="badge badge-ok">configured for {{ config.bot_github_login }}</span>{% endif %}
+        {% if config.bot_github_login %}<span class="p-status-label p-status-label--positive">configured for {{ config.bot_github_login }}</span>{% endif %}
       </span>
     </div>
 
@@ -293,9 +293,9 @@
     </div>
 
     <div class="form-actions">
-      <a href="/agents" class="btn btn-secondary btn-sm">View Agent Activity</a>
-      <a href="/version-bumps" class="btn btn-secondary btn-sm">View Version Bumps</a>
-      <button type="submit" class="btn btn-primary">Save Agent Settings</button>
+      <a href="/agents" class="p-button is-small">View Agent Activity</a>
+      <a href="/version-bumps" class="p-button is-small">View Version Bumps</a>
+      <button type="submit" class="p-button--positive">Save Agent Settings</button>
     </div>
   </form>
 </div>
@@ -304,7 +304,7 @@
 <div class="card">
   <div class="section-header-row">
     <h3 class="section-label">Tracked Snaps</h3>
-    <a href="/snaps/add" class="btn btn-secondary btn-sm">+ Add Snap</a>
+    <a href="/snaps/add" class="p-button is-small">+ Add Snap</a>
   </div>
 
   {% if snaps %}
@@ -344,7 +344,7 @@
           <td>
             <form method="post" action="/settings/remove/{{ snap.name }}"
                   onsubmit="return confirm('Remove {{ snap.name }} from tracking?')">
-              <button type="submit" class="btn-danger-sm">Remove</button>
+              <button type="submit" class="p-button--negative is-small">Remove</button>
             </form>
           </td>
         </tr>

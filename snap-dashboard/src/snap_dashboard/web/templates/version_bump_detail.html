@@ -19,20 +19,20 @@
     {% if bump.status in ('agent_approved', 'needs_review', 'yarf_passed', 'stable_promoted') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/merge"
           onsubmit="return confirm('Merge this PR?')">
-      <button type="submit" class="btn btn-primary">✓ Merge PR</button>
+      <button type="submit" class="p-button--positive">✓ Merge PR</button>
     </form>
     <form method="post" action="/version-bumps/{{ bump.id }}/reject"
           onsubmit="return confirm('Close this PR?')">
-      <button type="submit" class="btn-danger-sm" style="font-size:13px;padding:6px 14px;">✗ Reject</button>
+      <button type="submit" class="p-button--negative is-small" style="font-size:13px;padding:6px 14px;">✗ Reject</button>
     </form>
     {% endif %}
     {% if bump.status in ('agent_rejected', 'yarf_failed', 'promotion_failed') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
-      <button type="submit" class="btn btn-secondary">↺ Re-run YARF</button>
+      <button type="submit" class="p-button">↺ Re-run YARF</button>
     </form>
     {% endif %}
     {% if bump.bot_pr_url %}
-    <a href="{{ bump.bot_pr_url }}" target="_blank" rel="noopener" class="btn btn-secondary">
+    <a href="{{ bump.bot_pr_url }}" target="_blank" rel="noopener" class="p-button">
       PR #{{ bump.bot_pr_number }} ↗
     </a>
     {% endif %}
@@ -44,10 +44,10 @@
   <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
     <div>
       <span class="text-muted small">Status</span><br>
-      <span class="badge
-        {% if bump.status in ('agent_approved', 'stable_promoted') %}badge-ok
+      <span class="p-status-label
+        {% if bump.status in ('agent_approved', 'stable_promoted') %}p-status-label--positive
         {% elif bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed', 'promotion_failed') %}badge-fail
-        {% elif bump.status == 'needs_review' %}badge-warn
+        {% elif bump.status == 'needs_review' %}p-status-label--caution
         {% else %}badge-muted{% endif %}
       ">{{ bump.status | replace('_', ' ') }}</span>
     </div>
@@ -133,18 +133,18 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
     {% if bump.status not in ('merged', 'closed', 'agent_approved', 'needs_review', 'stable_promoted') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/request-review">
-      <button type="submit" class="btn btn-secondary">Flag for Manual Review</button>
+      <button type="submit" class="p-button">Flag for Manual Review</button>
     </form>
     {% endif %}
     {% if bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed', 'promotion_failed') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
-      <button type="submit" class="btn btn-secondary">↺ Re-run YARF</button>
+      <button type="submit" class="p-button">↺ Re-run YARF</button>
     </form>
     {% endif %}
     {% if bump.status not in ('merged', 'closed') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/reject"
           onsubmit="return confirm('Close PR #{{ bump.bot_pr_number }}?')">
-      <button type="submit" class="btn-danger-sm" style="font-size:13px;padding:6px 14px;">Close PR</button>
+      <button type="submit" class="p-button--negative is-small" style="font-size:13px;padding:6px 14px;">Close PR</button>
     </form>
     {% endif %}
   </div>

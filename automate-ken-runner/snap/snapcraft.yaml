@@ -1,0 +1,55 @@
+name: automate-ken-runner
+base: core24
+adopt-info: automate-ken-runner
+title: Automate Ken Runner
+summary: Remote YARF test execution agent for Automated Ken
+description: |
+  Install this on a dedicated test laptop with a real, logged-in desktop
+  session. It enrolls with an ``automated-ken`` server, then polls for
+  queued test jobs during idle time: installs/refreshes the snap under
+  test, launches it in the real graphical session, drives it with YARF,
+  extracts and uploads screenshots, and reports pass/fail back to the
+  dashboard — no synthetic/headless compositor required.
+
+  This snap uses **classic confinement** deliberately: running real YARF
+  test suites requires installing and refreshing arbitrary third-party
+  snaps (`snap install`/`snap refresh`), launching arbitrary GUI
+  applications in the live desktop session, talking to the session D-Bus
+  bus and the Wayland/X11 compositor to capture screenshots, and reading
+  systemd-logind idle/lock state — none of which strict or devmode
+  confinement can grant. Only install this on a machine you've dedicated
+  to this purpose.
+contact: https://github.com/kenvandine/automated-ken/issues
+issues: https://github.com/kenvandine/automated-ken/issues
+source-code: https://github.com/kenvandine/automated-ken
+grade: stable
+confinement: classic
+
+apps:
+  automate-ken-runner:
+    command: bin/automate-ken-runner
+
+  run:
+    command: bin/automate-ken-runner run
+    daemon: simple
+    # Runs as a `systemctl --user` service under the same graphical
+    # session it tests against — it needs the real session D-Bus bus,
+    # WAYLAND_DISPLAY/DISPLAY, and XDG_RUNTIME_DIR to launch apps and
+    # capture real screenshots; a system-scope (root) service would not
+    # have any of that. Requires snapd >= 2.53.
+    daemon-scope: user
+    restart-condition: on-failure
+    restart-delay: 10s
+
+parts:
+  automate-ken-runner:
+    plugin: python
+    source: .
+    python-packages: [click, httpx, pillow]
+    # version: git doesn't work here for the same reason as the
+    # automated-ken server snap: snapcraft.yaml lives in a subdirectory
+    # of the top-level repo, which has no .git of its own.
+    override-pull: |
+      craftctl default
+      version="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
+      craftctl set version="${version:-0.0.0}"

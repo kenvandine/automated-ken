@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import base64
 import logging
 import time
 from datetime import datetime, timezone
 
 import httpx
 
-from snap_dashboard.db.models import ChannelMap, Snap, TestRun
+from snap_dashboard.db.models import ChannelMap, Snap, TestRun, TestRunScreenshot
 from snap_dashboard.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -235,6 +236,54 @@ def trigger_workflow(
         return False, err, None
 
 
+def trigger_remote_run(
+    snap_name: str,
+    from_channel: str,
+    version: str,
+    revision: int | None,
+    architecture: str = "amd64",
+    triggered_by: str = "manual",
+    runner_id: int | None = None,
+    priority: int = 0,
+    user_id: int | None = None,
+) -> tuple[bool, str, int | None]:
+    """Queue a ``TestRun`` for a registered remote runner instead of GitHub Actions.
+
+    No outbound network call is made here — the run just sits in the queue
+    with ``status="pending"`` until an eligible runner's
+    ``GET /api/runners/{id}/next-job`` poll claims it (see
+    ``web/routes/runner_api.py``). If ``runner_id`` is None, any idle
+    runner belonging to the same user may claim it.
+
+    Returns a ``(success, error_message, db_run_id)`` tuple, mirroring
+    :func:`trigger_workflow`.
+    """
+    with get_session() as session:
+        if runner_id is not None:
+            from snap_dashboard.db.models import Runner
+
+            runner = session.query(Runner).get(runner_id)
+            if runner is None or runner.revoked_at is not None:
+                return False, f"Runner {runner_id} not found or revoked", None
+
+        run = TestRun(
+            snap_name=snap_name,
+            architecture=architecture,
+            from_channel=from_channel,
+            version=version,
+            revision=revision,
+            status="pending",
+            triggered_by=triggered_by,
+            dispatch_target="remote_runner",
+            runner_id=runner_id,
+            priority=priority,
+            user_id=user_id,
+        )
+        session.add(run)
+        session.flush()
+        return True, "", run.id
+
+
 def poll_for_gh_run_id(
     db_run_id: int,
     triggered_at: datetime,
@@ -316,10 +365,56 @@ def poll_for_gh_run_id(
                 if new_status in ("passed", "failed"):
                     db_run.finished_at = datetime.now(timezone.utc)
         if new_status in ("passed", "failed"):
+            ingest_run_screenshots(db_run_id, gh_run_id, owner, repo, github_token)
             if new_status == "passed":
-                _maybe_submit_auto_promoter(db_run_id)
+                maybe_submit_auto_promoter(db_run_id)
             logger.info("poll_for_gh_run_id: run %s finished as %s", gh_run_id, new_status)
             return
+
+
+def ingest_run_screenshots(
+    db_run_id: int,
+    gh_run_id: str | None,
+    owner: str,
+    repo: str,
+    token: str,
+) -> None:
+    """Best-effort: download the run's ``yarf-results-*`` artifact and store its PNGs.
+
+    Populates :class:`TestRunScreenshot` so the screenshot reviewer / auto-promoter
+    agents can compare real screenshots instead of always falling back to
+    "no comparable screenshots available". Safe to call repeatedly — a no-op if
+    screenshots were already ingested for this run, or if anything fails.
+    """
+    if not gh_run_id or not token:
+        return
+    with get_session() as session:
+        if session.query(TestRunScreenshot).filter_by(test_run_id=db_run_id).first():
+            return  # already ingested
+
+    from snap_dashboard.github.artifacts import fetch_run_screenshots
+
+    try:
+        pngs = fetch_run_screenshots(owner, repo, gh_run_id, token)
+    except Exception as exc:
+        logger.warning("ingest_run_screenshots: failed for TestRun %s (gh_run=%s): %s", db_run_id, gh_run_id, exc)
+        return
+
+    if not pngs:
+        return
+
+    with get_session() as session:
+        if session.query(TestRunScreenshot).filter_by(test_run_id=db_run_id).first():
+            return  # ingested concurrently
+        for image_name, data in pngs:
+            session.add(
+                TestRunScreenshot(
+                    test_run_id=db_run_id,
+                    image_name=image_name,
+                    image_b64=base64.b64encode(data).decode(),
+                )
+            )
+    logger.info("ingest_run_screenshots: stored %d screenshot(s) for TestRun %s", len(pngs), db_run_id)
 
 
 def _check_gh_run_status(gh_run_id: str, owner: str, repo: str, token: str) -> str | None:
@@ -387,6 +482,8 @@ def sync_test_runs(
         # Track TestRuns whose status just flipped to "passed" so we can
         # queue auto-promotion for them once the session below is closed.
         auto_promote_run_ids: set[int] = set()
+        # (test_run_id, gh_run_id) pairs whose status just went terminal this pass.
+        screenshot_ingest_targets: list[tuple[int, str]] = []
 
         # Update runs that are still in-flight
         q = session.query(TestRun).filter(
@@ -405,6 +502,7 @@ def sync_test_runs(
                     run.status = gha_status
                     if gha_status in ("passed", "failed"):
                         run.finished_at = datetime.now(timezone.utc)
+                        screenshot_ingest_targets.append((run.id, run.gh_run_id))
                 continue
             if not pr:
                 continue
@@ -424,6 +522,8 @@ def sync_test_runs(
 
             if gh_status in ("passed", "failed"):
                 run.finished_at = datetime.now(timezone.utc)
+                if run.gh_run_id:
+                    screenshot_ingest_targets.append((run.id, run.gh_run_id))
                 if gh_status == "passed" and not run.promoted:
                     auto_promote_run_ids.add(run.id)
 
@@ -463,14 +563,19 @@ def sync_test_runs(
                 new_run.finished_at = datetime.now(timezone.utc)
             session.add(new_run)
             session.flush()
+            if new_run.status in ("passed", "failed") and new_run.gh_run_id:
+                screenshot_ingest_targets.append((new_run.id, new_run.gh_run_id))
             if new_run.status == "passed" and not new_run.promoted:
                 auto_promote_run_ids.add(new_run.id)
 
+    for run_id, gh_run_id in screenshot_ingest_targets:
+        ingest_run_screenshots(run_id, gh_run_id, owner, repo, github_token)
+
     for run_id in sorted(auto_promote_run_ids):
-        _maybe_submit_auto_promoter(run_id)
+        maybe_submit_auto_promoter(run_id)
 
 
-def _maybe_submit_auto_promoter(test_run_id: int) -> None:
+def maybe_submit_auto_promoter(test_run_id: int) -> None:
     """Queue candidate auto-promotion for a passed test run when configured."""
     with get_session() as session:
         run = session.query(TestRun).get(test_run_id)

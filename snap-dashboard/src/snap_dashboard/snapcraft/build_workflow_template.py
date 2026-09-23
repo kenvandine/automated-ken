@@ -18,7 +18,7 @@ Required repository secret:
 
 from __future__ import annotations
 
-WORKFLOW_YAML: str = r"""\
+WORKFLOW_YAML: str = r"""
 # .github/workflows/automated-snap-build.yml
 #
 # Automated snap build workflow managed by snap-dashboard.

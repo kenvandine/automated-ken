@@ -61,7 +61,9 @@ class TestRunAutoPromoterAgent(BaseAgent):
             uc.testing_repo,
             uc.github_token,
         )
-        new_assets = load_test_run_screenshots(uc.testing_repo, pr_number, uc.github_token)
+        new_assets = load_test_run_screenshots(
+            uc.testing_repo, pr_number, uc.github_token, test_run_id=self.test_run_id
+        )
         pairs = pair_screenshots(baseline_assets, new_assets)
         if not pairs:
             _set_run_note(

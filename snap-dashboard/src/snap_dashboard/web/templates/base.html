@@ -4,55 +4,70 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Automated Ken{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Ubuntu:wght@300;400;500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://assets.ubuntu.com/v1/vanilla_framework_version_4.59.0.min.css">
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
 <div class="app">
-  <header>
-    <div class="header-brand">
-      <h1><a href="/" class="brand-link">Automated Ken</a></h1>
-      <p>Snap maintenance tracker</p>
-    </div>
-    <nav class="header-nav">
-      <a href="/" class="nav-link">Dashboard</a>
-      <a href="/snaps/add" class="nav-link">Add Snap</a>
-      <a href="/testing" class="nav-link">Testing</a>
-      <a href="/version-bumps" class="nav-link">Version Bumps</a>
-      <a href="/agents" class="nav-link">Agents</a>
-      <a href="/settings" class="nav-link">Settings</a>
-      <a href="/docs" class="nav-link">Help</a>
-      {% if current_user and current_user.is_admin %}
-      <a href="/admin" class="nav-link">Admin</a>
-      {% endif %}
-    </nav>
-    <div class="header-user">
-      {% if current_user %}
-      {% if current_user.avatar_url %}
-      <img src="{{ current_user.avatar_url }}" alt="{{ current_user.display_name }}" class="user-avatar">
-      {% endif %}
-      <span class="user-name">{{ current_user.display_name }}</span>
-      <form method="post" action="/auth/logout" style="display:inline;">
-        <button type="submit" class="btn btn-sm btn-secondary" style="margin-left:8px;">Logout</button>
-      </form>
-      {% endif %}
-      <div class="last-updated">
-        {% if last_run %}
-        Updated {{ last_run.strftime('%Y-%m-%d %H:%M') }} UTC
-        {% endif %}
+  <header class="p-navigation is-dark">
+    <div class="p-navigation__row">
+      <div class="p-navigation__banner">
+        <div class="p-navigation__tagged-logo">
+          <a href="/" class="p-navigation__link" aria-label="Homepage">
+            <span class="p-navigation__logo-title">Automated Ken</span>
+          </a>
+        </div>
+        <a href="#navigation" class="p-navigation__toggle--open" aria-controls="navigation">Menu</a>
       </div>
+      <nav class="p-navigation__nav" id="navigation" aria-label="Main navigation">
+        <ul class="p-navigation__items">
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/">Dashboard</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/snaps/add">Add Snap</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/testing">Testing</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/runners">Runners</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/version-bumps">Version Bumps</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/agents">Agents</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/stats">Stats</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/settings">Settings</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/docs">Help</a></li>
+          {% if current_user and current_user.is_admin %}
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/admin">Admin</a></li>
+          {% endif %}
+        </ul>
+        <div class="header-user">
+          {% if current_user %}
+          {% if current_user.avatar_url %}
+          <img src="{{ current_user.avatar_url }}" alt="{{ current_user.display_name }}" class="user-avatar">
+          {% endif %}
+          <span class="user-name">{{ current_user.display_name }}</span>
+          <form method="post" action="/auth/logout" style="display:inline;">
+            <button type="submit" class="p-button is-small is-dark" style="margin-left:8px;">Logout</button>
+          </form>
+          {% endif %}
+          <div class="last-updated">
+            {% if last_run %}
+            Updated {{ last_run.strftime('%Y-%m-%d %H:%M') }} UTC
+            {% endif %}
+          </div>
+        </div>
+      </nav>
     </div>
   </header>
 
-  {% block content %}{% endblock %}
+  <div class="p-strip">
+    <div class="row">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
 
   {% block scripts %}{% endblock %}
 
-  <footer>
-    <p>snap-dashboard &middot; powered by <a href="https://snapcraft.io" target="_blank" rel="noopener">snapcraft.io</a></p>
+  <footer class="p-strip is-shallow">
+    <div class="row">
+      <p>automated-ken &middot; powered by <a href="https://snapcraft.io" target="_blank" rel="noopener">snapcraft.io</a></p>
+    </div>
   </footer>
 </div>
 </body>

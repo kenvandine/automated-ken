@@ -107,7 +107,7 @@ class BaseAgent(ABC):
     def _get_lemonade(self, user_config=None):
         """Return a LemonadeClient if configured and available, else None."""
         from snap_dashboard.lemonade.client import get_lemonade_client
-        client = get_lemonade_client(user_config)
+        client = get_lemonade_client(user_config, ensure_started=True)
         if client and client.is_available():
             return client
         return None

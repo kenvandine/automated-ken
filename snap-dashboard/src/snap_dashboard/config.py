@@ -57,6 +57,12 @@ class Config:
     session_secret: str = ""
     github_client_id: str = ""
     github_client_secret: str = ""
+    # Bundled/embedded Lemonade server (private, per-instance — see
+    # snap_dashboard.lemonade.embedded). Auto-generated on first run so
+    # agents never depend on a system-wide lemonade-server being installed
+    # or reachable.
+    lemonade_embedded_port: int = 13411
+    lemonade_embedded_api_key: str = ""
 
 
 def get_config() -> Config:
@@ -76,6 +82,8 @@ def get_config() -> Config:
     session_secret = _get_value("SESSION_SECRET", file_values, "")
     github_client_id = _get_value("GITHUB_CLIENT_ID", file_values, "")
     github_client_secret = _get_value("GITHUB_CLIENT_SECRET", file_values, "")
+    embedded_port_str = _get_value("LEMONADE_EMBEDDED_PORT", file_values, "13411")
+    embedded_api_key = _get_value("LEMONADE_EMBEDDED_API_KEY", file_values, "")
 
     try:
         port = int(port_str)
@@ -86,6 +94,11 @@ def get_config() -> Config:
         interval = int(interval_str)
     except ValueError:
         interval = 6
+
+    try:
+        embedded_port = int(embedded_port_str)
+    except ValueError:
+        embedded_port = 13411
 
     return Config(
         bind=bind,
@@ -98,6 +111,8 @@ def get_config() -> Config:
         session_secret=session_secret,
         github_client_id=github_client_id,
         github_client_secret=github_client_secret,
+        lemonade_embedded_port=embedded_port,
+        lemonade_embedded_api_key=embedded_api_key,
     )
 
 

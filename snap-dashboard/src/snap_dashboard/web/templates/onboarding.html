@@ -46,7 +46,7 @@
             <span>GitHub &amp; GitLab issues + PRs</span>
           </div>
         </div>
-        <a href="/onboarding?step=2" class="btn btn-primary">Get Started</a>
+        <a href="/onboarding?step=2" class="p-button--positive">Get Started</a>
       </div>
 
       {% elif step == 2 %}
@@ -83,8 +83,8 @@
           </div>
           {% endif %}
           <div class="onboarding-actions">
-            <a href="/onboarding?step=1" class="btn btn-secondary">Back</a>
-            <button type="submit" class="btn btn-primary">Verify &amp; Continue</button>
+            <a href="/onboarding?step=1" class="p-button">Back</a>
+            <button type="submit" class="p-button--positive">Verify &amp; Continue</button>
           </div>
         </form>
       </div>
@@ -112,8 +112,8 @@
             >
           </div>
           <div class="onboarding-actions">
-            <a href="/onboarding?step=4" class="btn btn-secondary">Skip</a>
-            <button type="submit" class="btn btn-primary">Save &amp; Continue</button>
+            <a href="/onboarding?step=4" class="p-button">Skip</a>
+            <button type="submit" class="p-button--positive">Save &amp; Continue</button>
           </div>
         </form>
       </div>
@@ -131,7 +131,7 @@
           <div class="loading-bar-fill"></div>
         </div>
         <form method="post" action="/onboarding/complete" id="complete-form">
-          <button type="submit" class="btn btn-primary">Go to Dashboard</button>
+          <button type="submit" class="p-button--positive">Go to Dashboard</button>
         </form>
       </div>
       <script>

@@ -110,12 +110,16 @@ async def agent_status(request: Request) -> JSONResponse:
         ]
 
     # Lemonade status
-    lemonade_url = uc.lemonade_server_url or "http://localhost:8080"
-    lemonade_model = uc.lemonade_model or "llava"
+    lemonade_url = uc.lemonade_server_url or ""
+    lemonade_model = uc.lemonade_model or ""
     lemonade_available = False
     try:
-        from snap_dashboard.lemonade.client import LemonadeClient
-        lemonade_available = LemonadeClient(base_url=lemonade_url, model=lemonade_model).is_available()
+        from snap_dashboard.lemonade.client import get_lemonade_client
+        client = get_lemonade_client(uc)  # never blocks — reflects current state only
+        if client:
+            lemonade_url = client.base_url
+            lemonade_model = client.model
+            lemonade_available = client.is_available()
     except Exception:
         pass
 
@@ -154,25 +158,36 @@ async def scan_now(request: Request) -> RedirectResponse:
 
 @router.post("/agents/test-lemonade")
 async def test_lemonade(request: Request) -> JSONResponse:
-    """Ping lemonade-server and return availability + model list."""
+    """Ping lemonade-server (starting the embedded instance if needed) and return availability + model list."""
     user = get_current_user(request)
     if user is None:
         return JSONResponse({"error": "not authenticated"}, status_code=401)
     uc = get_user_config(user["id"])
-    url = uc.lemonade_server_url or "http://localhost:8080"
-    model = uc.lemonade_model or "llava"
     try:
-        from snap_dashboard.lemonade.client import LemonadeClient
+        import asyncio
+
         import httpx
-        client = LemonadeClient(base_url=url, model=model)
-        available = client.is_available()
-        models: list[str] = []
-        if available:
-            with httpx.Client(timeout=5) as hc:
-                resp = hc.get(f"{url}/v1/models")
-            if resp.status_code == 200:
-                models = [m.get("id", "") for m in resp.json().get("data", [])]
-        return JSONResponse({"available": available, "url": url, "model": model, "models": models})
+
+        from snap_dashboard.lemonade.client import get_lemonade_client
+
+        def _probe():
+            client = get_lemonade_client(uc, ensure_started=True)
+            available = client.is_available() if client else False
+            models: list[str] = []
+            if client and available:
+                with httpx.Client(timeout=5) as hc:
+                    resp = hc.get(f"{client.base_url}/v1/models", headers=client._headers())
+                if resp.status_code == 200:
+                    models = [m.get("id", "") for m in resp.json().get("data", [])]
+            return client, available, models
+
+        client, available, models = await asyncio.to_thread(_probe)
+        return JSONResponse({
+            "available": available,
+            "url": client.base_url if client else "",
+            "model": client.model if client else "",
+            "models": models,
+        })
     except Exception as exc:
         return JSONResponse({"available": False, "error": str(exc)})
 
