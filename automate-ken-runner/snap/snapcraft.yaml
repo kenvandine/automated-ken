@@ -46,6 +46,11 @@ parts:
     plugin: python
     source: .
     python-packages: [click, httpx, pillow]
+    # This snap uses classic confinement, so unlike a strictly-confined
+    # core24 snap it can't rely on the base snap providing a Python
+    # interpreter at runtime — it must be staged into the payload itself
+    # (see snapcraft's python_common.get_system_interpreter()).
+    stage-packages: [python3.12-minimal, libpython3.12-minimal, libpython3.12-stdlib]
     # version: git doesn't work here for the same reason as the
     # automated-ken server snap: snapcraft.yaml lives in a subdirectory
     # of the top-level repo, which has no .git of its own.
