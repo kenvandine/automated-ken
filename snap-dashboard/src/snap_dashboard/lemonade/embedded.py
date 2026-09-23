@@ -120,7 +120,11 @@ def _download_and_extract(url: str, dest_dir: Path) -> bool:
                 resp.raise_for_status()
                 for chunk in resp.iter_bytes(chunk_size=1 << 20):
                     tmp.write(chunk)
-        with tempfile.TemporaryDirectory() as extract_tmp:
+        # Extract next to dest_dir (not the system /tmp) so the final
+        # rename() is same-filesystem: under a snap, /tmp is a private
+        # tmpfs mount distinct from $SNAP_COMMON, and a cross-device
+        # rename() raises EXDEV ("Invalid cross-device link").
+        with tempfile.TemporaryDirectory(dir=dest_dir.parent) as extract_tmp:
             with tarfile.open(tmp_path) as tf:
                 tf.extractall(extract_tmp)  # noqa: S202 — trusted release asset from our own API query
             # The tarball has a single top-level directory; move its contents in.
