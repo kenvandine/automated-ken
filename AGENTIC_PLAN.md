@@ -327,6 +327,88 @@ error_msg, triggered_at
 
 ---
 
+## Phase 14: Delegated Coding Tasks (Copilot Cloud Agent) + Fleet Normalization
+
+Some agent work is genuinely "capable coding" — fixing a failing CI workflow,
+upgrading npm/node dependencies, attempting a fix for a filed issue, or
+bringing every packaging repo in line with how automated-ken now maintains
+them. Lemonade (a general vision/text model) isn't suited to autonomous
+multi-file code editing, so this work is delegated out via a pluggable
+**coding task backend** rather than attempted with a local model.
+
+### `agents/coding_backend.py` — the backend selector
+`get_coding_dispatcher(uc)` is the single decision point: reads
+`UserConfig.coding_task_backend` and returns a `CodingDispatcher`
+(`.start_task(owner, repo, prompt, base_ref, create_pull_request)`), or
+`None` if unusable/unimplemented.
+
+| Backend | Status |
+|---------|--------|
+| `copilot_cloud_agent` (default) | Implemented — dispatches to GitHub Copilot cloud agent via `github/copilot_agent.py`. Needs no new credentials (reuses `bot_github_token`/`github_token`). |
+| `local_lemonade` | Reserved extension point. No current local model is capable enough — cleanly skips with a log message. **Long-term goal: run as much of this locally as capable local models become available.** |
+| `external_api` | Reserved extension point for a user-supplied hosted-coding-model API key (`external_coding_api_key`/`_base_url`/`_model`). Not implemented yet. |
+
+### `github/copilot_agent.py` — `CopilotAgentClient`
+Thin client for GitHub's (public-preview) agent-tasks REST API:
+`start_task()` (`POST /agents/repos/{owner}/{repo}/tasks`), `get_task()`
+(`GET .../tasks/{id}`), `request_pr_review()` (requests the
+`copilot-pull-request-reviewer[bot]` reviewer on an existing PR). Requires a
+user-to-server token (PAT/OAuth), not a GitHub App installation token.
+
+### New DB model: `copilot_tasks`
+Tracks every dispatched task — `kind` (`ci_fix` | `dep_update` | `issue_fix` |
+`fleet_normalize`), `owner_repo`, `external_task_id`, `status`, `pr_url`,
+`issue_number` (also reused as a per-snap dedupe key for fleet-normalize
+suite-cleanup tasks), `error_msg`. Visible at `/copilot-tasks`, with
+per-task and refresh-all actions that poll `get_task()` for live status.
+
+### Three delegated agents (all opt-in, default off)
+- **`agents/pr_monitor.py`** (`_maybe_dispatch_ci_fix`): when a version-bump
+  PR's build/test workflow fails, dispatches a fix-PR task with `base_ref`
+  set to the failing PR's own branch (so the fix stacks on top of it).
+  Gated by `UserConfig.auto_fix_ci_failures`.
+- **`agents/upstream_maintainer.py`** (`UpstreamMaintainerAgent`, scheduled
+  daily): for snaps whose `upstream_repo` is owned by the logged-in user's
+  own GitHub account (heuristic — no new DB column), dispatches rate-limited
+  (14-day cooldown) dependency-upgrade tasks, requests Copilot PR reviews on
+  open PRs lacking one, and triages open issues (capped at 3/run,
+  deduplicated by issue number). Gated by `UserConfig.auto_maintain_upstream`.
+- **`agents/repo_normalizer.py`** (`RepoNormalizerAgent`, manually triggered
+  — "Run Fleet Normalization Now" button in Settings): a one-time campaign
+  across every packaging repo. Per repo, dispatches a single Copilot task
+  asking it to (1) find and remove any legacy release-polling workflow
+  (e.g. `sync-release`), (2) write an `AGENTS.md` explaining automated-ken
+  now owns version detection/CI monitoring/testing/promotion, and (3) add
+  the snap's YARF suite under `tests/` (fetched via
+  `testing/suite_zip.list_suite_files()` and inlined as file blocks in the
+  prompt, since Copilot's cloud-agent sandbox can't reach across repos).
+  Separately dispatches a cleanup task against the testing repo to remove
+  the now-migrated `suites/<snap>/`. Idempotent via `AGENTS.md` existence +
+  existing `CopilotTask` rows. Gated by
+  `UserConfig.fleet_normalization_enabled`.
+
+### New `UserConfig` columns
+| Column | Default | Purpose |
+|--------|---------|---------|
+| `auto_fix_ci_failures` | `False` | Enable CI-fix dispatch on failing version-bump PRs |
+| `auto_maintain_upstream` | `False` | Enable dep-update/PR-review/issue-fix for upstream-owned repos |
+| `fleet_normalization_enabled` | `False` | Allow manually triggering the fleet-normalization campaign |
+| `coding_task_backend` | `"copilot_cloud_agent"` | Which backend `get_coding_dispatcher()` selects |
+| `external_coding_api_key` / `_base_url` / `_model` | `None` | Reserved for the future external-API backend |
+
+### Why delegate to Copilot instead of a custom coding-LLM client
+Copilot cloud agent needs zero new credentials, is strictly more capable
+than the embedded Lemonade model for autonomous multi-file edits, and can
+actually inspect a repo's existing files/workflows to decide how to act
+(vs. automated-ken pattern-matching them mechanically). `github/tree_commit.py`
+(atomic multi-file commits via the Git Data API) was built for a mechanical
+version of the fleet-normalization campaign but is unused now that
+`repo_normalizer.py` delegates to Copilot instead — kept as reusable infra
+for any future purely-mechanical multi-file commit that doesn't need a
+coding model's judgment.
+
+---
+
 ## Phase Summary
 
 | Phase | Scope | Key New Files | DB Changes |
@@ -338,6 +420,7 @@ error_msg, triggered_at
 | **11** | Screenshot reviewer | `agents/screenshot_reviewer.py` | `screenshot_comparisons` table |
 | **12** | Live dashboard | `routes/agents.py`, `routes/version_bumps.py`, `routes/api.py` | — |
 | **13** | Stale snap rebuild | `agents/stale_build_scanner.py`, `snapcraft/build_workflow_template.py`, `set-snapcraft-secret.sh` | `stale_build_triggers` table; 2 new `user_config` columns |
+| **14** | Delegated coding tasks (Copilot cloud agent) + fleet normalization | `agents/coding_backend.py`, `github/copilot_agent.py`, `agents/upstream_maintainer.py`, `agents/repo_normalizer.py`, `routes/copilot_tasks.py` | `copilot_tasks` table; 7 new `user_config` columns |
 
 ---
 

@@ -41,6 +41,12 @@ You need a PAT with these scopes for full functionality:
 - **`repo`** — read issues/PRs, create branches and files, dispatch workflows
 - **`actions`** — trigger and monitor GitHub Actions runs
 
+If you plan to enable any of the Copilot cloud agent delegation features
+(auto-fix CI failures, upstream maintenance, fleet normalization — see step
+6), the same token also works: GitHub's agent-tasks API accepts any
+user-to-server token (classic or fine-grained PAT, or OAuth token) with
+`repo` scope. No separate credential is needed.
+
 Create one at: **GitHub → Settings → Developer settings → Personal access tokens**.
 
 ## 4. Start the server
@@ -81,6 +87,7 @@ Go to **Settings → Agents & AI** to configure:
 - **Release scan interval** — how often the release scanner checks packaging repos (default: 4 hours).
 - **Auto-merge** — automatically merge agent-approved version bump PRs.
 - **Auto-rebuild stale snaps** — trigger rebuilds for snaps not published in N days (see below).
+- **Delegated Coding Tasks** — opt-in toggles for auto-fixing failing CI on version-bump PRs, auto-maintaining repos you personally own upstream (dependency upgrades, PR reviews, issue fixes), and a one-time fleet-normalization campaign across all packaging repos. All delegate to GitHub Copilot cloud agent by default (`Coding Task Backend` — a future local model or external API key are reserved options). Review the PRs these open before merging; see `/copilot-tasks` for status of every dispatched task.
 
 ## 7. Set up the YARF testing repository
 
