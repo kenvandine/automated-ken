@@ -47,10 +47,16 @@ DEFAULT_EMBEDDED_MODEL = "Gemma-4-12B-it-GGUF"
 
 
 def get_lemonade_data_dir() -> Path:
-    """Return the directory embeddable Lemonade is installed/run from."""
-    snap_data = os.environ.get("SNAP_DATA")
-    if snap_data:
-        base = Path(snap_data) / "lemonade"
+    """Return the directory embeddable Lemonade is installed/run from.
+
+    Uses $SNAP_COMMON, not $SNAP_DATA: the downloaded lemond binary and
+    model weights can be sizeable, and $SNAP_DATA is per-revision, so
+    every refresh would otherwise leave a duplicate copy behind in the
+    old revision's directory until it's pruned.
+    """
+    snap_common = os.environ.get("SNAP_COMMON")
+    if snap_common:
+        base = Path(snap_common) / "lemonade"
     else:
         base = Path.home() / ".local" / "share" / "snap-dashboard" / "lemonade"
     base.mkdir(parents=True, exist_ok=True)

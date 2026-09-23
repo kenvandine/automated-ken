@@ -1,8 +1,15 @@
 """Configuration management for snap-dashboard.
 
 Reads config from environment variables first, then falls back to
-$SNAP_DATA/config.env if $SNAP_DATA is set, else
+$SNAP_COMMON/config.env if $SNAP_COMMON is set, else
 ~/.local/share/snap-dashboard/config.env.
+
+Deliberately $SNAP_COMMON, not $SNAP_DATA: $SNAP_DATA is per-revision
+(a fresh, snapd-copied directory on every refresh, with old revisions'
+copies left behind until pruned), while $SNAP_COMMON is shared across
+all revisions of the snap. All of this app's writable state should live
+in $SNAP_COMMON so refreshes don't pile up duplicate config/db/model
+data across revisions.
 """
 
 from __future__ import annotations
@@ -13,9 +20,9 @@ from pathlib import Path
 
 
 def _get_config_file_path() -> Path | None:
-    snap_data = os.environ.get("SNAP_DATA")
-    if snap_data:
-        return Path(snap_data) / "config.env"
+    snap_common = os.environ.get("SNAP_COMMON")
+    if snap_common:
+        return Path(snap_common) / "config.env"
     return Path.home() / ".local" / "share" / "snap-dashboard" / "config.env"
 
 

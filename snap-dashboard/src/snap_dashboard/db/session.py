@@ -14,10 +14,14 @@ from snap_dashboard.db.models import Base
 
 
 def get_db_path() -> Path:
-    """Return the SQLite database file path."""
-    snap_data = os.environ.get("SNAP_DATA")
-    if snap_data:
-        return Path(snap_data) / "snap-dashboard.db"
+    """Return the SQLite database file path.
+
+    Uses $SNAP_COMMON (shared across snap revisions), not $SNAP_DATA
+    (per-revision) — see snap_dashboard.config for why.
+    """
+    snap_common = os.environ.get("SNAP_COMMON")
+    if snap_common:
+        return Path(snap_common) / "snap-dashboard.db"
     db_env = os.environ.get("SNAP_DASHBOARD_DB")
     if db_env:
         return Path(db_env)

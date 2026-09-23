@@ -190,7 +190,10 @@ snap-dashboard/
 ## Data storage
 
 All data is stored locally in SQLite:
-- **Snap (runtime):** `$SNAP_DATA/snap-dashboard.db`
+- **Snap (runtime):** `$SNAP_COMMON/snap-dashboard.db` — deliberately
+  `$SNAP_COMMON` (shared across snap revisions) rather than `$SNAP_DATA`
+  (per-revision), so refreshes don't leave duplicate copies of the
+  database, config, and downloaded Lemonade model behind.
 - **Dev mode:** `~/.local/share/snap-dashboard/snap-dashboard.db`
 
 No data is sent to any third party. The tool only reads from:

@@ -41,6 +41,14 @@ where = ["src"]
 [tool.setuptools.package-dir]
 "" = "src"
 
+[tool.setuptools.package-data]
+# Jinja2 templates and static assets (css/js/html) aren't Python source,
+# so setuptools excludes them from the built wheel unless declared here.
+# This bit us in the snap build: `pip install -U .` (a real build, not
+# `pip install -e .`) silently dropped them, and uvicorn failed at
+# startup with "Directory '.../web/static' does not exist".
+"snap_dashboard" = ["web/static/**/*", "web/templates/**/*"]
+
 [tool.ruff]
 line-length = 100
 
