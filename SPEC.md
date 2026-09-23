@@ -374,7 +374,7 @@ ambiance; the main dashboard keeps them very subtle to avoid distracting from da
 ### `snap/snapcraft.yaml` (outline)
 
 ```yaml
-name: snap-dashboard
+name: automated-ken
 base: core24
 version: git
 summary: Personal snap maintenance dashboard
@@ -384,7 +384,7 @@ description: |
 grade: stable
 confinement: strict
 
-# User-configurable snap options (snap set snap-dashboard <key>=<value>)
+# User-configurable snap options (snap set automated-ken <key>=<value>)
 # bind:         bind address (default: 127.0.0.1)
 # port:         listen port   (default: 8080)
 # github-token: GitHub PAT    (default: "")
@@ -440,7 +440,7 @@ COLLECT_INTERVAL_HOURS=${interval:-6}
 EOF
 
 # Restart web server to pick up new bind/port
-snapctl restart snap-dashboard.serve || true
+snapctl restart automated-ken.serve || true
 ```
 
 ### Data locations
@@ -526,10 +526,10 @@ LOG_LEVEL=INFO
 ## Resolved Design Decisions
 
 1. **Web UI binding** — defaults to `127.0.0.1` (localhost only).
-   Overridable via `snap set snap-dashboard bind=0.0.0.0` to expose on all
-   interfaces. Port configurable via `snap set snap-dashboard port=8080`.
+   Overridable via `snap set automated-ken bind=0.0.0.0` to expose on all
+   interfaces. Port configurable via `snap set automated-ken port=8080`.
 
-2. **GitHub token** — `snap set snap-dashboard github-token=ghp_...` stored in
+2. **GitHub token** — `snap set automated-ken github-token=ghp_...` stored in
    snapd config (integrated with snapd's credential store, not a world-readable
    file). Read at runtime via `snapctl get github-token`.
 

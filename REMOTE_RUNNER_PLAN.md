@@ -58,7 +58,7 @@ in the web UI, and the machine shows up as a manageable resource.
                                    │ (poll/long-poll — no inbound port,
                                    │  works behind NAT/home routers)
                     ┌──────────────┴───────────────┐
-                    │   automated-ken-runner        │
+                    │   automate-ken-runner        │
                     │   (installed on an idle       │
                     │    desktop/laptop, real        │
                     │    logged-in graphical session)│
@@ -157,7 +157,7 @@ targets; only trigger/poll/result-ingestion logic differs.
     (never retrievable again, same UX as a PAT).
   - A FastAPI dependency `get_runner_from_bearer(request)` resolving
     `Runner` by `secret_hash`, for all other `/api/runners/*` endpoints.
-- New CLI tool (separate package, see Phase R7): `automated-ken-runner
+- New CLI tool (separate package, see Phase R7): `automate-ken-runner
   enroll --server <url> --token <token>` performs the enroll call and
   persists `{server_url, runner_id, secret}` locally.
 
@@ -310,7 +310,7 @@ runner/
 ├── automated_ken_runner/
 │   ├── __init__.py
 │   ├── cli.py                  click CLI: enroll, run, prepare-machine, status
-│   ├── config.py               reads/writes ~/.config/automated-ken-runner/
+│   ├── config.py               reads/writes ~/.config/automate-ken-runner/
 │   ├── idle.py                 loginctl / logind idle+lock detection
 │   ├── client.py                httpx client for /api/runners/* (bearer auth)
 │   ├── executor.py              snap install/run + yarf invocation
@@ -325,13 +325,13 @@ runner/
 │   │                             SETUPTOOLS_SCM_PRETEND_VERSION from changelog
 │   ├── changelog
 │   ├── copyright
-│   ├── automated-ken-runner.install     -> ships the systemd user unit
-│   ├── automated-ken-runner.service     systemd --user unit (see below)
-│   └── automated-ken-runner.postinst    snapd presence check + enable hint
+│   ├── automate-ken-runner.install     -> ships the systemd user unit
+│   ├── automate-ken-runner.service     systemd --user unit (see below)
+│   └── automate-ken-runner.postinst    snapd presence check + enable hint
 └── README.md
 ```
 
-### systemd unit (`debian/automated-ken-runner.service`)
+### systemd unit (`debian/automate-ken-runner.service`)
 
 ```ini
 [Unit]
@@ -340,7 +340,7 @@ Documentation=https://github.com/kenvandine/automated-ken
 After=network.target graphical-session.target
 
 [Service]
-ExecStart=/usr/bin/automated-ken-runner run
+ExecStart=/usr/bin/automate-ken-runner run
 Restart=on-failure
 RestartSec=5
 
@@ -358,7 +358,7 @@ system service would need to fight its way into the user session anyway
 ### `debian/control`
 
 ```
-Source: automated-ken-runner
+Source: automate-ken-runner
 Section: utils
 Priority: optional
 Maintainer: Ken VanDine <ken@vandine.org>
@@ -373,7 +373,7 @@ Standards-Version: 4.7.2
 Rules-Requires-Root: no
 Homepage: https://github.com/kenvandine/automated-ken
 
-Package: automated-ken-runner
+Package: automate-ken-runner
 Architecture: all
 Depends:
  ${misc:Depends},
@@ -396,7 +396,7 @@ Description: Private test runner for Automated Ken
  interrupts active use of the machine.
 ```
 
-### `debian/automated-ken-runner.postinst`
+### `debian/automate-ken-runner.postinst`
 
 Mirrors `ailab.postinst`'s style: check for `snapd` (hard requirement,
 since job execution is entirely `snap install`/`snap run`), print the
@@ -410,13 +410,13 @@ set -eu
 case "$1" in
     configure)
         if ! command -v snap >/dev/null 2>&1; then
-            echo "automated-ken-runner: snapd is required." >&2
+            echo "automate-ken-runner: snapd is required." >&2
             exit 1
         fi
         echo ""
-        echo "automated-ken-runner installed. Next steps:"
-        echo "  automated-ken-runner enroll --server <url> --token <token>"
-        echo "  systemctl --user enable --now automated-ken-runner"
+        echo "automate-ken-runner installed. Next steps:"
+        echo "  automate-ken-runner enroll --server <url> --token <token>"
+        echo "  systemctl --user enable --now automate-ken-runner"
         echo ""
         ;;
 esac
@@ -428,7 +428,7 @@ esac
 Add jobs to the existing `.github/workflows/ci.yml` in this repo (or a
 new workflow scoped to `runner/`, triggered on paths):
 - `ruff check runner/automated_ken_runner/`
-- smoke test: `pip install -e runner/`, import the package, `automated-ken-runner --help`
+- smoke test: `pip install -e runner/`, import the package, `automate-ken-runner --help`
 - `lintian` on an unsigned source build (`debuild -us -uc -S -d` from
   `runner/`, then `lintian --fail-on error ../*.changes`)
 
@@ -437,7 +437,7 @@ new workflow scoped to `runner/`, triggered on paths):
 Same pattern: a `release: [published]`-triggered workflow that stamps
 `debian/changelog` per target distro (noble/questing/resolute), builds a
 signed source package with `debuild`, and `dput`s to a Launchpad PPA
-(e.g. `ppa:ken-vandine/automated-ken-runner`) — reusing the same
+(e.g. `ppa:ken-vandine/automate-ken-runner`) — reusing the same
 `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` org secrets already set
 up for `ailab`, if this repo has access to them, otherwise new ones
 scoped to this repo.
@@ -453,7 +453,7 @@ of fiddly, easy-to-forget setup step that should be automated rather
 than left as a manual checklist — add it as a CLI subcommand:
 
 ```sh
-automated-ken-runner prepare-machine
+automate-ken-runner prepare-machine
 ```
 
 which runs (and is idempotent/safe to re-run):
@@ -487,10 +487,10 @@ note — worth stating plainly in both the CLI output and the docs.
 
 - "Add runner" flow shows the exact install + enroll commands, e.g.:
   ```sh
-  sudo add-apt-repository ppa:ken-vandine/automated-ken-runner
-  sudo apt install automated-ken-runner
-  automated-ken-runner enroll --server https://dashboard.example.com --token r_AbC123...
-  systemctl --user enable --now automated-ken-runner
+  sudo add-apt-repository ppa:ken-vandine/automate-ken-runner
+  sudo apt install automate-ken-runner
+  automate-ken-runner enroll --server https://dashboard.example.com --token r_AbC123...
+  systemctl --user enable --now automate-ken-runner
   ```
 - `/runners/{id}` detail page: recent jobs run on that machine, last
   screenshots, revoke button — same shape as `/version-bumps/{id}`.
@@ -501,7 +501,7 @@ note — worth stating plainly in both the CLI output and the docs.
 
 ## Open Questions (need a decision before/while implementing)
 
-1. ~~Packaging format for `automated-ken-runner`.~~ **Resolved: `.deb`**,
+1. ~~Packaging format for `automate-ken-runner`.~~ **Resolved: `.deb`**,
    matching the `ailab` convention exactly (debhelper + pybuild +
    setuptools-scm + systemd `--user` unit + Launchpad PPA release flow).
    See Phase R7 above for the concrete layout.
@@ -527,7 +527,7 @@ note — worth stating plainly in both the CLI output and the docs.
 5. **PPA access.** Does this repo's GitHub Actions have access to the
    same `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` secrets used for
    `ailab`'s release-ppa.yml, or does a new Launchpad PPA + GPG key need
-   to be set up for `automated-ken-runner` specifically? Not blocking
+   to be set up for `automate-ken-runner` specifically? Not blocking
    for R1–R6 (only matters once we get to actually cutting a release).
 
 ## Also Worth Doing (adjacent, smaller, not blocking this plan)

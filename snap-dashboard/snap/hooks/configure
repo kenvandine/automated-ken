@@ -1,12 +1,12 @@
 #!/bin/sh
 # Called automatically by snapd:
 #   - once right after install (with whatever defaults are set below)
-#   - every time `snap set snap-dashboard <key>=<value>` is run
+#   - every time `snap set automated-ken <key>=<value>` is run
 #
 # Translates snapd's own config store (accessed via snapctl) into
 # $SNAP_DATA/config.env, which is what snap_dashboard.config.get_config()
 # actually reads at runtime. Anyone deploying this snap for themselves
-# only needs `snap set snap-dashboard github-client-id=... github-client-secret=...`
+# only needs `snap set automated-ken github-client-id=... github-client-secret=...`
 # (see README.md) — everything else has a sane default.
 set -e
 
@@ -28,7 +28,7 @@ interval=$(snapctl get interval 2>/dev/null || true)
 # restart of the serve daemon invalidates every logged-in session. Generate
 # one automatically on first run and persist it in snapd's own config store
 # (via snapctl set) so it survives reinstalls/refreshes and is visible via
-# `snap get snap-dashboard session-secret`, instead of silently regenerating
+# `snap get automated-ken session-secret`, instead of silently regenerating
 # a new throwaway secret on every process start.
 if [ -z "$session_secret" ]; then
     session_secret=$(head -c32 /dev/urandom | base64 | tr -d '\n')
@@ -47,4 +47,4 @@ PUBLISHER=${publisher:-}
 COLLECT_INTERVAL_HOURS=${interval:-6}
 EOF
 
-snapctl restart snap-dashboard.serve 2>/dev/null || true
+snapctl restart automated-ken.serve 2>/dev/null || true

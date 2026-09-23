@@ -149,7 +149,7 @@ When triggered, the agent creates `.github/workflows/automated-snap-build.yml` i
 > **Not implemented yet.** This section documents the intended
 > install/enroll flow for the private remote test runner described in
 > [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md) (Phases R1–R7).
-> Commands below (`automated-ken-runner ...`, the `/runners` page) don't
+> Commands below (`automate-ken-runner ...`, the `/runners` page) don't
 > exist in the dashboard yet — treat this as a preview of what setting
 > up a fleet of runner laptops will look like once it ships, so this
 > doc doesn't need to be rewritten from scratch at that point.
@@ -185,12 +185,12 @@ Requirements:
 - Plugged into power, or otherwise not going to run out of battery
   mid-fleet
 
-## 12. Install `automated-ken-runner`
+## 12. Install `automate-ken-runner`
 
 ```bash
-sudo add-apt-repository ppa:ken-vandine/automated-ken-runner
+sudo add-apt-repository ppa:ken-vandine/automate-ken-runner
 sudo apt update
-sudo apt install automated-ken-runner
+sudo apt install automate-ken-runner
 ```
 
 ## 13. Enroll the machine
@@ -199,7 +199,7 @@ On the dashboard, go to **Runners → Add runner** to generate a one-time
 enrollment token (expires in ~15 minutes), then on the runner machine:
 
 ```bash
-automated-ken-runner enroll --server https://your-dashboard-host:9080 --token <token>
+automate-ken-runner enroll --server https://your-dashboard-host:9080 --token <token>
 ```
 
 This also runs the machine-preparation step automatically, which:
@@ -224,7 +224,7 @@ your own — see the exact `gsettings` commands in
 ## 14. Start the runner service
 
 ```bash
-systemctl --user enable --now automated-ken-runner
+systemctl --user enable --now automate-ken-runner
 ```
 
 It's a `systemd --user` service (not system-wide) — it needs the real
@@ -235,8 +235,8 @@ apps into, so it has to run as your user, in your session, not as root.
 
 Back on the dashboard's **Runners** page, the machine should appear
 within a few seconds, reporting `idle` (unlocked, no recent input). If
-it shows `offline`, check `systemctl --user status automated-ken-runner`
-and `journalctl --user -u automated-ken-runner -f` on the runner machine.
+it shows `offline`, check `systemctl --user status automate-ken-runner`
+and `journalctl --user -u automate-ken-runner -f` on the runner machine.
 
 ## 16. Add more runners
 

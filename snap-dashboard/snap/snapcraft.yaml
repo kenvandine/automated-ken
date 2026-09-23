@@ -1,4 +1,4 @@
-name: snap-dashboard
+name: automated-ken
 base: core24
 adopt-info: snap-dashboard
 title: Automated Ken
@@ -15,7 +15,7 @@ source-code: https://github.com/kenvandine/automated-ken
 grade: stable
 confinement: strict
 
-# Required snap options (snap set snap-dashboard <key>=<value>):
+# Required snap options (snap set automated-ken <key>=<value>):
 #   github-client-id:     OAuth App client ID (create one at
 #                          GitHub → Settings → Developer settings → OAuth Apps)
 #   github-client-secret: OAuth App client secret

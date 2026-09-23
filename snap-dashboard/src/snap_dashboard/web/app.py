@@ -112,6 +112,7 @@ from snap_dashboard.web.routes import (  # noqa: E402
     runners,
     settings,
     snaps,
+    stats,
     testing,
     version_bumps,
 )
@@ -126,5 +127,6 @@ app.include_router(runner_api.router)
 app.include_router(runners.router)
 app.include_router(snaps.router)
 app.include_router(settings.router)
+app.include_router(stats.router)
 app.include_router(testing.router)
 app.include_router(version_bumps.router)

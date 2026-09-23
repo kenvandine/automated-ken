@@ -53,7 +53,7 @@ This snap isn't tied to any particular publisher account — anyone can
 install it and point it at their own snaps.
 
 ```sh
-sudo snap install snap-dashboard
+sudo snap install automated-ken
 ```
 
 Create a GitHub OAuth App (**GitHub → Settings → Developer settings → OAuth
@@ -61,8 +61,8 @@ Apps → New OAuth App**) with callback URL `http://<host>:9080/auth/callback`,
 then configure it and start the server:
 
 ```sh
-snap set snap-dashboard github-client-id=...
-snap set snap-dashboard github-client-secret=...
+snap set automated-ken github-client-id=...
+snap set automated-ken github-client-secret=...
 ```
 
 The `serve` daemon starts (and restarts itself to pick up the new config)
@@ -73,12 +73,12 @@ so multiple people can run their own independent setups against the same
 snap-dashboard instance if they want to.
 
 A session-signing secret is generated automatically on first run and
-persisted (`snap get snap-dashboard session-secret`), so logins survive
+persisted (`snap get automated-ken session-secret`), so logins survive
 daemon restarts without any extra configuration. To bind to a non-default
 address/port:
 
 ```sh
-snap set snap-dashboard bind=0.0.0.0 port=8080
+snap set automated-ken bind=0.0.0.0 port=8080
 ```
 
 ## Configuration
@@ -204,7 +204,7 @@ No data is sent to any third party. The tool only reads from:
 ```sh
 cd snap-dashboard
 snapcraft
-sudo snap install snap-dashboard_*.snap --dangerous
+sudo snap install automated-ken_*.snap --dangerous
 ```
 
 ## Dependencies

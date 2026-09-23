@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}Stats — Automated Ken{% endblock %}
+
+{% block content %}
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">Usage Stats</h2>
+    <p class="text-muted">How much autonomous work this instance has done</p>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-3">
+    <div class="card">
+      <h3 class="section-label">Test runs</h3>
+      <p style="font-size:2rem; margin:0;">{{ total_test_runs }}</p>
+      <p class="text-muted small">
+        {{ passed_test_runs }} passed &middot; {{ failed_test_runs }} failed
+        {% if pass_rate is not none %}&middot; {{ pass_rate }}% pass rate{% endif %}
+      </p>
+    </div>
+  </div>
+  <div class="col-3">
+    <div class="card">
+      <h3 class="section-label">Promoted to stable</h3>
+      <p style="font-size:2rem; margin:0;">{{ promoted_runs }}</p>
+      <p class="text-muted small">snap revisions auto-promoted</p>
+    </div>
+  </div>
+  <div class="col-3">
+    <div class="card">
+      <h3 class="section-label">Agent runs</h3>
+      <p style="font-size:2rem; margin:0;">{{ total_agent_runs }}</p>
+      <p class="text-muted small">across all background agents</p>
+    </div>
+  </div>
+  <div class="col-3">
+    <div class="card">
+      <h3 class="section-label">Version-bump PRs</h3>
+      <p style="font-size:2rem; margin:0;">{{ version_bumps_total }}</p>
+      <p class="text-muted small">
+        {{ version_bumps_merged }} merged &middot; {{ version_bumps_needs_review }} needs review
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col-6">
+    <div class="card">
+      <h3 class="section-label">Test runs by dispatch target</h3>
+      {% if not runs_by_dispatch %}
+      <p class="text-muted">No test runs yet.</p>
+      {% else %}
+      <table class="snap-table">
+        <thead><tr><th>Target</th><th>Runs</th></tr></thead>
+        <tbody>
+          {% for target, count in runs_by_dispatch.items() %}
+          <tr><td>{{ target }}</td><td>{{ count }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-6">
+    <div class="card">
+      <h3 class="section-label">Agent runs by type</h3>
+      {% if not agent_run_counts %}
+      <p class="text-muted">No agent runs yet.</p>
+      {% else %}
+      <table class="snap-table">
+        <thead><tr><th>Agent</th><th>Runs</th></tr></thead>
+        <tbody>
+          {% for agent_type, count in agent_run_counts.items() %}
+          <tr><td>{{ agent_type }}</td><td>{{ count }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="section-label">Runner throughput</h3>
+  {% if not runner_stats %}
+  <p class="text-muted">No runners enrolled yet — see the <a href="/runners">Runners</a> page.</p>
+  {% else %}
+  <table class="snap-table">
+    <thead><tr><th>Runner</th><th>Status</th><th>Jobs run</th><th>Jobs passed</th></tr></thead>
+    <tbody>
+      {% for r in runner_stats %}
+      <tr>
+        <td>{{ r.name }}</td>
+        <td>{{ r.status }}</td>
+        <td>{{ r.jobs_run }}</td>
+        <td>{{ r.jobs_passed }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="section-label">Recent test runs</h3>
+  {% if not recent_runs %}
+  <p class="text-muted">No test runs yet.</p>
+  {% else %}
+  <table class="snap-table">
+    <thead><tr><th>Snap</th><th>Status</th><th>Dispatch</th><th>Started</th></tr></thead>
+    <tbody>
+      {% for run in recent_runs %}
+      <tr>
+        <td>{{ run.snap_name }}</td>
+        <td>
+          <span class="p-status-label {{ 'p-status-label--positive' if run.status in ('passed', 'promoted') else 'p-status-label--negative' if run.status in ('failed', 'error', 'cancelled') else 'p-status-label--caution' }}">
+            {{ run.status }}
+          </span>
+        </td>
+        <td>{{ run.dispatch_target }}</td>
+        <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
+{% endblock %}
