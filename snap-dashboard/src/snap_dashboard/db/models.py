@@ -94,6 +94,24 @@ class UserConfig(Base):
     # Remote runner settings
     prefer_remote_runner = Column(Boolean, default=False, nullable=False)
     runner_job_timeout_minutes = Column(Integer, default=10, nullable=False)
+    # Delegating "capable coding" work to GitHub Copilot cloud agent — see
+    # agents/pr_monitor.py, agents/upstream_maintainer.py, agents/repo_normalizer.py.
+    # All default off: these open real PRs/issues-fixes against real repos,
+    # so they're opt-in until a user has reviewed a first run.
+    auto_fix_ci_failures = Column(Boolean, default=False, nullable=False)
+    auto_maintain_upstream = Column(Boolean, default=False, nullable=False)
+    fleet_normalization_enabled = Column(Boolean, default=False, nullable=False)
+
+    # Which backend handles "capable coding" tasks (CI fixes, dep upgrades,
+    # issue fixes, fleet normalization). Long-term goal is to run this
+    # locally as capable local models become available; "copilot_cloud_agent"
+    # is today's practical default since it needs no extra credentials.
+    # "external_api" is a forward-looking escalation path for a
+    # user-supplied API key to a hosted coding model, not yet implemented.
+    coding_task_backend = Column(String(32), default="copilot_cloud_agent", nullable=False)
+    external_coding_api_key = Column(Text, nullable=True)
+    external_coding_api_base_url = Column(String(500), nullable=True)
+    external_coding_api_model = Column(String(255), nullable=True)
 
     user = relationship("User", back_populates="config")
 
@@ -543,4 +561,44 @@ class ScreenshotComparison(Base):
         return (
             f"<ScreenshotComparison id={self.id}"
             f" pr_id={self.version_bump_pr_id} decision={self.decision!r}>"
+        )
+
+
+class CopilotTask(Base):
+    """Tracks a task dispatched to GitHub Copilot cloud agent.
+
+    Covers all the "capable coding" work delegated out rather than done with
+    a local/small model: fixing a failing CI check on a bot PR (``ci_fix``),
+    dependency upgrades on a repo the user maintains upstream (``dep_update``),
+    attempting a fix for a filed issue (``issue_fix``), and the one-time
+    fleet-normalization campaign (``fleet_normalize``).
+    """
+
+    __tablename__ = "copilot_tasks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    snap_id = Column(Integer, ForeignKey("snaps.id", ondelete="SET NULL"), nullable=True)
+    # ci_fix | dep_update | issue_fix | fleet_normalize
+    kind = Column(String(32), nullable=False)
+    owner_repo = Column(String(500), nullable=False)  # "owner/repo" the task targets
+    # GitHub's own agent-task id, e.g. for GET /agents/repos/{o}/{r}/tasks/{id}.
+    external_task_id = Column(String(128), nullable=True)
+    prompt = Column(Text, nullable=True)
+    # queued | in_progress | completed | failed | idle | waiting_for_user |
+    # timed_out | cancelled | dispatch_failed (our own sentinel if the POST itself failed)
+    status = Column(String(32), nullable=False, default="queued")
+    pr_url = Column(Text, nullable=True)
+    issue_number = Column(Integer, nullable=True)
+    error_msg = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+    user = relationship("User")
+    snap = relationship("Snap")
+
+    def __repr__(self) -> str:
+        return (
+            f"<CopilotTask id={self.id} kind={self.kind!r}"
+            f" repo={self.owner_repo!r} status={self.status!r}>"
         )

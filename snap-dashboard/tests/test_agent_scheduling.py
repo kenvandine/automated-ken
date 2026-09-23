@@ -13,6 +13,7 @@ from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
 from snap_dashboard.agents.runner import AgentRunner
 from snap_dashboard.agents.scheduling import schedule_user_agents
 from snap_dashboard.agents.stale_build_scanner import StaleSnapScannerAgent
+from snap_dashboard.agents.upstream_maintainer import UpstreamMaintainerAgent
 
 
 class _FakeUserConfig:
@@ -38,7 +39,8 @@ def test_schedule_user_agents_creates_one_job_set_per_user() -> None:
         assert runner.is_scheduled(ReleaseScannerAgent, user_id=2)
         assert runner.is_scheduled(CollectorAgent, user_id=1)
         assert runner.is_scheduled(StaleSnapScannerAgent, user_id=2)
-        assert len(runner._scheduled) == 6
+        assert runner.is_scheduled(UpstreamMaintainerAgent, user_id=2)
+        assert len(runner._scheduled) == 8
     finally:
         runner.shutdown()
 
@@ -50,7 +52,7 @@ def test_schedule_user_agents_is_idempotent_per_user() -> None:
         schedule_user_agents(runner, user_id=1, uc=_FakeUserConfig(agent_interval_hours=4))
         schedule_user_agents(runner, user_id=1, uc=_FakeUserConfig(agent_interval_hours=8))
 
-        assert len(runner._scheduled) == 3
+        assert len(runner._scheduled) == 4
         job = next(j for j in runner._scheduled if j.agent_cls is ReleaseScannerAgent)
         assert job.interval_seconds == 8 * 3600
     finally:

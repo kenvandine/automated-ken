@@ -35,12 +35,11 @@ def _default_branch(owner: str, repo: str, token: str) -> str:
         return "main"
 
 
-def fetch_suite_zip(testing_repo: str, snap_name: str, token: str = "") -> bytes | None:
-    """Return an in-memory zip of ``suites/<snap_name>/suite/`` from ``testing_repo``.
+def list_suite_files(testing_repo: str, snap_name: str, token: str = "") -> dict[str, bytes] | None:
+    """Return {relative_path: content_bytes} for ``suites/<snap_name>/suite/`` in ``testing_repo``.
 
-    Returns None (never raises) if the repo, branch, or suite directory
-    can't be found/fetched — callers should surface this as a 404 to the
-    calling runner.
+    Paths are relative to the suite directory itself (the ``suites/<snap>/suite/``
+    prefix is stripped). Returns None if the repo/branch/suite dir can't be found.
     """
     owner_repo = parse_owner_repo(testing_repo)
     if not owner_repo:
@@ -72,22 +71,34 @@ def fetch_suite_zip(testing_repo: str, snap_name: str, token: str = "") -> bytes
                 logger.warning("No suite files found under %s in %s/%s", prefix, owner, repo)
                 return None
 
-            buf = io.BytesIO()
-            with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-                for entry in matches:
-                    blob_resp = client.get(
-                        f"{_GH_API}/repos/{owner}/{repo}/git/blobs/{entry['sha']}",
-                        headers=headers,
-                    )
-                    blob_resp.raise_for_status()
-                    blob = blob_resp.json()
-                    content = base64.b64decode(blob["content"]) if blob.get("encoding") == "base64" else b""
-                    # Strip the "suites/<snap>/suite/" prefix so the zip's
-                    # root is the suite directory itself.
-                    arcname = entry["path"][len(prefix):]
-                    zf.writestr(arcname, content)
-
-            return buf.getvalue()
+            files: dict[str, bytes] = {}
+            for entry in matches:
+                blob_resp = client.get(
+                    f"{_GH_API}/repos/{owner}/{repo}/git/blobs/{entry['sha']}",
+                    headers=headers,
+                )
+                blob_resp.raise_for_status()
+                blob = blob_resp.json()
+                content = base64.b64decode(blob["content"]) if blob.get("encoding") == "base64" else b""
+                files[entry["path"][len(prefix):]] = content
+            return files
     except httpx.HTTPError as exc:
-        logger.warning("fetch_suite_zip failed for %s/%s: %s", owner, repo, exc)
+        logger.warning("list_suite_files failed for %s/%s: %s", owner, repo, exc)
         return None
+
+
+def fetch_suite_zip(testing_repo: str, snap_name: str, token: str = "") -> bytes | None:
+    """Return an in-memory zip of ``suites/<snap_name>/suite/`` from ``testing_repo``.
+
+    Returns None (never raises) if the repo, branch, or suite directory
+    can't be found/fetched — callers should surface this as a 404 to the
+    calling runner.
+    """
+    files = list_suite_files(testing_repo, snap_name, token)
+    if not files:
+        return None
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for arcname, content in files.items():
+            zf.writestr(arcname, content)
+    return buf.getvalue()

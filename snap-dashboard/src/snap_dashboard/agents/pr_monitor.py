@@ -8,8 +8,9 @@ from datetime import datetime, timezone
 import httpx
 
 from snap_dashboard.agents.base import BaseAgent
+from snap_dashboard.agents.coding_backend import get_coding_dispatcher
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import VersionBumpPR
+from snap_dashboard.db.models import CopilotTask, VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_owner_repo
 
@@ -64,6 +65,7 @@ class PRMonitorAgent(BaseAgent):
                     "packaging_repo": p.packaging_repo or "",
                     "bot_pr_number": p.bot_pr_number,
                     "bot_pr_url": p.bot_pr_url or "",
+                    "branch_name": p.branch_name or "",
                     "test_run_id": p.test_run_id,
                     "new_version": p.new_version or "",
                     "old_version": p.old_version or "",
@@ -107,7 +109,7 @@ class PRMonitorAgent(BaseAgent):
         if status == "ci_pending":
             if self._check_pr_closed(pr, owner, repo, token):
                 return True
-            return self._check_ci_complete(pr, owner, repo, token)
+            return self._check_ci_complete(pr, owner, repo, token, uc)
         if status == "ci_passed":
             return self._trigger_yarf(pr, uc)
         if status == "yarf_running":
@@ -157,7 +159,7 @@ class PRMonitorAgent(BaseAgent):
             return True
         return False
 
-    def _check_ci_complete(self, pr: dict, owner: str, repo: str, token: str) -> bool:
+    def _check_ci_complete(self, pr: dict, owner: str, repo: str, token: str, uc) -> bool:
         """ci_pending → ci_passed/ci_failed when all checks conclude."""
         runs = _get_pr_check_runs(owner, repo, pr["bot_pr_number"], token)
         if not runs:
@@ -169,7 +171,71 @@ class PRMonitorAgent(BaseAgent):
             _update_pr_status(pr["id"], "ci_passed")
         else:
             _update_pr_status(pr["id"], "ci_failed")
+            self._maybe_dispatch_ci_fix(pr, owner, repo, uc, runs)
         return True
+
+    def _maybe_dispatch_ci_fix(self, pr: dict, owner: str, repo: str, uc, runs: list[dict]) -> None:
+        """ci_failed → dispatch the configured coding backend to open a fix PR.
+
+        Opt-in via UserConfig.auto_fix_ci_failures — this delegates real
+        code-editing work to whichever "capable coding" backend is configured
+        (see agents/coding_backend.py; GitHub Copilot cloud agent today,
+        pending a capable local model), rather than the local Lemonade model,
+        which is only used for lightweight text/vision tasks elsewhere.
+        """
+        if not uc or not getattr(uc, "auto_fix_ci_failures", False):
+            return
+        client = get_coding_dispatcher(uc)
+        if not client:
+            return
+        owner_repo = f"{owner}/{repo}"
+        with get_session() as session:
+            existing = (
+                session.query(CopilotTask)
+                .filter(
+                    CopilotTask.kind == "ci_fix",
+                    CopilotTask.owner_repo == owner_repo,
+                    CopilotTask.issue_number == pr["bot_pr_number"],
+                    CopilotTask.status.in_(["queued", "in_progress"]),
+                )
+                .first()
+            )
+            if existing:
+                return  # already dispatched, avoid duplicate tasks
+
+        failed = [r for r in runs if r.get("conclusion") not in ("success", None)]
+        failed_names = ", ".join(r.get("name", "?") for r in failed) or "the CI checks"
+        failed_urls = "\n".join(f"- {r.get('name', '?')}: {r.get('html_url', '')}" for r in failed)
+        head_branch = pr.get("branch_name") or ""
+        snap_name = _snap_name_from_id(pr["snap_id"]) or "this snap"
+        prompt = (
+            f"The build/test workflow failed on PR #{pr['bot_pr_number']} in {owner_repo}, "
+            f"which bumps {snap_name} to version {pr.get('new_version')}. "
+            f"Failing check(s): {failed_names}.\n{failed_urls}\n\n"
+            "Please look at the failure logs, fix whatever is causing the build/test "
+            "workflow to fail (e.g. a broken snapcraft.yaml part, a stale patch, an "
+            "out-of-date dependency pin), and open a pull request with the fix."
+        )
+        task = client.start_task(
+            owner, repo, prompt, base_ref=head_branch or "main", create_pull_request=True,
+        )
+        with get_session() as session:
+            session.add(
+                CopilotTask(
+                    user_id=pr.get("user_id"),
+                    snap_id=pr.get("snap_id"),
+                    kind="ci_fix",
+                    owner_repo=owner_repo,
+                    external_task_id=str(task.get("id")) if task else None,
+                    prompt=prompt,
+                    status="queued" if task else "dispatch_failed",
+                    issue_number=pr["bot_pr_number"],
+                )
+            )
+        if task:
+            logger.info("pr_monitor: dispatched Copilot ci_fix task for %s PR #%s", owner_repo, pr["bot_pr_number"])
+        else:
+            logger.warning("pr_monitor: failed to dispatch Copilot ci_fix task for %s PR #%s", owner_repo, pr["bot_pr_number"])
 
     def _trigger_yarf(self, pr: dict, uc) -> bool:
         """ci_passed → yarf_running by triggering a YARF test run."""

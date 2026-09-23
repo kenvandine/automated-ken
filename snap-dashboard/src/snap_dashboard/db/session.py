@@ -76,6 +76,15 @@ def _migrate() -> None:
         "ALTER TABLE test_runs ADD COLUMN runner_id INTEGER REFERENCES runners(id)",
         "ALTER TABLE test_runs ADD COLUMN priority INTEGER DEFAULT 0",
         "ALTER TABLE test_runs ADD COLUMN cancel_requested BOOLEAN DEFAULT 0",
+        # Copilot cloud agent delegation (CI-fix, upstream maintenance, fleet normalize)
+        "ALTER TABLE user_configs ADD COLUMN auto_fix_ci_failures BOOLEAN DEFAULT 0",
+        "ALTER TABLE user_configs ADD COLUMN auto_maintain_upstream BOOLEAN DEFAULT 0",
+        "ALTER TABLE user_configs ADD COLUMN fleet_normalization_enabled BOOLEAN DEFAULT 0",
+        # Pluggable coding-task backend selection — see agents/coding_backend.py.
+        "ALTER TABLE user_configs ADD COLUMN coding_task_backend VARCHAR(32) DEFAULT 'copilot_cloud_agent'",
+        "ALTER TABLE user_configs ADD COLUMN external_coding_api_key TEXT",
+        "ALTER TABLE user_configs ADD COLUMN external_coding_api_base_url VARCHAR(500)",
+        "ALTER TABLE user_configs ADD COLUMN external_coding_api_model VARCHAR(255)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

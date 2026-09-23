@@ -292,6 +292,128 @@
       </span>
     </div>
 
+    <h4 class="section-label">Delegated Coding Tasks</h4>
+    <p class="form-hint">
+      Fixing failing CI, upgrading dependencies, and fixing filed issues require a genuinely
+      capable coding model. The long-term goal is to run this locally as local models become
+      capable enough; today that dispatches to GitHub Copilot cloud agent instead of the
+      lightweight local Lemonade model used elsewhere. All three toggles below are opt-in and
+      off by default — review the PRs they open before merging.
+    </p>
+
+    <div class="form-row">
+      <label class="form-label" for="coding_task_backend">Coding Task Backend</label>
+      <select id="coding_task_backend" name="coding_task_backend" class="form-input form-select">
+        <option value="copilot_cloud_agent" {% if (config.coding_task_backend or 'copilot_cloud_agent') == 'copilot_cloud_agent' %}selected{% endif %}>
+          GitHub Copilot cloud agent (default)
+        </option>
+        <option value="local_lemonade" {% if config.coding_task_backend == 'local_lemonade' %}selected{% endif %}>
+          Local model (not yet capable — reserved)
+        </option>
+        <option value="external_api" {% if config.coding_task_backend == 'external_api' %}selected{% endif %}>
+          External API key (not yet implemented — reserved)
+        </option>
+      </select>
+      <span class="form-hint">
+        Which backend handles CI-fix / dependency-update / issue-fix / fleet-normalization tasks.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="external_coding_api_key">External Coding API Key</label>
+      <input
+        type="password"
+        id="external_coding_api_key"
+        name="external_coding_api_key"
+        class="form-input"
+        placeholder="{% if config.external_coding_api_key %}(saved){% else %}not set{% endif %}"
+      >
+      <span class="form-hint">
+        Reserved for a future hosted coding-model escalation path. Not used yet.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="external_coding_api_base_url">External Coding API Base URL</label>
+      <input
+        type="text"
+        id="external_coding_api_base_url"
+        name="external_coding_api_base_url"
+        class="form-input"
+        value="{{ config.external_coding_api_base_url or '' }}"
+      >
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="external_coding_api_model">External Coding API Model</label>
+      <input
+        type="text"
+        id="external_coding_api_model"
+        name="external_coding_api_model"
+        class="form-input"
+        value="{{ config.external_coding_api_model or '' }}"
+      >
+    </div>
+
+    <div class="form-row">
+      <label class="form-label checkbox-label">
+        <input
+          type="checkbox"
+          name="auto_fix_ci_failures"
+          value="true"
+          {% if config.auto_fix_ci_failures %}checked{% endif %}
+          style="margin-right: 6px;"
+        >
+        Auto-fix failing CI on version-bump PRs
+      </label>
+      <span class="form-hint">
+        When a bot-opened version-bump PR's build/test workflow fails, dispatch the configured
+        coding backend to open a fix PR stacked on top of the failing branch.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label checkbox-label">
+        <input
+          type="checkbox"
+          name="auto_maintain_upstream"
+          value="true"
+          {% if config.auto_maintain_upstream %}checked{% endif %}
+          style="margin-right: 6px;"
+        >
+        Auto-maintain upstream repos you personally own
+      </label>
+      <span class="form-hint">
+        For snaps whose upstream repo is owned by your own GitHub account, periodically dispatch
+        dependency-upgrade PRs, request Copilot reviews on your open PRs, and attempt fixes for a
+        small batch of open issues per run.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label checkbox-label">
+        <input
+          type="checkbox"
+          name="fleet_normalization_enabled"
+          value="true"
+          {% if config.fleet_normalization_enabled %}checked{% endif %}
+          style="margin-right: 6px;"
+        >
+        Enable fleet normalization campaign
+      </label>
+      <span class="form-hint">
+        Allows manually triggering a one-time pass across all packaging repos: dispatches a
+        GitHub Copilot cloud agent task per repo to remove legacy <code>sync-release</code>-style
+        workflows, add an <code>AGENTS.md</code>, and move each snap's YARF test suite from the
+        shared testing repo into its own packaging repo. Review each PR before merging.
+      </span>
+      {% if config.fleet_normalization_enabled %}
+      <form method="post" action="/settings/run-fleet-normalization" style="margin-top: 8px;">
+        <button type="submit" class="p-button is-small">Run Fleet Normalization Now</button>
+      </form>
+      {% endif %}
+    </div>
+
     <div class="form-actions">
       <a href="/agents" class="p-button is-small">View Agent Activity</a>
       <a href="/version-bumps" class="p-button is-small">View Version Bumps</a>

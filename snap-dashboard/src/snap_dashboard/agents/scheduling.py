@@ -24,12 +24,14 @@ from snap_dashboard.agents.collector_agent import CollectorAgent
 from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
 from snap_dashboard.agents.runner import AgentRunner
 from snap_dashboard.agents.stale_build_scanner import StaleSnapScannerAgent
+from snap_dashboard.agents.upstream_maintainer import UpstreamMaintainerAgent
 
 logger = logging.getLogger(__name__)
 
-# Stale-build scanning always runs once a day; only the release scan and
-# collection intervals are user-configurable.
+# Stale-build scanning and upstream-maintenance both run once a day; only the
+# release scan and collection intervals are user-configurable.
 _STALE_SCAN_INTERVAL_HOURS = 24
+_UPSTREAM_MAINTAIN_INTERVAL_HOURS = 24
 
 
 def schedule_user_agents(
@@ -53,6 +55,7 @@ def schedule_user_agents(
     is_new_release_job = not runner.is_scheduled(ReleaseScannerAgent, user_id)
     is_new_collector_job = not runner.is_scheduled(CollectorAgent, user_id)
     is_new_stale_job = not runner.is_scheduled(StaleSnapScannerAgent, user_id)
+    is_new_upstream_job = not runner.is_scheduled(UpstreamMaintainerAgent, user_id)
 
     if is_new_release_job:
         runner.schedule_periodic(
@@ -81,6 +84,15 @@ def schedule_user_agents(
             user_id=user_id,
         )
     # Stale scan interval is not user-configurable, so nothing to reschedule.
+
+    if is_new_upstream_job:
+        runner.schedule_periodic(
+            UpstreamMaintainerAgent,
+            interval_hours=_UPSTREAM_MAINTAIN_INTERVAL_HOURS,
+            user_id=user_id,
+        )
+    # Gated internally by UserConfig.auto_maintain_upstream (off by default),
+    # so it's safe to always schedule — it's a fast no-op when disabled.
 
     logger.info(
         "agents scheduled for user_id=%s (release=%.1fh, collect=%.1fh, stale=%dh)",
