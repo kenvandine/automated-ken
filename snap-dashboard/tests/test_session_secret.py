@@ -23,6 +23,7 @@ test "what happens on process start" is to actually start a process.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -32,10 +33,26 @@ _IMPORT_AND_PRINT_SECRET = (
 )
 
 
+def _subprocess_pythonpath() -> str:
+    """Build a PYTHONPATH so the subprocess can import snap_dashboard/deps.
+
+    The package (and its dependencies) are installed with ``pip install
+    --user -e .``, whose site-packages directory lives under the *real*
+    ``$HOME`` (``~/.local/lib/pythonX.Y/site-packages``). These tests
+    intentionally point the subprocess's ``HOME`` at a throwaway tmp_path to
+    isolate config.env/state, which would otherwise make that site-packages
+    directory — and the editable install — unreachable. Passing the current
+    process's own resolved ``sys.path`` entries explicitly keeps imports
+    working regardless of the sandboxed HOME.
+    """
+    return os.pathsep.join(p for p in sys.path if p)
+
+
 def _run(home: Path, extra_env: dict[str, str] | None = None) -> str:
     env = {
         "HOME": str(home),
         "PATH": "/usr/bin:/bin",
+        "PYTHONPATH": _subprocess_pythonpath(),
         # Keep each subprocess's DB isolated too, though these tests don't
         # touch it — avoids any chance of writing to a real dev database.
         "SNAP_DASHBOARD_DB": str(home / "test.db"),
