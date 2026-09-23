@@ -302,7 +302,6 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
     from snap_dashboard.github.pr_viewer import (
         get_pr_details,
         get_pr_screenshot_urls,
-        parse_pr_metadata,
     )
 
     pr_data: dict = {}

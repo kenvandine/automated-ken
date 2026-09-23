@@ -3,7 +3,8 @@
 > **Note:** This document describes the initial scope (Phases 1–6). The project
 > has since grown significantly. For the current architecture and feature set see
 > [`README.md`](README.md). For the agentic features (Phases 7–13) see
-> [`AGENTIC_PLAN.md`](AGENTIC_PLAN.md).
+> [`AGENTIC_PLAN.md`](AGENTIC_PLAN.md). For the (planned) private remote test
+> runner see [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md).
 
 A personal snap maintenance dashboard for ken-vandine. Tracks channel versions,
 open PRs, issues, and release status across all snaps published by (or maintained

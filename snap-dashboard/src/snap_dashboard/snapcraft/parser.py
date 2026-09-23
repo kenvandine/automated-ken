@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -88,20 +88,6 @@ def _parse_regex(content: str) -> list[SourcePart]:
 
     top_version_m = re.search(r"^version:\s*['\"]?([^\s'\"]+)['\"]?", content, re.MULTILINE)
     top_version = top_version_m.group(1) if top_version_m else ""
-
-    # Find each top-level part block by indentation
-    part_blocks = re.findall(
-        r"^  ([A-Za-z0-9_\-]+):\s*\n((?:    .*\n?)*)",
-        content,
-        re.MULTILINE,
-    )
-
-    in_parts = False
-    for line in content.splitlines():
-        if line.startswith("parts:"):
-            in_parts = True
-        if in_parts:
-            break
 
     # Simpler approach: just match source: lines following a part header
     part_pattern = re.compile(r"^  ([A-Za-z0-9_\-]+):\s*$", re.MULTILINE)

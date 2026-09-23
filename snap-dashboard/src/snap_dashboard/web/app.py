@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import secrets
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
+from snap_dashboard.config import get_config, save_config
 from snap_dashboard.db.session import init_db
 
 logger = logging.getLogger(__name__)
@@ -21,16 +21,21 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 app = FastAPI(title="Automated Ken", docs_url=None, redoc_url=None)
 
-# Session middleware — secret read from env or auto-generated.
-# The full config.py (which reads config.env) is not used here to avoid
-# circular import issues and to ensure middleware is registered before startup.
-_session_secret = os.environ.get("SESSION_SECRET", "")
+# Session middleware — secret comes from config.env / SESSION_SECRET env var
+# (for a snap install, snap/hooks/configure generates and persists this via
+# `snapctl set session-secret=...` the first time it runs, so it survives
+# daemon restarts). If neither is set (e.g. a brand-new dev-mode checkout),
+# generate one now and persist it to config.env so it's stable across
+# restarts here too, instead of silently minting a new throwaway secret
+# every time the process starts and logging everyone out.
+_config = get_config()
+_session_secret = _config.session_secret
 if not _session_secret:
     _session_secret = secrets.token_hex(32)
-    logger.warning(
-        "SESSION_SECRET not set — using a random key. "
-        "Sessions will not persist across restarts. "
-        "Set SESSION_SECRET in your config for production use."
+    save_config({"SESSION_SECRET": _session_secret})
+    logger.info(
+        "No SESSION_SECRET configured — generated and persisted a new one "
+        "to config.env so sessions survive restarts."
     )
 app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 
@@ -47,41 +52,26 @@ async def on_startup() -> None:
     init_db()
     logger.info("Database initialised.")
 
-    from snap_dashboard.agents.runner import get_runner
-    from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
     from snap_dashboard.agents.pr_monitor import PRMonitorAgent
-    from snap_dashboard.agents.stale_build_scanner import StaleSnapScannerAgent
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.scheduling import schedule_user_agents
+    from snap_dashboard.auth import get_user_config
     from snap_dashboard.db.models import UserConfig
     from snap_dashboard.db.session import get_session as _gs
 
     runner = get_runner()
 
-    # Schedule the release scanner for every active user.
-    # fire_immediately=True kicks off the first scan within seconds so the
+    # Schedule the per-user agents (release scanner, collector, stale build
+    # scanner) for every user that already has a UserConfig row.
+    # fire_immediately=True kicks off the first run within seconds so the
     # dashboard populates without waiting for the full interval to elapse.
     with _gs() as session:
-        configs = session.query(UserConfig).all()
-        for uc in configs:
-            interval = uc.agent_interval_hours or 4
-            runner.schedule_periodic(
-                ReleaseScannerAgent,
-                interval_hours=interval,
-                fire_immediately=True,
-                user_id=uc.user_id,
-            )
+        user_ids = [uc.user_id for uc in session.query(UserConfig).all()]
+    for uid in user_ids:
+        schedule_user_agents(runner, uid, get_user_config(uid), fire_immediately=True)
 
     # PR monitor runs every 5 minutes regardless of user count.
     runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
-
-    # Stale build scanner runs every 24h per user.
-    with _gs() as session:
-        configs = session.query(UserConfig).all()
-        for uc in configs:
-            runner.schedule_periodic(
-                StaleSnapScannerAgent,
-                interval_hours=24,
-                user_id=uc.user_id,
-            )
 
     logger.info("Agent runner started.")
 

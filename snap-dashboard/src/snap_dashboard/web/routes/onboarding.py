@@ -98,7 +98,7 @@ async def onboarding_complete(
     background_tasks: BackgroundTasks,
     request: Request,
 ) -> RedirectResponse:
-    """Trigger first collection and redirect to dashboard."""
+    """Trigger first collection, start this user's background agents, and redirect."""
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -113,4 +113,17 @@ async def onboarding_complete(
             run_collection(session, config, user_id=user_id)
 
     background_tasks.add_task(_first_collect)
+
+    # Previously, a brand-new user's release scanner / collector / stale
+    # build scanner were never scheduled until the whole server process was
+    # restarted, because app startup only schedules agents for UserConfig
+    # rows that already existed at boot time. Schedule them here too so the
+    # agents advertised on first login actually start working immediately.
+    try:
+        from snap_dashboard.agents.runner import get_runner
+        from snap_dashboard.agents.scheduling import schedule_user_agents
+        schedule_user_agents(get_runner(), user_id, get_user_config(user_id), fire_immediately=True)
+    except Exception as exc:
+        logger.warning("failed to schedule agents for new user %s: %s", user_id, exc)
+
     return RedirectResponse(url="/", status_code=303)

@@ -21,7 +21,15 @@ dependencies = [
     "jinja2>=3.1.0",
     "python-multipart>=0.0.9",
     "itsdangerous>=2.1.0",
+    "pyyaml>=6.0",
+    "packaging>=24.0",
     # htmx is served from CDN in base.html (no Python package needed)
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
 ]
 
 [project.scripts]
@@ -32,3 +40,21 @@ where = ["src"]
 
 [tool.setuptools.package-dir]
 "" = "src"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+# Keep this deliberately narrow: pyflakes (F) catches real bugs (unused
+# imports/vars, undefined names — see the sync_test_runs NameError this
+# caught) and E9 catches syntax errors. Broader style rule families
+# (pyupgrade, bandit, pylint, ...) are not enabled since this codebase
+# hasn't been formatted against them; enabling those separately, as a
+# deliberate follow-up, is fine but shouldn't block CI on unrelated debt.
+select = ["E9", "F"]
+
+[tool.pytest.ini_options]
+# Without this, pytest's default discovery also picks up
+# src/snap_dashboard/agents/test_run_auto_promoter.py (its filename happens
+# to match the test_*.py glob even though it's application code).
+testpaths = ["tests"]

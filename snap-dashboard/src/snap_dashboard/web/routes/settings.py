@@ -130,12 +130,9 @@ async def settings_post(
 
     # Reschedule agents with the new settings
     try:
-        from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
-        from snap_dashboard.agents.stale_build_scanner import StaleSnapScannerAgent
         from snap_dashboard.agents.runner import get_runner
-        runner = get_runner()
-        runner.reschedule(ReleaseScannerAgent, interval_hours=agent_interval_hours, user_id=user_id)
-        runner.reschedule(StaleSnapScannerAgent, interval_hours=24, user_id=user_id)
+        from snap_dashboard.agents.scheduling import schedule_user_agents
+        schedule_user_agents(get_runner(), user_id, get_user_config(user_id))
     except Exception as exc:
         logger.warning("failed to reschedule agents: %s", exc)
 

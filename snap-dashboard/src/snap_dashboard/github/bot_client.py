@@ -240,9 +240,6 @@ def patch_snapcraft_yaml(content: str, part_name: str, new_version: str) -> str:
     in_parts_section = False
     result = []
 
-    # Determine indentation style of the file
-    tag_prefix = "    source-tag:"  # 4-space default
-
     for i, line in enumerate(lines):
         stripped = line.strip()
 

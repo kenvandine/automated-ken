@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import ScreenshotComparison, VersionBumpPR
 from snap_dashboard.db.session import get_session
+from snap_dashboard.github.utils import parse_owner_repo
 
 logger = logging.getLogger(__name__)
 
@@ -131,10 +132,12 @@ async def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump or not bump.packaging_repo or not bump.bot_pr_number:
             return RedirectResponse(url="/version-bumps", status_code=302)
-        repo_slug = _extract_slug(bump.packaging_repo)
+        owner_repo = parse_owner_repo(bump.packaging_repo)
         pr_number = bump.bot_pr_number
 
-    owner, _, repo = repo_slug.partition("/")
+    if not owner_repo:
+        return RedirectResponse(url="/version-bumps", status_code=302)
+    owner, repo = owner_repo
     url = f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}/merge"
     headers = {
         "Accept": "application/vnd.github+json",
@@ -170,11 +173,11 @@ async def reject_bump(bump_id: int, request: Request) -> RedirectResponse:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump:
             return RedirectResponse(url="/version-bumps", status_code=302)
-        repo_slug = _extract_slug(bump.packaging_repo or "")
+        owner_repo = parse_owner_repo(bump.packaging_repo or "")
         pr_number = bump.bot_pr_number
 
-    if repo_slug and pr_number and token:
-        owner, _, repo = repo_slug.partition("/")
+    if owner_repo and pr_number and token:
+        owner, repo = owner_repo
         url = f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}"
         headers = {
             "Accept": "application/vnd.github+json",
@@ -280,12 +283,3 @@ def _serialise_comp(c: ScreenshotComparison) -> dict:
         "reasoning": c.reasoning or "",
         "analyzed_at": c.analyzed_at,
     }
-
-
-def _extract_slug(repo: str) -> str:
-    repo = repo.strip()
-    if repo.startswith("https://github.com/"):
-        repo = repo[len("https://github.com/"):]
-    elif repo.startswith("http://github.com/"):
-        repo = repo[len("http://github.com/"):]
-    return repo.rstrip("/").rstrip(".git")
