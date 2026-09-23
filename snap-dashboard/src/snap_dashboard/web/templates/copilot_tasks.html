@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Copilot Tasks — Automated Ken{% endblock %}
+
+{% block content %}
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">Copilot Tasks</h2>
+    <p class="text-muted">
+      Coding work delegated to GitHub Copilot cloud agent (CI fixes, dependency upgrades,
+      issue fixes, and fleet normalization) — see <a href="/settings">Settings</a> to configure
+      the coding-task backend.
+    </p>
+  </div>
+  <form method="post" action="/copilot-tasks/refresh-all">
+    <button type="submit" class="p-button">Refresh All Statuses</button>
+  </form>
+</div>
+
+{% if not tasks %}
+<div class="card">
+  <div class="empty-state">
+    <p>No Copilot tasks have been dispatched yet. Enable the delegation toggles under
+       <a href="/settings">Settings</a> to let automated-ken dispatch CI fixes, dependency
+       upgrades, issue fixes, or the one-time fleet-normalization campaign.</p>
+  </div>
+</div>
+{% endif %}
+
+{% for kind in kinds %}
+<div class="card">
+  <div class="section-header-row">
+    <h3 class="section-label">{{ kind }} ({{ tasks | selectattr('kind', 'equalto', kind) | list | length }})</h3>
+  </div>
+
+  <table class="p-table">
+    <thead>
+      <tr>
+        <th>Repo</th>
+        <th>Status</th>
+        <th>PR</th>
+        <th>Dispatched</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tasks if t.kind == kind %}
+      <tr>
+        <td>{{ t.owner_repo }}{% if t.issue_number %} <span class="text-muted small">(#{{ t.issue_number }})</span>{% endif %}</td>
+        <td>
+          {% if t.status in ('completed',) %}
+          <span class="p-status-label p-status-label--positive">{{ t.status }}</span>
+          {% elif t.status in ('failed', 'dispatch_failed', 'cancelled', 'timed_out') %}
+          <span class="p-status-label p-status-label--negative">{{ t.status }}</span>
+          {% elif t.status in ('queued', 'in_progress', 'waiting_for_user') %}
+          <span class="p-status-label p-status-label--caution">{{ t.status }}</span>
+          {% else %}
+          <span class="p-status-label">{{ t.status }}</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if t.pr_url %}
+          <a href="{{ t.pr_url }}" target="_blank" rel="noopener" class="link-inline small">View PR ↗</a>
+          {% else %}
+          <span class="text-muted small">—</span>
+          {% endif %}
+        </td>
+        <td class="text-muted small">{{ t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '' }}</td>
+        <td>
+          {% if not t.is_terminal %}
+          <form method="post" action="/copilot-tasks/{{ t.id }}/refresh">
+            <button type="submit" class="p-button is-small">Refresh</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% if t.error_msg %}
+      <tr>
+        <td colspan="5" class="text-muted small">Error: {{ t.error_msg }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+{% endblock %}
