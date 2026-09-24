@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import AgentRun, UpstreamRelease, VersionBumpPR
+from snap_dashboard.db.models import AgentRun, TestRun, UpstreamRelease, VersionBumpPR
 from snap_dashboard.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -77,13 +77,48 @@ async def agent_status(request: Request) -> JSONResponse:
                 .filter(VersionBumpPR.status.in_(statuses))
                 .count()
             )
+
+        # Not every TestRun is tied to a version-bump PR -- manually
+        # triggered runs and runs against manually-added snaps have
+        # ``pr_number is None`` (see testing/orchestrator.py) and their
+        # progress lives entirely on TestRun.status/review_decision, which
+        # the VersionBumpPR-based counts above never see. Without this,
+        # the pipeline showed real "New Releases" activity but a
+        # permanently-stuck 0 for every later stage whenever the live work
+        # was happening via standalone test runs rather than bot PRs.
+        standalone_runs = (
+            session.query(TestRun)
+            .filter(TestRun.user_id == user_id)
+            .filter(TestRun.pr_number.is_(None))
+            .filter(TestRun.status.in_(
+                ("triggered", "running", "reviewing", "passed", "failed", "promoted")
+            ))
+            .all()
+        )
+        standalone_yarf_running = 0
+        standalone_under_review = 0
+        standalone_approved = 0
+        standalone_merged = 0
+        for r in standalone_runs:
+            if r.status in ("triggered", "running"):
+                standalone_yarf_running += 1
+            elif r.status == "reviewing" or r.status == "failed":
+                standalone_under_review += 1
+            elif r.status == "passed":
+                if r.review_decision == "approve":
+                    standalone_approved += 1
+                else:
+                    standalone_under_review += 1
+            elif r.status == "promoted":
+                standalone_merged += 1
+
         pipeline = {
             "new_releases": new_releases,
             "prs_open": _bump_count("open", "ci_pending", "ci_passed", "ci_failed"),
-            "yarf_running": _bump_count("yarf_running"),
-            "under_review": _bump_count("yarf_passed", "yarf_failed", "needs_review"),
-            "approved": _bump_count("agent_approved", "promoting"),
-            "merged": _bump_count("merged", "stable_promoted"),
+            "yarf_running": _bump_count("yarf_running") + standalone_yarf_running,
+            "under_review": _bump_count("yarf_passed", "yarf_failed", "needs_review") + standalone_under_review,
+            "approved": _bump_count("agent_approved", "promoting") + standalone_approved,
+            "merged": _bump_count("merged", "stable_promoted") + standalone_merged,
         }
 
         # Recent agent run history (last 20)
