@@ -37,6 +37,7 @@ import time
 import click
 import httpx
 
+from automated_ken_runner.arch import detect_arch
 from automated_ken_runner.config import RunnerConfig, clear_config, load_config, save_config
 from automated_ken_runner.deps import ensure_dependencies
 from automated_ken_runner.desktop_setup import ensure_desktop_ready
@@ -61,10 +62,11 @@ def enroll(server: str, token: str, name: str) -> None:
     import socket
 
     name = name or socket.gethostname()
+    arch = detect_arch()
     try:
         resp = httpx.post(
             f"{server.rstrip('/')}/api/runners/enroll",
-            json={"token": token, "name": name},
+            json={"token": token, "name": name, "arch": arch},
             timeout=15,
         )
         resp.raise_for_status()
@@ -80,7 +82,7 @@ def enroll(server: str, token: str, name: str) -> None:
         name=name,
     )
     path = save_config(cfg)
-    click.echo(f"Enrolled as runner #{cfg.runner_id} ({name}). Credentials saved to {path}.")
+    click.echo(f"Enrolled as runner #{cfg.runner_id} ({name}, {arch}). Credentials saved to {path}.")
     click.echo(
         "Start the service with: "
         "systemctl --user enable --now snap.automated-ken-runner.run.service"

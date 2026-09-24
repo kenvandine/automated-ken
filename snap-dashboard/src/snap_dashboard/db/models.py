@@ -294,6 +294,16 @@ class TestRun(Base):
     review_decision = Column(String(32), nullable=True)
     review_confidence = Column(Float, nullable=True)
     review_reasoning = Column(Text, nullable=True)
+    # Links sibling per-architecture runs of the same version bump together
+    # (one TestRun per arch — see agents/pr_monitor.py:_trigger_yarf) so the
+    # PR monitor / screenshot reviewer / stable promoter can wait for every
+    # arch to finish and promote the whole release set as one unit, the way
+    # `snapcraft promote` treats a version's revisions across architectures.
+    # VersionBumpPR.test_run_id still points at one representative run for
+    # older single-run displays/links.
+    version_bump_pr_id = Column(
+        Integer, ForeignKey("version_bump_prs.id", ondelete="SET NULL"), nullable=True
+    )
 
     user = relationship("User", back_populates="test_runs")
     runner = relationship("Runner", foreign_keys=[runner_id])
@@ -517,7 +527,11 @@ class VersionBumpPR(Base):
 
     snap = relationship("Snap", back_populates="version_bump_prs")
     upstream_release = relationship("UpstreamRelease")
-    test_run = relationship("TestRun")
+    # Explicit foreign_keys: TestRun also has a version_bump_pr_id column
+    # (the reverse, one-per-architecture link — see TestRun above), so two
+    # FK paths now connect these tables and SQLAlchemy can't infer which
+    # one this relationship means without being told.
+    test_run = relationship("TestRun", foreign_keys=[test_run_id])
     user = relationship("User")
 
     def __repr__(self) -> str:

@@ -10,7 +10,7 @@ import httpx
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.agents.coding_backend import get_coding_dispatcher, task_result_fields
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import CopilotTask, VersionBumpPR
+from snap_dashboard.db.models import CopilotTask, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_owner_repo
 
@@ -237,49 +237,86 @@ class PRMonitorAgent(BaseAgent):
             logger.warning("pr_monitor: failed to dispatch Copilot ci_fix task for %s PR #%s", owner_repo, pr["bot_pr_number"])
 
     def _trigger_yarf(self, pr: dict, uc) -> bool:
-        """ci_passed → yarf_running by queuing a YARF test run for a remote runner."""
+        """ci_passed → yarf_running by queuing one YARF test run per architecture.
+
+        Every architecture the snap actually ships (see
+        ``orchestrator.get_snap_architectures``) gets its own ``TestRun``,
+        tagged with this PR via ``version_bump_pr_id`` — e.g. one for an
+        amd64 runner and one for an arm64 runner to pick up independently.
+        ``_check_yarf`` waits for all of them before advancing the PR, and
+        promotion later releases every architecture's revision together.
+        """
         snap_name = _snap_name_from_id(pr["snap_id"])
-        if snap_name:
-            self._report(f"Queuing YARF test for {snap_name} {pr['new_version']}", snap_name)
         if not snap_name:
             return False
-        # Tests run on a registered remote runner (real hardware polling this
-        # dashboard), not GitHub Actions — see snap_dashboard.db.models.Runner.
-        from snap_dashboard.testing.orchestrator import trigger_remote_run
-        ok, err, run_id = trigger_remote_run(
-            snap_name=snap_name,
-            from_channel="edge",
-            version=pr["new_version"],
-            revision=None,
-            triggered_by="auto",
-            user_id=pr["user_id"],
+
+        from snap_dashboard.testing.orchestrator import get_snap_architectures, trigger_remote_run
+        with get_session() as session:
+            archs = get_snap_architectures(session, pr["snap_id"])
+
+        self._report(
+            f"Queuing YARF test for {snap_name} {pr['new_version']} ({', '.join(archs)})",
+            snap_name,
         )
-        if ok and run_id:
-            with get_session() as session:
-                bump = session.query(VersionBumpPR).get(pr["id"])
-                if bump:
-                    bump.status = "yarf_running"
-                    bump.test_run_id = run_id
-            return True
-        logger.warning("pr_monitor: YARF trigger failed for PR %s: %s", pr["id"], err)
-        return False
+
+        # Tests run on registered remote runners (real hardware polling this
+        # dashboard), not GitHub Actions — see snap_dashboard.db.models.Runner.
+        run_ids: list[int] = []
+        errors: list[str] = []
+        for arch in archs:
+            ok, err, run_id = trigger_remote_run(
+                snap_name=snap_name,
+                from_channel="edge",
+                version=pr["new_version"],
+                revision=None,
+                architecture=arch,
+                triggered_by="auto",
+                user_id=pr["user_id"],
+            )
+            if ok and run_id:
+                run_ids.append(run_id)
+            else:
+                errors.append(f"{arch}: {err}")
+
+        if not run_ids:
+            logger.warning("pr_monitor: YARF trigger failed for PR %s: %s", pr["id"], "; ".join(errors))
+            return False
+        if errors:
+            logger.warning(
+                "pr_monitor: YARF trigger partially failed for PR %s: %s", pr["id"], "; ".join(errors)
+            )
+
+        with get_session() as session:
+            for run_id in run_ids:
+                run = session.query(TestRun).get(run_id)
+                if run:
+                    run.version_bump_pr_id = pr["id"]
+            bump = session.query(VersionBumpPR).get(pr["id"])
+            if bump:
+                bump.status = "yarf_running"
+                bump.test_run_id = run_ids[0]  # representative run for legacy single-run displays
+        return True
 
     def _check_yarf(self, pr: dict) -> bool:
-        """yarf_running → yarf_passed/yarf_failed via existing TestRun record."""
-        if not pr["test_run_id"]:
-            return False
-        from snap_dashboard.db.models import TestRun
+        """yarf_running → yarf_passed/yarf_failed once every architecture's run finishes."""
         with get_session() as session:
-            run = session.query(TestRun).get(pr["test_run_id"])
-            if not run:
+            runs = session.query(TestRun).filter_by(version_bump_pr_id=pr["id"]).all()
+            if not runs:
+                # Pre-migration PR with no sibling rows recorded — fall back
+                # to the single representative run.
+                if not pr["test_run_id"]:
+                    return False
+                run = session.query(TestRun).get(pr["test_run_id"])
+                runs = [run] if run else []
+            if not runs:
                 return False
-            if run.status not in ("passed", "failed"):
-                return False
-            new_status = "yarf_passed" if run.status == "passed" else "yarf_failed"
+            if not all(r.status in ("passed", "failed") for r in runs):
+                return False  # still waiting on at least one architecture
+            new_status = "yarf_passed" if all(r.status == "passed" for r in runs) else "yarf_failed"
             _update_pr_status(pr["id"], new_status)
 
-        # Spawn screenshot reviewer
-        self._spawn_reviewer(pr)
+        # Spawn one screenshot reviewer per architecture's run.
+        self._spawn_reviewer(pr, [r.id for r in runs])
         return True
 
     def _check_auto_merge(self, pr: dict, uc, owner: str, repo: str, token: str) -> bool:
@@ -313,15 +350,18 @@ class PRMonitorAgent(BaseAgent):
             return True
         return False
 
-    def _spawn_reviewer(self, pr: dict) -> None:
+    def _spawn_reviewer(self, pr: dict, test_run_ids: list[int]) -> None:
         from snap_dashboard.agents.screenshot_reviewer import ScreenshotReviewerAgent
         from snap_dashboard.agents.runner import get_runner
-        reviewer = ScreenshotReviewerAgent(
-            version_bump_pr_id=pr["id"],
-            test_run_id=pr["test_run_id"],
-            user_id=pr["user_id"],
-        )
-        get_runner().submit(reviewer)
+        runner = get_runner()
+        for test_run_id in test_run_ids:
+            runner.submit(
+                ScreenshotReviewerAgent(
+                    version_bump_pr_id=pr["id"],
+                    test_run_id=test_run_id,
+                    user_id=pr["user_id"],
+                )
+            )
 
 
 # ---------------------------------------------------------------------------

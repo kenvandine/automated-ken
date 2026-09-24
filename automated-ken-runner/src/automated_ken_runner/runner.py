@@ -25,6 +25,7 @@ from typing import Callable
 
 import httpx
 
+from automated_ken_runner.arch import detect_arch
 from automated_ken_runner.config import RunnerConfig
 from automated_ken_runner.deps import ensure_dependencies
 from automated_ken_runner.idle import is_safe_to_claim_job
@@ -138,6 +139,11 @@ class RunnerLoop:
                     "status": "idle" if safe else "busy",
                     "idle_seconds": state.idle_seconds,
                     "locked": state.locked,
+                    # Self-heal already-enrolled runners that predate arch
+                    # reporting (see enroll() in cli.py) without requiring a
+                    # manual re-enrollment — the server only overwrites its
+                    # stored arch when this differs (see runner_api.py).
+                    "arch": detect_arch(),
                 },
             )
         except httpx.HTTPError as exc:

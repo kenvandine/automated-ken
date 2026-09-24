@@ -133,6 +133,23 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
     return results
 
 
+def get_snap_architectures(session, snap_id: int) -> list[str]:
+    """Return the distinct architectures *snap_id* actually ships, sorted.
+
+    Sourced from :class:`ChannelMap` (mirrors the Store's real per-arch
+    channel map — see collector.py), the same data `find_snaps_needing_tests`
+    already keys off of. Falls back to ``["amd64"]`` for a snap with no
+    channel-map data yet (e.g. never published) so callers always get at
+    least one architecture to test.
+    """
+    archs = {
+        row[0]
+        for row in session.query(ChannelMap.architecture).filter_by(snap_id=snap_id).distinct()
+        if row[0]
+    }
+    return sorted(archs) if archs else ["amd64"]
+
+
 def _path_exists_in_repo(repo: str, path: str, token: str) -> bool:
     """Return True if *path* exists in *repo* (``owner/repo`` format)."""
     owner, _, name = repo.partition("/")

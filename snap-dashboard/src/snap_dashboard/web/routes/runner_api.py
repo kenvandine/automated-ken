@@ -135,6 +135,7 @@ async def heartbeat(
     status = body.get("status", "idle")
     idle_seconds = body.get("idle_seconds")
     locked = bool(body.get("locked", False))
+    arch = body.get("arch", "")
 
     cancel_requested = False
     with get_session() as session:
@@ -144,6 +145,11 @@ async def heartbeat(
         runner.status = "locked" if locked else status
         runner.idle_seconds = idle_seconds
         runner.last_heartbeat_at = datetime.now(timezone.utc)
+        # Self-heal runners enrolled before arch reporting existed (or
+        # whose reported arch has since changed) without requiring a
+        # manual re-enrollment — see automated_ken_runner.runner._maybe_heartbeat.
+        if arch and runner.arch != arch:
+            runner.arch = arch
         if runner.current_test_run_id:
             job = session.query(TestRun).get(runner.current_test_run_id)
             if job is not None:
@@ -193,7 +199,18 @@ async def next_job(
 
 
 def _try_claim_job(runner_id: int) -> dict | None:
-    """Atomically claim the highest-priority queued job for this runner, if any."""
+    """Atomically claim the highest-priority queued job this runner can actually run.
+
+    A job explicitly pre-assigned to this runner (``TestRun.runner_id``,
+    set by an operator picking a specific machine from the dashboard) is
+    always eligible — that's a deliberate human override. An unassigned job
+    is only eligible if its target architecture matches this runner's
+    reported arch (see ``Runner.arch`` / ``automated_ken_runner.arch``), so
+    e.g. an arm64 job never gets picked up by an amd64 runner and vice
+    versa. A job with no recorded architecture, or a runner with no
+    reported arch yet, is treated as "amd64" for matching purposes — the
+    long-standing default before per-arch dispatch existed.
+    """
     with get_session() as session:
         runner = session.query(Runner).get(runner_id)
         if runner is None or runner.revoked_at is not None:
@@ -201,12 +218,21 @@ def _try_claim_job(runner_id: int) -> dict | None:
         if runner.current_test_run_id is not None:
             return None  # already has a job in flight
 
-        candidate = (
+        runner_arch = (runner.arch or "amd64").strip().lower()
+        candidates = (
             session.query(TestRun)
             .filter_by(dispatch_target="remote_runner", status="pending")
             .filter((TestRun.runner_id == runner_id) | (TestRun.runner_id.is_(None)))
             .order_by(TestRun.priority.desc(), TestRun.started_at.asc())
-            .first()
+            .all()
+        )
+        candidate = next(
+            (
+                c for c in candidates
+                if c.runner_id == runner_id
+                or (c.architecture or "amd64").strip().lower() == runner_arch
+            ),
+            None,
         )
         if candidate is None:
             return None

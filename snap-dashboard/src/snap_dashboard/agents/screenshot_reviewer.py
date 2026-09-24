@@ -111,6 +111,8 @@ class ScreenshotReviewerAgent(BaseAgent):
             new_screenshots[0] if new_screenshots else None
         )
 
+        should_auto_promote = False
+        sibling_ids: list[int] = []
         with get_session() as session:
             comp = ScreenshotComparison(
                 version_bump_pr_id=self.version_bump_pr_id,
@@ -125,47 +127,101 @@ class ScreenshotReviewerAgent(BaseAgent):
                 llm_prompt="vision_compare" if lemonade and comparison_pairs else None,
             )
             session.add(comp)
+            session.flush()
 
-        final_status = _decision_to_status(decision)
-        should_auto_promote = (
-            decision == "approve"
-            and yarf_status == "yarf_passed"
-            and bool(getattr(uc, "auto_promote", False))
-            and confidence >= float(getattr(uc, "auto_promote_confidence", 0.85) or 0.85)
-            and from_channel == "candidate"
-            and revision is not None
-            and test_run_id is not None
-        )
-        if should_auto_promote:
-            final_status = "promoting"
+            # Every architecture of this version bump gets its own TestRun
+            # (see agents/pr_monitor.py:_trigger_yarf) and thus its own
+            # ScreenshotReviewerAgent — only finalize the PR / consider
+            # promotion once every one of them has recorded a decision, so
+            # e.g. an arm64 regression can still block a passing amd64 run
+            # from being promoted alone.
+            sibling_runs = (
+                session.query(TestRun).filter_by(version_bump_pr_id=self.version_bump_pr_id).all()
+            )
+            sibling_ids = [r.id for r in sibling_runs] if sibling_runs else (
+                [test_run_id] if test_run_id is not None else []
+            )
+            runs_by_id = {r.id: r for r in sibling_runs}
 
-        with get_session() as session:
+            latest_by_run: dict[int, ScreenshotComparison] = {}
+            if sibling_ids:
+                for row in (
+                    session.query(ScreenshotComparison)
+                    .filter(ScreenshotComparison.test_run_id.in_(sibling_ids))
+                    .order_by(ScreenshotComparison.id.asc())
+                    .all()
+                ):
+                    latest_by_run[row.test_run_id] = row  # keep the highest id per run
+
+            pending = [rid for rid in sibling_ids if rid not in latest_by_run]
+            if pending:
+                logger.info(
+                    "screenshot_reviewer: %s test_run=%s recorded %s; waiting on %d more architecture(s)",
+                    snap_name, test_run_id, decision, len(pending),
+                )
+                return f"{snap_name}: {decision} (confidence={confidence:.0%}, waiting on {len(pending)} more arch(es))"
+
+            decisions = [
+                {
+                    "decision": latest_by_run[rid].decision,
+                    "confidence": latest_by_run[rid].confidence or 0.0,
+                    "reasoning": latest_by_run[rid].reasoning or "",
+                }
+                for rid in sibling_ids
+            ]
+            aggregate = _aggregate_decisions(decisions)
+            agg_decision = aggregate["decision"]
+            agg_confidence = aggregate["confidence"]
+            agg_reasoning = aggregate["reasoning"]
+
+            final_status = _decision_to_status(agg_decision)
+            all_candidate = all(
+                (runs_by_id[rid].from_channel if rid in runs_by_id else from_channel) == "candidate"
+                for rid in sibling_ids
+            )
+            all_have_revision = all(
+                (runs_by_id[rid].revision if rid in runs_by_id else revision) is not None
+                for rid in sibling_ids
+            )
+            should_auto_promote = (
+                agg_decision == "approve"
+                and yarf_status == "yarf_passed"
+                and bool(getattr(uc, "auto_promote", False))
+                and agg_confidence >= float(getattr(uc, "auto_promote_confidence", 0.85) or 0.85)
+                and all_candidate
+                and all_have_revision
+                and bool(sibling_ids)
+            )
+            if should_auto_promote:
+                final_status = "promoting"
+
             bump = session.query(VersionBumpPR).get(self.version_bump_pr_id)
             if bump:
-                bump.agent_decision = decision
-                bump.agent_confidence = confidence
-                bump.agent_reasoning = reasoning
+                bump.agent_decision = agg_decision
+                bump.agent_confidence = agg_confidence
+                bump.agent_reasoning = agg_reasoning
                 bump.status = final_status
 
-        if should_auto_promote and test_run_id is not None:
+        if should_auto_promote:
             from snap_dashboard.agents.runner import get_runner
             from snap_dashboard.agents.stable_promoter import StablePromoterAgent
 
             get_runner().submit(
                 StablePromoterAgent(
                     version_bump_pr_id=self.version_bump_pr_id,
-                    test_run_id=test_run_id,
+                    test_run_ids=sibling_ids,
                     user_id=self.user_id,
                 )
             )
 
         logger.info(
-            "screenshot_reviewer: %s → %s (confidence=%.2f)",
+            "screenshot_reviewer: %s → %s (confidence=%.2f, %d arch(es))",
             snap_name,
-            decision,
-            confidence,
+            agg_decision,
+            agg_confidence,
+            len(sibling_ids),
         )
-        return f"{snap_name}: {decision} (confidence={confidence:.0%})"
+        return f"{snap_name}: {agg_decision} (confidence={agg_confidence:.0%}, {len(sibling_ids)} arch(es))"
 
     def _llm_compare(
         self,

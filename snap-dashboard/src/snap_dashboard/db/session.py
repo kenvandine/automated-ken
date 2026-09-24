@@ -149,6 +149,10 @@ def _migrate() -> None:
         "ALTER TABLE test_runs ADD COLUMN review_decision VARCHAR(32)",
         "ALTER TABLE test_runs ADD COLUMN review_confidence FLOAT",
         "ALTER TABLE test_runs ADD COLUMN review_reasoning TEXT",
+        # Multi-architecture testing: links sibling per-arch TestRuns to the
+        # same VersionBumpPR so all architectures can be gated and promoted
+        # together. See agents/pr_monitor.py and agents/stable_promoter.py.
+        "ALTER TABLE test_runs ADD COLUMN version_bump_pr_id INTEGER REFERENCES version_bump_prs(id)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
