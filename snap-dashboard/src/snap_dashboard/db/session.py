@@ -141,6 +141,9 @@ def _migrate() -> None:
         # snap's own packaging repo when it has colocated YARF tests, or the
         # legacy shared testing repo as a fallback. See testing/orchestrator.py.
         "ALTER TABLE test_runs ADD COLUMN repo VARCHAR(500)",
+        # Captured runner-side stdout/stderr/traceback so failures can be
+        # debugged from the web UI. See automated_ken_runner.runner._execute_job.
+        "ALTER TABLE test_runs ADD COLUMN log_output TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

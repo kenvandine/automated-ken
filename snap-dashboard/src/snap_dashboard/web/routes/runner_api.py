@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/runners")
 
+# Cap on stored per-job debug log size (~500KB) so a runaway/looping test
+# suite can't bloat the sqlite DB indefinitely.
+_MAX_LOG_CHARS = 500_000
+
 _NEXT_JOB_POLL_INTERVAL = 1.0
 _DEFAULT_NEXT_JOB_TIMEOUT = 25
 
@@ -264,6 +268,7 @@ async def update_job(
     body = await request.json()
     status = body.get("status")
     error = body.get("error", "")
+    log = body.get("log", "")
     terminal = status in ("passed", "failed", "error", "cancelled")
 
     with get_session() as session:
@@ -274,6 +279,10 @@ async def update_job(
             job.status = status
         if error:
             job.error_msg = error
+        if log:
+            # Cap stored size — this is debug output, not something that
+            # needs unbounded retention.
+            job.log_output = log[-_MAX_LOG_CHARS:]
         if terminal:
             job.finished_at = datetime.now(timezone.utc)
             runner = session.query(Runner).get(runner_id)

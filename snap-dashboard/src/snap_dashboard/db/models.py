@@ -281,6 +281,11 @@ class TestRun(Base):
     promoted = Column(Boolean, default=False, nullable=False)
     promoted_at = Column(DateTime, nullable=True)
     error_msg = Column(Text, nullable=True)
+    # Combined stdout/stderr/traceback captured by automated-ken-runner while
+    # executing this job (snap install/refresh + yarf output) — lets users
+    # debug a failure from the web UI instead of SSHing into the runner and
+    # grepping journalctl. Only populated for dispatch_target=remote_runner.
+    log_output = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="test_runs")
     runner = relationship("Runner", foreign_keys=[runner_id])

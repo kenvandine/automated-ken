@@ -16,18 +16,18 @@ def test_resolve_prefers_colocated_packaging_repo(monkeypatch):
     assert suite_path == "tests/suite"
 
 
-def test_resolve_falls_back_to_legacy_repo_when_not_colocated(monkeypatch):
+def test_resolve_returns_empty_when_not_colocated_and_no_fallback(monkeypatch):
     monkeypatch.setattr(orchestrator, "_path_exists_in_repo", lambda repo, path, token: False)
 
     repo, suite_path = orchestrator.resolve_test_repo(
         "kenvandine/some-snap", "some-snap", token="tok"
     )
 
-    assert repo == orchestrator.LEGACY_CENTRAL_TESTING_REPO
-    assert suite_path == "suites/some-snap/suite"
+    assert repo == ""
+    assert suite_path == ""
 
 
-def test_resolve_uses_explicit_fallback_over_default_legacy_repo(monkeypatch):
+def test_resolve_uses_explicit_fallback_when_configured(monkeypatch):
     monkeypatch.setattr(orchestrator, "_path_exists_in_repo", lambda repo, path, token: False)
 
     repo, suite_path = orchestrator.resolve_test_repo(
@@ -38,7 +38,7 @@ def test_resolve_uses_explicit_fallback_over_default_legacy_repo(monkeypatch):
     assert suite_path == "suites/some-snap/suite"
 
 
-def test_resolve_without_packaging_repo_skips_colocated_check(monkeypatch):
+def test_resolve_without_packaging_repo_or_fallback_returns_empty(monkeypatch):
     calls = []
     monkeypatch.setattr(
         orchestrator,
@@ -49,8 +49,8 @@ def test_resolve_without_packaging_repo_skips_colocated_check(monkeypatch):
     repo, suite_path = orchestrator.resolve_test_repo(None, "some-snap", token="tok")
 
     assert calls == []  # never checked colocated path when there's no packaging repo
-    assert repo == orchestrator.LEGACY_CENTRAL_TESTING_REPO
-    assert suite_path == "suites/some-snap/suite"
+    assert repo == ""
+    assert suite_path == ""
 
 
 def test_suite_exists_in_repo_uses_resolved_repo(monkeypatch):

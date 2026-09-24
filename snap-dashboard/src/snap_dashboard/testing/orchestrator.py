@@ -132,14 +132,6 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
     return results
 
 
-# Legacy shared repo that used to hold every snap's YARF suite under
-# suites/<snap_name>/suite/. Tests are now colocated in each snap's own
-# packaging repo (tests/suite/) instead — this is only used as a fallback
-# for snaps whose packaging repo hasn't been bootstrapped with colocated
-# tests yet.
-LEGACY_CENTRAL_TESTING_REPO = "kenvandine/automated-ken-tests"
-
-
 def _path_exists_in_repo(repo: str, path: str, token: str) -> bool:
     """Return True if *path* exists in *repo* (``owner/repo`` format)."""
     owner, _, name = repo.partition("/")
@@ -164,14 +156,17 @@ def resolve_test_repo(
     """Return ``(repo, suite_path)`` for *snap_name*'s YARF test suite.
 
     Prefers the snap's own ``packaging_repo`` if it has been bootstrapped with
-    colocated tests (``tests/suite/__init__.robot``). Falls back to the legacy
-    shared testing repo (``suites/<snap_name>/suite/``) otherwise, so snaps not
-    yet migrated keep working exactly as before.
+    colocated tests (``tests/suite/__init__.robot``). Falls back to
+    *testing_repo_fallback* (``suites/<snap_name>/suite``) only if a user has
+    explicitly configured one — there is no longer a hardcoded shared/legacy
+    testing repo to fall back to (it was never used in production). Returns
+    ``("", "")`` when neither is available.
     """
     if packaging_repo and _path_exists_in_repo(packaging_repo, "tests/suite/__init__.robot", token):
         return packaging_repo, "tests/suite"
-    fallback = testing_repo_fallback or LEGACY_CENTRAL_TESTING_REPO
-    return fallback, f"suites/{snap_name}/suite"
+    if testing_repo_fallback:
+        return testing_repo_fallback, f"suites/{snap_name}/suite"
+    return "", ""
 
 
 def suite_exists_in_repo(

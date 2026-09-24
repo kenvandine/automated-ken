@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
@@ -45,8 +46,10 @@ async def testing_index(request: Request) -> HTMLResponse:
         snaps_needing_raw = find_snaps_needing_tests(session, user_id=user_id)
 
         # Gather plain data only (no network calls) while the session/lock
-        # is held; suite_exists_in_repo() below hits the GitHub API and
-        # must run *after* the session closes — see the comment there.
+        # is held. Suite existence is checked lazily by the page's JS via
+        # /testing/api/suite-status *after* the page has already rendered
+        # — see the comment on that route for why this can no longer be
+        # done synchronously here.
         prepared = []
         for item in snaps_needing_raw:
             snap_name = item["snap"].name
@@ -70,6 +73,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "pr_number": existing.pr_number,
                     "pr_url": existing.pr_url,
                     "repo": existing.repo or uc.testing_repo,
+                    "has_log": bool(existing.log_output),
                 }
                 if existing
                 else None
@@ -85,6 +89,10 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "can_promote": item["can_promote"],
                     "packaging_repo": item["snap"].packaging_repo,
                     "existing_run": existing_run,
+                    # Unknown until /testing/api/suite-status responds —
+                    # the template renders a "checking…" placeholder for
+                    # None and the page's JS fills this in async.
+                    "has_suite": None,
                 }
             )
 
@@ -115,22 +123,10 @@ async def testing_index(request: Request) -> HTMLResponse:
                 "promoted_at": r.promoted_at,
                 "error_msg": r.error_msg,
                 "repo": r.repo or uc.testing_repo,
+                "has_log": bool(r.log_output),
             }
             for r in all_runs
         ]
-
-    # suite_exists_in_repo() makes GitHub API requests — this must run with
-    # no session/lock held, since get_session() now serializes all sqlite
-    # access process-wide and doing blocking network I/O under that lock
-    # would stall every other request, agent, and runner heartbeat in the
-    # app for the duration of every GitHub call.
-    snaps_needing = []
-    for item in prepared:
-        item["has_suite"] = suite_exists_in_repo(
-            uc.testing_repo, item["snap"]["name"], uc.github_token,
-            packaging_repo=item["packaging_repo"],
-        )
-        snaps_needing.append(item)
 
     pending_promotion = [
         r for r in runs_data
@@ -142,14 +138,78 @@ async def testing_index(request: Request) -> HTMLResponse:
         "testing.html",
         {
             "config": uc,
-            "snaps_needing": snaps_needing,
+            "snaps_needing": prepared,
             "all_runs": runs_data,
             "pending_promotion": pending_promotion,
             "last_run": None,
             "current_user": user,
-            "any_suite_configured": any(s["has_suite"] for s in snaps_needing),
+            # Suites are now discovered async (see above) so we can't know
+            # this synchronously; assume True whenever there's a testing_repo
+            # configured or the user has snaps at all, so the page always
+            # renders its normal content and lets the async check settle
+            # the per-row detail. The truly-empty-state card is only meant
+            # for brand-new setups with nothing configured or recorded yet.
+            "any_suite_configured": bool(uc.testing_repo) or bool(prepared) or bool(all_runs),
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Async suite-existence check — called by the testing page's JS after the
+# page has already rendered.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/testing/api/suite-status")
+async def suite_status(request: Request) -> JSONResponse:
+    """Report which "needs testing" snaps have a YARF suite.
+
+    This used to run synchronously inside the ``/testing`` GET handler,
+    which made every page load (and every redirect back to it, e.g. after
+    triggering a test) take as long as N sequential GitHub API calls. It's
+    also plain ``httpx.Client`` (sync) I/O, which — unlike an awaited async
+    HTTP call — blocks this process's *entire* asyncio event loop for its
+    duration, stalling every other concurrent request (including runner
+    long-polls) the whole time. ``asyncio.to_thread`` moves that blocking
+    work off the event loop so the rest of the app stays responsive while
+    this endpoint is in flight.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"results": []}, status_code=401)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+
+    with get_session() as session:
+        snaps_needing_raw = find_snaps_needing_tests(session, user_id=user_id)
+        items = [
+            {
+                "snap_name": item["snap"].name,
+                "architecture": item["architecture"],
+                "packaging_repo": item["snap"].packaging_repo,
+            }
+            for item in snaps_needing_raw
+        ]
+
+    def _check_all() -> list[dict]:
+        results = []
+        for item in items:
+            has_suite = suite_exists_in_repo(
+                uc.testing_repo, item["snap_name"], uc.github_token,
+                packaging_repo=item["packaging_repo"],
+            )
+            results.append(
+                {
+                    "snap_name": item["snap_name"],
+                    "architecture": item["architecture"],
+                    "has_suite": has_suite,
+                }
+            )
+        return results
+
+    results = await asyncio.to_thread(_check_all)
+    return JSONResponse({"results": results})
 
 
 # ---------------------------------------------------------------------------
@@ -231,6 +291,32 @@ async def sync_runs(
 
 
 # ---------------------------------------------------------------------------
+# Runner-captured debug log for a single run
+# ---------------------------------------------------------------------------
+
+
+@router.get("/testing/runs/{run_id}/log", response_class=PlainTextResponse)
+async def run_log(run_id: int, request: Request) -> PlainTextResponse:
+    """Return the raw stdout/stderr/traceback captured by the remote runner.
+
+    Plain text so it's easy to view in-browser or download/curl, and so we
+    don't need any JS/modal plumbing to expose it.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return PlainTextResponse("Not authenticated", status_code=401)
+
+    user_id = user["id"]
+    with get_session() as session:
+        run = session.query(TestRun).filter_by(id=run_id, user_id=user_id).first()
+        if run is None:
+            return PlainTextResponse("Run not found", status_code=404)
+        log = run.log_output or "(no log captured for this run)"
+
+    return PlainTextResponse(log)
+
+
+# ---------------------------------------------------------------------------
 # Mark a run as failed (manual override for stuck runs)
 # ---------------------------------------------------------------------------
 
@@ -284,6 +370,7 @@ async def testing_status(request: Request) -> JSONResponse:
                 "pr_number": r.pr_number,
                 "pr_url": r.pr_url,
                 "repo": r.repo or uc.testing_repo,
+                "has_log": bool(r.log_output),
             }
             for r in runs
         ]

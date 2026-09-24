@@ -119,11 +119,9 @@
         <td class="muted small">{{ item.version or '—' }}</td>
         <td class="muted small">{{ item.stable_ver or 'none' }}</td>
         <td>
-          {% if item.has_suite %}
-          <span class="p-status-label p-status-label--positive">yes</span>
-          {% else %}
-          <span class="p-status-label" title="No suite found in testing repo">no suite</span>
-          {% endif %}
+          <span class="js-suite-cell" data-snap="{{ item.snap.name }}" data-arch="{{ item.architecture }}">
+            <span class="muted small">checking…</span>
+          </span>
         </td>
         <td class="active-run-cell">
           {% if item.existing_run %}
@@ -140,12 +138,13 @@
           {% else %}
           <span class="p-status-label p-status-label--negative">failed</span>
           {% endif %}
+          {% if run.has_log %}
+          <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="View runner debug log">log</a>
+          {% endif %}
           {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
           <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
-          {% if run.gh_run_id and run.repo %}
+          {% if run.gh_run_id and run.repo and '/' in run.repo %}
           <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
-          {% elif run.repo %}
-          <a href="https://github.com/{{ run.repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow">↗</a>
           {% endif %}
           {% elif run.status == 'error' %}
           <span class="p-status-label p-status-label--negative">error</span>
@@ -156,18 +155,16 @@
           <span class="muted small">—</span>
           {% endif %}
         </td>
-        <td>
-          {% if item.has_suite %}
-          <form method="post" action="/testing/trigger/{{ item.snap.name }}" class="js-trigger-form">
+        <td class="js-actions-cell" data-snap="{{ item.snap.name }}" data-arch="{{ item.architecture }}">
+          <span class="muted small js-actions-checking">checking…</span>
+          <form method="post" action="/testing/trigger/{{ item.snap.name }}" class="js-trigger-form" style="display:none">
             <input type="hidden" name="from_channel" value="{{ item.from_channel }}">
             <input type="hidden" name="architecture" value="{{ item.architecture }}">
             <input type="hidden" name="version" value="{{ item.version }}">
             <input type="hidden" name="revision" value="{{ item.revision or '' }}">
             <button type="submit" class="p-button is-small">Run Tests</button>
           </form>
-          {% else %}
-          <span class="muted small">No suite</span>
-          {% endif %}
+          <span class="muted small js-no-suite" style="display:none">No suite</span>
         </td>
       </tr>
       {% endfor %}
@@ -255,6 +252,9 @@
             {% else %}
             <span class="muted small">{{ run.status }}</span>
             {% endif %}
+            {% if run.has_log %}
+            <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="muted small js-log-link" data-run-id="{{ run.id }}" style="margin-left:4px;" title="View runner debug log">log</a>
+            {% endif %}
           </td>
           <td style="white-space:nowrap;">
             {% if run.pr_number %}
@@ -264,9 +264,9 @@
             {% else %}
             <span class="muted small">—</span>
             {% endif %}
-            {% if run.gh_run_id and run.repo %}
+            {% if run.gh_run_id and run.repo and '/' in run.repo %}
             <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open GitHub Actions run" data-gh-run="1">↗</a>
-            {% elif run.status in ('pending', 'triggered', 'running') and run.repo %}
+            {% elif run.status in ('pending', 'triggered', 'running') and run.repo and '/' in run.repo %}
             <a href="https://github.com/{{ run.repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow" data-gh-run="fallback">↗</a>
             {% endif %}
           </td>
@@ -334,10 +334,11 @@
           el.textContent = run.status;
           el.className = badgeClass(run.status);
           const cell = el.closest('td');
-          if (run.gh_run_id && (run.repo || data.testing_repo)) {
+          const repoSlug = run.repo || data.testing_repo;
+          if (run.gh_run_id && repoSlug && repoSlug.includes('/')) {
             // Upgrade fallback link or insert specific run link
             const existing = cell.querySelector('a[data-gh-run]');
-            const runUrl = 'https://github.com/' + (run.repo || data.testing_repo) + '/actions/runs/' + run.gh_run_id;
+            const runUrl = 'https://github.com/' + repoSlug + '/actions/runs/' + run.gh_run_id;
             if (existing && existing.dataset.ghRun === 'fallback') {
               existing.href = runUrl;
               existing.title = 'Open GitHub Actions run';
@@ -374,6 +375,43 @@
 
   // Only start polling if there are in-flight runs on initial render
   if (document.querySelector('.js-run-status')) poll();
+
+  // Suite existence is checked async (see /testing/api/suite-status) so
+  // the page renders instantly instead of blocking on N GitHub API calls.
+  // Fill in the "checking…" placeholders once results arrive.
+  function loadSuiteStatus() {
+    const suiteCells = document.querySelectorAll('.js-suite-cell');
+    if (!suiteCells.length) return;
+
+    fetch('/testing/api/suite-status')
+      .then(r => r.json())
+      .then(data => {
+        const byKey = {};
+        for (const r of data.results) byKey[r.snap_name + '|' + r.architecture] = r.has_suite;
+
+        suiteCells.forEach(cell => {
+          const key = cell.dataset.snap + '|' + cell.dataset.arch;
+          const hasSuite = byKey[key];
+          cell.innerHTML = hasSuite
+            ? '<span class="p-status-label p-status-label--positive">yes</span>'
+            : '<span class="p-status-label" title="No suite found in testing repo">no suite</span>';
+        });
+
+        document.querySelectorAll('.js-actions-cell').forEach(cell => {
+          const key = cell.dataset.snap + '|' + cell.dataset.arch;
+          const hasSuite = byKey[key];
+          cell.querySelector('.js-actions-checking').style.display = 'none';
+          cell.querySelector('.js-trigger-form').style.display = hasSuite ? '' : 'none';
+          cell.querySelector('.js-no-suite').style.display = hasSuite ? 'none' : '';
+        });
+      })
+      .catch(() => {
+        suiteCells.forEach(cell => {
+          cell.innerHTML = '<span class="muted small" title="Failed to check">unknown</span>';
+        });
+      });
+  }
+  loadSuiteStatus();
 
   // Intercept "Run Tests" submits so we don't reload the whole page (which
   // used to re-scan every snap + hit GitHub's API per row — very slow).
