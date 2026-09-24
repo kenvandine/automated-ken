@@ -66,9 +66,9 @@ async def admin_index(request: Request) -> HTMLResponse:
         ]
 
     return templates.TemplateResponse(
+        request,
         "admin.html",
         {
-            "request": request,
             "current_user": user,
             "allowlist": allowlist_data,
             "users": users_data,

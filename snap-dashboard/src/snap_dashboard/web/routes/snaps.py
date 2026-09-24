@@ -39,9 +39,9 @@ async def snap_add_get(request: Request) -> HTMLResponse:
         return RedirectResponse(url="/auth/login", status_code=302)
 
     return templates.TemplateResponse(
+        request,
         "snap_add.html",
         {
-            "request": request,
             "last_run": _get_last_run(user["id"]),
             "search_result": None,
             "current_user": user,
@@ -214,9 +214,9 @@ async def snap_detail(request: Request, name: str) -> HTMLResponse:
         ]
 
     return templates.TemplateResponse(
+        request,
         "snap_detail.html",
         {
-            "request": request,
             "snap": snap_data,
             "arch_map": arch_map,
             "cm_rows": cm_data,

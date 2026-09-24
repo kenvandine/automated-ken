@@ -58,9 +58,9 @@ async def settings_get(request: Request) -> HTMLResponse:
         ]
 
     return templates.TemplateResponse(
+        request,
         "settings.html",
         {
-            "request": request,
             "config": uc,
             "snaps": snap_list,
             "last_run": _get_last_run(user_id),

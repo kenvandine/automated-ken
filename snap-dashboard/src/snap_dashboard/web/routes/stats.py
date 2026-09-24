@@ -123,9 +123,9 @@ async def stats_page(request: Request) -> HTMLResponse:
         ]
 
     return templates.TemplateResponse(
+        request,
         "stats.html",
         {
-            "request": request,
             "current_user": user,
             "last_run": None,
             "total_test_runs": total_test_runs,

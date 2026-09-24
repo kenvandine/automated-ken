@@ -126,9 +126,9 @@ async def testing_index(request: Request) -> HTMLResponse:
     ]
 
     return templates.TemplateResponse(
+        request,
         "testing.html",
         {
-            "request": request,
             "config": uc,
             "snaps_needing": snaps_needing,
             "all_runs": runs_data,
@@ -351,9 +351,9 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
     )
 
     return templates.TemplateResponse(
+        request,
         "pr_detail.html",
         {
-            "request": request,
             "run": run_dict,
             "pr": pr_info,
             "pr_url": pr_url,
@@ -435,9 +435,9 @@ async def promote_snap_route(
 
     # Render the detail page again with an error message
     return templates.TemplateResponse(
+        request,
         "pr_detail.html",
         {
-            "request": request,
             "run": {
                 "snap_name": snap_name,
                 "pr_number": pr_number,

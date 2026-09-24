@@ -147,9 +147,9 @@ async def dashboard_index(request: Request) -> HTMLResponse:
                 }
 
         return templates.TemplateResponse(
+            request,
             "dashboard.html",
             {
-                "request": request,
                 "rows": rows,
                 "attention": attention,
                 "last_run": last_run,

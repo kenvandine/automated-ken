@@ -4,7 +4,7 @@
 #   - every time `snap set automated-ken <key>=<value>` is run
 #
 # Translates snapd's own config store (accessed via snapctl) into
-# $SNAP_DATA/config.env, which is what snap_dashboard.config.get_config()
+# $SNAP_COMMON/config.env, which is what snap_dashboard.config.get_config()
 # actually reads at runtime. Anyone deploying this snap for themselves
 # only needs `snap set automated-ken github-client-id=... github-client-secret=...`
 # (see README.md) — everything else has a sane default.
@@ -35,8 +35,8 @@ if [ -z "$session_secret" ]; then
     snapctl set session-secret="$session_secret"
 fi
 
-mkdir -p "$SNAP_DATA"
-cat > "$SNAP_DATA/config.env" <<EOF
+mkdir -p "$SNAP_COMMON"
+cat > "$SNAP_COMMON/config.env" <<EOF
 BIND=${bind:-127.0.0.1}
 PORT=${port:-9080}
 SESSION_SECRET=${session_secret}

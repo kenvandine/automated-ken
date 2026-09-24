@@ -31,9 +31,9 @@ async def onboarding_get(request: Request, step: int = 1) -> HTMLResponse:
 
     uc = get_user_config(user["id"])
     return templates.TemplateResponse(
+        request,
         "onboarding.html",
         {
-            "request": request,
             "step": step,
             "publisher": uc.publisher or "",
             "verify_result": _verify_result,
@@ -90,7 +90,7 @@ async def onboarding_token(
                 session.add(uc)
             uc.github_token = github_token.strip()
 
-    return RedirectResponse(url="/onboarding?step=3", status_code=303)
+    return RedirectResponse(url="/onboarding?step=4", status_code=303)
 
 
 @router.post("/complete")

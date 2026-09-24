@@ -96,9 +96,9 @@ async def runners_page(request: Request) -> HTMLResponse:
         ]
 
     return templates.TemplateResponse(
+        request,
         "runners.html",
         {
-            "request": request,
             "current_user": user,
             "runners": runner_rows,
             "queue": queue_rows,

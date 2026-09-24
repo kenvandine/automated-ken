@@ -85,9 +85,9 @@ async def copilot_tasks_page(request: Request) -> HTMLResponse:
     kinds = sorted({t["kind"] for t in task_list})
 
     return templates.TemplateResponse(
+        request,
         "copilot_tasks.html",
         {
-            "request": request,
             "tasks": task_list,
             "kinds": kinds,
             "current_user": user,

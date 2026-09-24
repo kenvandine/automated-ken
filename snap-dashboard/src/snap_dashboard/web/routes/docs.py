@@ -18,9 +18,9 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 async def docs_index(request: Request, section: str = "") -> HTMLResponse:
     user = get_current_user(request)
     return templates.TemplateResponse(
+        request,
         "docs.html",
         {
-            "request": request,
             "current_user": user,
             "last_run": None,
             "active_section": section or "overview",

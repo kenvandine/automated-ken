@@ -36,9 +36,9 @@ async def login(request: Request) -> HTMLResponse:
     config = get_config()
     if not config.github_client_id:
         return templates.TemplateResponse(
+            request,
             "login.html",
             {
-                "request": request,
                 "error": (
                     "GitHub OAuth is not configured. "
                     "Set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in config."
@@ -56,8 +56,9 @@ async def login(request: Request) -> HTMLResponse:
         f"&state={state}"
     )
     return templates.TemplateResponse(
+        request,
         "login.html",
-        {"request": request, "error": None, "oauth_url": oauth_url},
+        {"error": None, "oauth_url": oauth_url},
     )
 
 
@@ -69,9 +70,9 @@ async def oauth_callback(request: Request) -> HTMLResponse:
 
     if not code or state != request.session.get("oauth_state"):
         return templates.TemplateResponse(
+            request,
             "login.html",
             {
-                "request": request,
                 "error": "Invalid OAuth state. Please try again.",
                 "oauth_url": None,
             },
@@ -100,9 +101,9 @@ async def oauth_callback(request: Request) -> HTMLResponse:
     except Exception as exc:
         logger.error("OAuth token exchange failed: %s", exc)
         return templates.TemplateResponse(
+            request,
             "login.html",
             {
-                "request": request,
                 "error": "GitHub OAuth failed. Please try again.",
                 "oauth_url": None,
             },
@@ -129,9 +130,9 @@ async def oauth_callback(request: Request) -> HTMLResponse:
     except Exception as exc:
         logger.error("Failed to fetch GitHub user info: %s", exc)
         return templates.TemplateResponse(
+            request,
             "login.html",
             {
-                "request": request,
                 "error": "Could not fetch your GitHub profile. Please try again.",
                 "oauth_url": None,
             },
@@ -148,9 +149,9 @@ async def oauth_callback(request: Request) -> HTMLResponse:
             allowed = session.query(AllowlistedUser).filter_by(github_login=github_login).first()
             if not allowed:
                 return templates.TemplateResponse(
+                    request,
                     "login.html",
                     {
-                        "request": request,
                         "error": (
                             f"Your GitHub account ({github_login!r}) is not on the allowlist. "
                             "Ask an administrator to add you."

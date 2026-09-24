@@ -74,9 +74,9 @@ async def version_bumps_page(request: Request) -> HTMLResponse:
     )
 
     return templates.TemplateResponse(
+        request,
         "version_bumps.html",
         {
-            "request": request,
             "current_user": user,
             "groups": groups,
             "actionable_count": actionable,
@@ -107,9 +107,9 @@ async def version_bump_detail(bump_id: int, request: Request) -> HTMLResponse:
         comp_data = _serialise_comp(comp) if comp else None
 
     return templates.TemplateResponse(
+        request,
         "version_bump_detail.html",
         {
-            "request": request,
             "current_user": user,
             "bump": bump_data,
             "comparison": comp_data,

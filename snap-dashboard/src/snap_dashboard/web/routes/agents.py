@@ -31,8 +31,9 @@ async def agents_page(request: Request) -> HTMLResponse:
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
     return templates.TemplateResponse(
+        request,
         "agents.html",
-        {"request": request, "current_user": user, "last_run": None},
+        {"current_user": user, "last_run": None},
     )
 
 

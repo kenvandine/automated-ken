@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 
 from snap_dashboard.db.models import Base
@@ -33,11 +33,29 @@ def get_db_path() -> Path:
 def _make_engine():
     db_path = get_db_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    return create_engine(
+    engine = create_engine(
         f"sqlite:///{db_path}",
-        connect_args={"check_same_thread": False},
+        # `timeout` sets sqlite3's busy_timeout (seconds) for this connection
+        # so concurrent writers (background collection, agent scheduling,
+        # request handlers) block-and-retry instead of immediately raising
+        # "database is locked".
+        connect_args={"check_same_thread": False, "timeout": 30},
         echo=False,
     )
+
+    @event.listens_for(engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, connection_record):
+        # WAL lets readers and a single writer proceed concurrently instead
+        # of the default rollback-journal mode, which takes a whole-database
+        # lock for any write and is why multiple background agents writing
+        # at once produced "database is locked" errors.
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
+
+    return engine
 
 
 engine = _make_engine()
