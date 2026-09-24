@@ -18,8 +18,10 @@ import shutil
 import subprocess
 import tempfile
 import time
+import traceback
 import zipfile
 from pathlib import Path
+from typing import Callable
 
 import httpx
 
@@ -134,6 +136,12 @@ class RunnerLoop:
         logger.info("Claimed job %s: %s (%s)", job_id, snap_name, channel)
         self._report_status(job_id, "running")
 
+        log_lines: list[str] = []
+
+        def _log(section: str, text: str) -> None:
+            if text:
+                log_lines.append(f"----- {section} -----\n{text.rstrip()}\n")
+
         with tempfile.TemporaryDirectory(prefix="automated-ken-runner-") as tmp:
             tmp_path = Path(tmp)
             try:
@@ -144,17 +152,19 @@ class RunnerLoop:
                     # a bare FileNotFoundError until someone notices.
                     ensure_dependencies(auto_install=True)
                 suite_dir = self._fetch_suite(job_id, tmp_path)
-                self._install_snap(snap_name, channel)
-                yarf_exit, log_html = self._run_yarf(snap_name, suite_dir, tmp_path)
+                self._install_snap(snap_name, channel, _log)
+                yarf_exit, log_html = self._run_yarf(snap_name, suite_dir, tmp_path, _log)
                 shots = extract_screenshots(log_html) if log_html else []
                 passed = yarf_exit == 0 and all(s.is_valid for s in shots)
                 self._upload_screenshots(job_id, shots)
                 self._report_status(
-                    job_id, "passed" if passed else "failed", yarf_exit_code=yarf_exit
+                    job_id, "passed" if passed else "failed",
+                    yarf_exit_code=yarf_exit, log="\n".join(log_lines),
                 )
             except Exception as exc:  # noqa: BLE001 — never crash the loop over one bad job
                 logger.exception("Job %s failed with an unexpected error", job_id)
-                self._report_status(job_id, "failed", error=str(exc))
+                _log("traceback", traceback.format_exc())
+                self._report_status(job_id, "failed", error=str(exc), log="\n".join(log_lines))
 
     def _fetch_suite(self, job_id: int, tmp_path: Path) -> Path:
         resp = self.client.get(f"/{self.cfg.runner_id}/jobs/{job_id}/suite")
@@ -164,7 +174,7 @@ class RunnerLoop:
             zf.extractall(suite_dir)
         return suite_dir
 
-    def _install_snap(self, snap_name: str, channel: str) -> None:
+    def _install_snap(self, snap_name: str, channel: str, log: Callable[[str, str], None]) -> None:
         subprocess.run(
             ["snap", "info", snap_name], capture_output=True, timeout=30, check=False
         )
@@ -172,12 +182,19 @@ class RunnerLoop:
             ["snap", "list", snap_name], capture_output=True, timeout=15, check=False
         ).returncode == 0
         action = "refresh" if installed else "install"
-        subprocess.run(
+        proc = subprocess.run(
             ["sudo", "snap", action, snap_name, f"--channel={channel}"],
-            capture_output=True, timeout=300, check=True,
+            capture_output=True, timeout=300, check=False,
         )
+        log(
+            f"snap {action} {snap_name}",
+            (proc.stdout or b"").decode(errors="replace") + (proc.stderr or b"").decode(errors="replace"),
+        )
+        proc.check_returncode()
 
-    def _run_yarf(self, snap_name: str, suite_dir: Path, tmp_path: Path) -> tuple[int, str]:
+    def _run_yarf(
+        self, snap_name: str, suite_dir: Path, tmp_path: Path, log: Callable[[str, str], None]
+    ) -> tuple[int, str]:
         outdir = tmp_path / "results"
         outdir.mkdir(exist_ok=True)
         # yarf only accepts "Mir" (real Wayland display, via WAYLAND_DISPLAY)
@@ -196,6 +213,10 @@ class RunnerLoop:
         proc = subprocess.run(
             ["yarf", "--platform", platform_name, "--outdir", str(outdir), str(suite_dir)],
             capture_output=True, timeout=1800, check=False, env=yarf_env,
+        )
+        log(
+            f"yarf --platform {platform_name}",
+            (proc.stdout or b"").decode(errors="replace") + (proc.stderr or b"").decode(errors="replace"),
         )
         log_html_path = outdir / "log.html"
         log_html = log_html_path.read_text(errors="replace") if log_html_path.exists() else ""
