@@ -89,8 +89,15 @@ async def enroll(request: Request) -> JSONResponse:
         )
         if runner is None:
             return JSONResponse({"error": "invalid enrollment token"}, status_code=401)
-        if runner.enrollment_expires_at and runner.enrollment_expires_at < datetime.now(timezone.utc):
-            return JSONResponse({"error": "enrollment token expired"}, status_code=401)
+        expires_at = runner.enrollment_expires_at
+        if expires_at is not None:
+            # SQLite's plain DateTime columns come back naive even though
+            # they were written from an aware UTC datetime (see
+            # snap_dashboard.runners.effective_status for the same fixup).
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at < datetime.now(timezone.utc):
+                return JSONResponse({"error": "enrollment token expired"}, status_code=401)
 
         secret = generate_token()
         runner.secret_hash = hash_token(secret)
