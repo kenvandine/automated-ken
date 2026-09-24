@@ -239,8 +239,8 @@ class PRMonitorAgent(BaseAgent):
     def _trigger_yarf(self, pr: dict, uc) -> bool:
         """ci_passed → yarf_running by queuing one YARF test run per architecture.
 
-        Every architecture the snap actually ships (see
-        ``orchestrator.get_snap_architectures``) gets its own ``TestRun``,
+        Every testable architecture the snap ships (see
+        ``orchestrator.queue_yarf_tests_for_bump``) gets its own ``TestRun``,
         tagged with this PR via ``version_bump_pr_id`` — e.g. one for an
         amd64 runner and one for an arm64 runner to pick up independently.
         ``_check_yarf`` waits for all of them before advancing the PR, and
@@ -250,33 +250,17 @@ class PRMonitorAgent(BaseAgent):
         if not snap_name:
             return False
 
-        from snap_dashboard.testing.orchestrator import get_snap_architectures, trigger_remote_run
-        with get_session() as session:
-            archs = get_snap_architectures(session, pr["snap_id"])
-
-        self._report(
-            f"Queuing YARF test for {snap_name} {pr['new_version']} ({', '.join(archs)})",
-            snap_name,
-        )
-
         # Tests run on registered remote runners (real hardware polling this
         # dashboard), not GitHub Actions — see snap_dashboard.db.models.Runner.
-        run_ids: list[int] = []
-        errors: list[str] = []
-        for arch in archs:
-            ok, err, run_id = trigger_remote_run(
-                snap_name=snap_name,
-                from_channel="edge",
-                version=pr["new_version"],
-                revision=None,
-                architecture=arch,
-                triggered_by="auto",
-                user_id=pr["user_id"],
-            )
-            if ok and run_id:
-                run_ids.append(run_id)
-            else:
-                errors.append(f"{arch}: {err}")
+        from snap_dashboard.testing.orchestrator import queue_yarf_tests_for_bump
+        run_ids, errors = queue_yarf_tests_for_bump(
+            snap_id=pr["snap_id"],
+            snap_name=snap_name,
+            version=pr["new_version"],
+            user_id=pr["user_id"],
+            version_bump_pr_id=pr["id"],
+            triggered_by="auto",
+        )
 
         if not run_ids:
             logger.warning("pr_monitor: YARF trigger failed for PR %s: %s", pr["id"], "; ".join(errors))
@@ -287,14 +271,15 @@ class PRMonitorAgent(BaseAgent):
             )
 
         with get_session() as session:
-            for run_id in run_ids:
-                run = session.query(TestRun).get(run_id)
-                if run:
-                    run.version_bump_pr_id = pr["id"]
+            archs = ", ".join(
+                r.architecture or "amd64"
+                for r in session.query(TestRun).filter(TestRun.id.in_(run_ids)).all()
+            )
             bump = session.query(VersionBumpPR).get(pr["id"])
             if bump:
                 bump.status = "yarf_running"
                 bump.test_run_id = run_ids[0]  # representative run for legacy single-run displays
+        self._report(f"Queued YARF test for {snap_name} {pr['new_version']} ({archs})", snap_name)
         return True
 
     def _check_yarf(self, pr: dict) -> bool:

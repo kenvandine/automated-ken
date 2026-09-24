@@ -53,44 +53,46 @@ async def testing_index(request: Request) -> HTMLResponse:
         prepared = []
         for item in snaps_needing_raw:
             snap_name = item["snap"].name
-            existing = (
-                session.query(TestRun)
-                .filter_by(
-                    snap_name=snap_name,
-                    architecture=item["architecture"],
-                    version=item["version"],
-                    promoted=False,
-                    user_id=user_id,
+            # One existing run per architecture in this group, so the row
+            # can show "amd64: passed, arm64: pending" instead of only ever
+            # reflecting one architecture's state.
+            per_arch_runs = {}
+            for arch in item["architectures"]:
+                existing = (
+                    session.query(TestRun)
+                    .filter_by(
+                        snap_name=snap_name,
+                        architecture=arch,
+                        version=item["version"],
+                        promoted=False,
+                        user_id=user_id,
+                    )
+                    .order_by(TestRun.started_at.desc())
+                    .first()
                 )
-                .order_by(TestRun.started_at.desc())
-                .first()
-            )
-            existing_run = (
-                {
-                    "id": existing.id,
-                    "status": existing.status,
-                    "gh_run_id": existing.gh_run_id,
-                    "pr_number": existing.pr_number,
-                    "pr_url": existing.pr_url,
-                    "repo": existing.repo or uc.testing_repo,
-                    "has_log": bool(existing.log_output),
-                    "review_decision": existing.review_decision,
-                    "review_confidence": existing.review_confidence,
-                }
-                if existing
-                else None
-            )
+                if existing:
+                    per_arch_runs[arch] = {
+                        "id": existing.id,
+                        "status": existing.status,
+                        "gh_run_id": existing.gh_run_id,
+                        "pr_number": existing.pr_number,
+                        "pr_url": existing.pr_url,
+                        "repo": existing.repo or uc.testing_repo,
+                        "has_log": bool(existing.log_output),
+                        "review_decision": existing.review_decision,
+                        "review_confidence": existing.review_confidence,
+                    }
             prepared.append(
                 {
                     "snap": {"name": snap_name},
-                    "architecture": item["architecture"],
+                    "architectures": item["architectures"],
                     "from_channel": item["from_channel"],
                     "version": item["version"],
-                    "revision": item["revision"],
+                    "revisions": item["revisions"],
                     "stable_ver": item["stable_ver"],
                     "can_promote": item["can_promote"],
                     "packaging_repo": item["snap"].packaging_repo,
-                    "existing_run": existing_run,
+                    "existing_runs": per_arch_runs,
                     # Unknown until /testing/api/suite-status responds —
                     # the template renders a "checking…" placeholder for
                     # None and the page's JS fills this in async.
@@ -187,29 +189,25 @@ async def suite_status(request: Request) -> JSONResponse:
 
     with get_session() as session:
         snaps_needing_raw = find_snaps_needing_tests(session, user_id=user_id)
-        items = [
-            {
+        # A YARF suite lives in the packaging repo and doesn't vary by
+        # architecture, so check each snap once — not once per architecture
+        # in its group — deduplicated by name.
+        items_by_name = {
+            item["snap"].name: {
                 "snap_name": item["snap"].name,
-                "architecture": item["architecture"],
                 "packaging_repo": item["snap"].packaging_repo,
             }
             for item in snaps_needing_raw
-        ]
+        }
 
     def _check_all() -> list[dict]:
         results = []
-        for item in items:
+        for item in items_by_name.values():
             has_suite = suite_exists_in_repo(
                 uc.testing_repo, item["snap_name"], uc.github_token,
                 packaging_repo=item["packaging_repo"],
             )
-            results.append(
-                {
-                    "snap_name": item["snap_name"],
-                    "architecture": item["architecture"],
-                    "has_suite": has_suite,
-                }
-            )
+            results.append({"snap_name": item["snap_name"], "has_suite": has_suite})
         return results
 
     results = await asyncio.to_thread(_check_all)
@@ -263,6 +261,46 @@ async def trigger_test(
             status_code=200 if ok else 400,
         )
     return RedirectResponse(url="/testing", status_code=303)
+
+
+@router.post("/testing/trigger-group/{snap_name}")
+async def trigger_test_group(
+    snap_name: str,
+    request: Request,
+    from_channel: str = Form(default="candidate"),
+    version: str = Form(default=""),
+    architecture: list[str] = Form(default=[]),
+    revision: list[str] = Form(default=[]),
+) -> JSONResponse:
+    """Queue one YARF test run per architecture for a "needs testing" row.
+
+    The "Needs Testing" table groups every testable architecture a version
+    covers into one row (see ``orchestrator.find_snaps_needing_tests``), so
+    one "Run Tests" click here queues one run per architecture instead of
+    requiring a separate click per arch. ``architecture``/``revision`` are
+    parallel lists (same order, one hidden input pair per arch — see
+    testing.html) so each run gets its own recorded revision.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+
+    user_id = user["id"]
+    results = []
+    for i, arch in enumerate(architecture):
+        rev_str = revision[i] if i < len(revision) else ""
+        rev: int | None = int(rev_str) if rev_str.isdigit() and int(rev_str) > 0 else None
+        ok, err, db_run_id = trigger_remote_run(
+            snap_name, from_channel, version, rev,
+            architecture=arch,
+            triggered_by="manual",
+            user_id=user_id,
+        )
+        if not ok:
+            logger.error("Failed to trigger test for %s (%s): %s", snap_name, arch, err)
+        results.append({"architecture": arch, "ok": ok, "error": err, "run_id": db_run_id, "status": "pending"})
+
+    return JSONResponse({"ok": all(r["ok"] for r in results), "results": results})
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import ScreenshotComparison, VersionBumpPR
+from snap_dashboard.db.models import ScreenshotComparison, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_owner_repo
 
@@ -57,7 +57,7 @@ async def version_bumps_page(request: Request) -> HTMLResponse:
             .order_by(VersionBumpPR.created_at.desc())
             .all()
         )
-        bump_list = [_serialise_bump(b) for b in bumps]
+        bump_list = [_serialise_bump(session, b) for b in bumps]
 
     # Group by status
     groups: list[dict] = []
@@ -96,15 +96,29 @@ async def version_bump_detail(bump_id: int, request: Request) -> HTMLResponse:
         if not bump:
             return RedirectResponse(url="/version-bumps", status_code=302)
 
-        bump_data = _serialise_bump(bump)
+        bump_data = _serialise_bump(session, bump)
 
-        comp = (
-            session.query(ScreenshotComparison)
-            .filter_by(version_bump_pr_id=bump_id)
-            .order_by(ScreenshotComparison.analyzed_at.desc())
-            .first()
-        )
-        comp_data = _serialise_comp(comp) if comp else None
+        # One comparison per architecture (see agents/screenshot_reviewer.py)
+        # — keep the latest per test_run_id and order to match bump_data's
+        # architecture list so the two line up in the template.
+        run_ids = [a["test_run_id"] for a in bump_data["architectures"] if a["test_run_id"]]
+        latest_by_run: dict[int, ScreenshotComparison] = {}
+        if run_ids:
+            for row in (
+                session.query(ScreenshotComparison)
+                .filter(ScreenshotComparison.test_run_id.in_(run_ids))
+                .order_by(ScreenshotComparison.id.asc())
+                .all()
+            ):
+                latest_by_run[row.test_run_id] = row
+        comparisons = [
+            {
+                "architecture": a["architecture"],
+                **_serialise_comp(latest_by_run[a["test_run_id"]]),
+            }
+            for a in bump_data["architectures"]
+            if a["test_run_id"] in latest_by_run
+        ]
 
     return templates.TemplateResponse(
         request,
@@ -112,7 +126,7 @@ async def version_bump_detail(bump_id: int, request: Request) -> HTMLResponse:
         {
             "current_user": user,
             "bump": bump_data,
-            "comparison": comp_data,
+            "comparisons": comparisons,
             "last_run": None,
         },
     )
@@ -221,27 +235,32 @@ async def re_run_yarf(bump_id: int, request: Request) -> RedirectResponse:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump:
             return RedirectResponse(url="/version-bumps", status_code=302)
+        snap_id = bump.snap_id
         snap_name = bump.snap.name if bump.snap else ""
         new_version = bump.new_version or ""
 
     if snap_name:
-        # Tests run on a registered remote runner, not GitHub Actions — see
-        # snap_dashboard.db.models.Runner.
-        from snap_dashboard.testing.orchestrator import trigger_remote_run
-        ok, err, run_id = trigger_remote_run(
+        # Tests run on registered remote runners, not GitHub Actions — see
+        # snap_dashboard.db.models.Runner. Fans out one run per testable
+        # architecture, same as the automated pipeline (agents/pr_monitor.py)
+        # so a manual re-run still tests/promotes every arch together.
+        from snap_dashboard.testing.orchestrator import queue_yarf_tests_for_bump
+        run_ids, errors = queue_yarf_tests_for_bump(
+            snap_id=snap_id,
             snap_name=snap_name,
-            from_channel="edge",
             version=new_version,
-            revision=None,
-            triggered_by="manual",
             user_id=user["id"],
+            version_bump_pr_id=bump_id,
+            triggered_by="manual",
         )
-        if ok and run_id:
+        if errors:
+            logger.warning("re_run_yarf: partial/full failure for bump %s: %s", bump_id, "; ".join(errors))
+        if run_ids:
             with get_session() as session:
                 bump = session.query(VersionBumpPR).get(bump_id)
                 if bump:
                     bump.status = "yarf_running"
-                    bump.test_run_id = run_id
+                    bump.test_run_id = run_ids[0]
 
     return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
 
@@ -250,9 +269,31 @@ async def re_run_yarf(bump_id: int, request: Request) -> RedirectResponse:
 # Serialisation helpers
 # ---------------------------------------------------------------------------
 
-def _serialise_bump(b: VersionBumpPR) -> dict:
+def _serialise_bump(session, b: VersionBumpPR) -> dict:
+    # One row per architecture (see agents/pr_monitor.py:_trigger_yarf /
+    # orchestrator.queue_yarf_tests_for_bump) so the whole release set —
+    # amd64, arm64, ... — displays and gets acted on together instead of
+    # as disconnected individual runs. Pre-migration bumps with no sibling
+    # rows recorded fall back to the single representative test_run.
+    sibling_runs = (
+        session.query(TestRun).filter_by(version_bump_pr_id=b.id).order_by(TestRun.architecture).all()
+    )
+    if not sibling_runs and b.test_run:
+        sibling_runs = [b.test_run]
+    architectures = [
+        {
+            "architecture": r.architecture or "amd64",
+            "test_run_id": r.id,
+            "status": r.status,
+            "revision": r.revision,
+            "promoted": r.promoted,
+        }
+        for r in sibling_runs
+    ]
+
     return {
         "id": b.id,
+        "snap_id": b.snap_id,
         "snap_name": b.snap.name if b.snap else "",
         "part_name": b.upstream_release.part_name if b.upstream_release else "",
         "old_version": b.old_version or "",
@@ -266,6 +307,7 @@ def _serialise_bump(b: VersionBumpPR) -> dict:
         "agent_reasoning": b.agent_reasoning or "",
         "created_at": b.created_at,
         "merged_at": b.merged_at,
+        "architectures": architectures,
     }
 
 

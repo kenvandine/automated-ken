@@ -106,12 +106,12 @@
     <thead>
       <tr>
         <th>Snap</th>
-        <th>Arch</th>
+        <th>Arches</th>
         <th>Channel</th>
         <th>Version</th>
         <th>Stable</th>
         <th>Suite</th>
-        <th>Active Run</th>
+        <th>Active Runs</th>
         <th>Actions</th>
       </tr>
     </thead>
@@ -121,55 +121,74 @@
         <td class="snap-name-cell">
           <a href="/snap/{{ item.snap.name }}" class="snap-link">{{ item.snap.name }}</a>
         </td>
-        <td class="muted small">{{ item.architecture }}</td>
+        <td class="muted small">
+          {% for arch in item.architectures %}
+          <span class="arch-badge arch-badge--pending">{{ arch }}</span>
+          {% endfor %}
+        </td>
         <td>
           <span class="p-status-label {% if item.can_promote %}p-status-label--caution{% else %}p-status-label{% endif %}">{{ item.from_channel }}</span>
         </td>
         <td class="muted small">{{ item.version or '—' }}</td>
-        <td class="muted small">{{ item.stable_ver or 'none' }}</td>
+        <td class="muted small">
+          {% if item.stable_ver is mapping %}
+          {% for arch, ver in item.stable_ver.items() %}{{ arch }}: {{ ver or 'none' }}{% if not loop.last %}, {% endif %}{% endfor %}
+          {% else %}
+          {{ item.stable_ver or 'none' }}
+          {% endif %}
+        </td>
         <td>
-          <span class="js-suite-cell" data-snap="{{ item.snap.name }}" data-arch="{{ item.architecture }}">
+          <span class="js-suite-cell" data-snap="{{ item.snap.name }}">
             <span class="muted small">checking…</span>
           </span>
         </td>
         <td class="active-run-cell">
-          {% if item.existing_run %}
-          {% set run = item.existing_run %}
-          {% if run.status == 'passed' %}
-          <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
-          {% if run.review_decision == 'reject' %}
-          <span class="muted small" title="AI review flagged this" style="margin-left:4px;">⚠</span>
-          {% endif %}
-          {% elif run.status == 'failed' %}
-          <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative">failed</a>
-          {% if run.has_log %}
-          <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="View runner debug log">log</a>
-          {% endif %}
-          {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
-          <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
-          {% if run.gh_run_id and run.repo and '/' in run.repo %}
-          <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
-          {% endif %}
-          {% elif run.status == 'error' %}
-          <span class="p-status-label p-status-label--negative">error</span>
-          {% else %}
-          <span class="muted small">{{ run.status }}</span>
-          {% endif %}
-          {% else %}
-          <span class="muted small">—</span>
-          {% endif %}
+          {% for arch in item.architectures %}
+          {% set run = item.existing_runs.get(arch) %}
+          <div style="white-space:nowrap;">
+            <span class="muted small">{{ arch }}:</span>
+            {% if run %}
+            {% if run.status == 'passed' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
+            {% if run.review_decision == 'reject' %}
+            <span class="muted small" title="AI review flagged this" style="margin-left:4px;">⚠</span>
+            {% endif %}
+            {% elif run.status == 'failed' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative">failed</a>
+            {% if run.has_log %}
+            <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="View runner debug log">log</a>
+            {% endif %}
+            {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
+            <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
+            {% if run.gh_run_id and run.repo and '/' in run.repo %}
+            <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
+            {% endif %}
+            {% elif run.status == 'error' %}
+            <span class="p-status-label p-status-label--negative">error</span>
+            {% else %}
+            <span class="muted small">{{ run.status }}</span>
+            {% endif %}
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
+          </div>
+          {% endfor %}
         </td>
-        <td class="js-actions-cell" data-snap="{{ item.snap.name }}" data-arch="{{ item.architecture }}">
+        <td class="js-actions-cell" data-snap="{{ item.snap.name }}">
           <!-- The runner runs a generic launch+screenshot smoke test when a
                repo has no suite of its own, so triggering is always
                available — has_suite only affects the informational label
-               in the "Suite" column, not whether this button shows. -->
-          <form method="post" action="/testing/trigger/{{ item.snap.name }}" class="js-trigger-form">
+               in the "Suite" column, not whether this button shows. One
+               submit queues one run per architecture in this group (see
+               /testing/trigger-group). -->
+          <form method="post" action="/testing/trigger-group/{{ item.snap.name }}" class="js-trigger-form">
             <input type="hidden" name="from_channel" value="{{ item.from_channel }}">
-            <input type="hidden" name="architecture" value="{{ item.architecture }}">
             <input type="hidden" name="version" value="{{ item.version }}">
-            <input type="hidden" name="revision" value="{{ item.revision or '' }}">
-            <button type="submit" class="p-button is-small">Run Tests</button>
+            {% for arch in item.architectures %}
+            <input type="hidden" name="architecture" value="{{ arch }}">
+            <input type="hidden" name="revision" value="{{ item.revisions.get(arch) or '' }}">
+            {% endfor %}
+            <button type="submit" class="p-button is-small">Run Tests ({{ item.architectures | join(', ') }})</button>
           </form>
         </td>
       </tr>
@@ -397,12 +416,11 @@
     fetch('/testing/api/suite-status')
       .then(r => r.json())
       .then(data => {
-        const byKey = {};
-        for (const r of data.results) byKey[r.snap_name + '|' + r.architecture] = r.has_suite;
+        const byName = {};
+        for (const r of data.results) byName[r.snap_name] = r.has_suite;
 
         suiteCells.forEach(cell => {
-          const key = cell.dataset.snap + '|' + cell.dataset.arch;
-          const hasSuite = byKey[key];
+          const hasSuite = byName[cell.dataset.snap];
           cell.innerHTML = hasSuite
             ? '<span class="p-status-label p-status-label--positive">yes</span>'
             : '<span class="muted small" title="No suite found — will run a generic launch+screenshot smoke test instead">smoke test</span>';
@@ -418,7 +436,9 @@
 
   // Intercept "Run Tests" submits so we don't reload the whole page (which
   // used to re-scan every snap + hit GitHub's API per row — very slow).
-  // Just update this one row's Active Run cell and (re)start polling.
+  // One submit queues one run per architecture in the group (see
+  // /testing/trigger-group); update each arch's own line in the Active
+  // Runs cell and (re)start polling for all of them.
   document.querySelectorAll('.js-trigger-form').forEach(form => {
     form.addEventListener('submit', evt => {
       evt.preventDefault();
@@ -436,15 +456,17 @@
       })
         .then(r => r.json())
         .then(data => {
-          if (!data.ok) {
-            alert('Failed to trigger test: ' + (data.error || 'unknown error'));
-            button.disabled = false;
-            button.textContent = originalLabel;
-            return;
+          const failed = (data.results || []).filter(r => !r.ok);
+          if (failed.length) {
+            alert('Failed to trigger test for: ' + failed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', '));
           }
           if (cell) {
-            cell.innerHTML = '<span class="p-status-label p-status-label--caution js-run-status" data-run-id="'
-              + data.run_id + '">' + data.status + '</span>';
+            const lines = (data.results || []).map(r => {
+              if (!r.ok) return '<div><span class="muted small">' + r.architecture + ':</span> <span class="p-status-label p-status-label--negative">error</span></div>';
+              return '<div><span class="muted small">' + r.architecture + ':</span> '
+                + '<span class="p-status-label p-status-label--caution js-run-status" data-run-id="' + r.run_id + '">' + r.status + '</span></div>';
+            });
+            if (lines.length) cell.innerHTML = lines.join('');
           }
           button.disabled = false;
           button.textContent = originalLabel;

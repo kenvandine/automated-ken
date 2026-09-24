@@ -1810,6 +1810,36 @@ footer a:hover {
   color: var(--amber);
 }
 
+/* ---- Per-architecture status chips (multi-arch releases) - */
+.arch-badge-row {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.arch-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  text-transform: none;
+}
+
+.arch-badge--ok {
+  background: rgba(var(--green-rgb), 0.12);
+  color: var(--green);
+}
+
+.arch-badge--fail {
+  background: rgba(var(--red-rgb), 0.12);
+  color: var(--red);
+}
+
+.arch-badge--pending {
+  background: rgba(var(--amber-rgb), 0.12);
+  color: var(--amber);
+}
+
 /* ============================================================
    Docs / Help page
    ============================================================ */

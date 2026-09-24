@@ -41,9 +41,15 @@ def _default_branch(owner: str, repo: str, token: str) -> str:
 
 
 def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
-    """Return snaps where candidate or edge version differs from stable, per architecture.
+    """Return snaps where candidate or edge version differs from stable, as a set.
 
-    Returns one entry per snap+channel+architecture combination:
+    Returns one entry per snap+channel+version combination, grouping every
+    testable architecture (:data:`TESTABLE_ARCHITECTURES`) that version
+    covers together — a version bump built for amd64 and arm64 is one row
+    to read and one "Run Tests" click, not two near-identical ones. Other
+    architectures a snap ships are left out entirely; there's no runner for
+    them yet (see :data:`TESTABLE_ARCHITECTURES`).
+
     - candidate entries have ``can_promote=True``  (promotion path to stable)
     - edge entries have ``can_promote=False``       (test-only, no promotion)
 
@@ -52,11 +58,12 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
 
     Each dict contains:
       snap          – Snap ORM object
-      architecture  – e.g. "amd64", "arm64"
+      architectures – testable archs this version covers, e.g. ["amd64", "arm64"]
       from_channel  – "candidate" or "edge"
-      version       – version string in that channel+arch
-      revision      – revision int in that channel+arch (may be None)
-      stable_ver    – current stable version for that arch (may be None)
+      version       – version string
+      revisions     – {architecture: revision or None}
+      stable_ver    – current stable version, if the same across every arch
+                       above; otherwise a {architecture: version or None} dict
       can_promote   – True for candidate, False for edge
     """
     q = session.query(Snap).order_by(Snap.name)
@@ -75,79 +82,91 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
                 "revision": cm.revision,
             }
 
-        # Collect all architectures published across any channel
-        all_archs: set[str] = set()
-        for arch_map in channels.values():
-            all_archs.update(arch_map.keys())
+        for channel_name, can_promote in (("candidate", True), ("edge", False)):
+            # version -> {"architectures": [...], "revisions": {}, "stable_vers": {}}
+            by_version: dict[str, dict] = {}
+            for arch in TESTABLE_ARCHITECTURES:
+                info = (channels.get(channel_name) or {}).get(arch) or {}
+                ver = info.get("version")
+                if not ver:
+                    continue
 
-        for arch in sorted(all_archs):
-            def _get(ch: str, a: str = arch) -> dict:
-                return (channels.get(ch) or {}).get(a) or {}
+                stable_info = (channels.get("stable") or {}).get(arch) or {}
+                stable_ver = stable_info.get("version")
+                stable_rev = stable_info.get("revision")
 
-            stable_info = _get("stable")
-            stable_ver = stable_info.get("version")
-            stable_rev = stable_info.get("revision")
-            candidate_info = _get("candidate")
-            candidate_ver = candidate_info.get("version")
-            candidate_rev = candidate_info.get("revision")
+                if can_promote:
+                    # Include rebuilds: same version but higher revision
+                    # (e.g. a security rebuild).
+                    differs = ver != stable_ver or (
+                        info.get("revision") is not None
+                        and stable_rev is not None
+                        and info["revision"] > stable_rev
+                    )
+                else:
+                    candidate_ver = ((channels.get("candidate") or {}).get(arch) or {}).get("version")
+                    differs = ver != stable_ver and ver != candidate_ver
 
-            # Candidate — promotion path to stable.
-            # Include rebuilds: same version but higher revision (e.g. security rebuild).
-            _candidate_differs = candidate_ver and (
-                candidate_ver != stable_ver
-                or (
-                    candidate_rev is not None
-                    and stable_rev is not None
-                    and candidate_rev > stable_rev
+                if not differs:
+                    continue
+
+                group = by_version.setdefault(
+                    ver, {"architectures": [], "revisions": {}, "stable_vers": {}}
                 )
-            )
-            if _candidate_differs:
+                group["architectures"].append(arch)
+                group["revisions"][arch] = info.get("revision")
+                group["stable_vers"][arch] = stable_ver
+
+            for ver, group in by_version.items():
+                distinct_stable = set(group["stable_vers"].values())
                 results.append(
                     {
                         "snap": snap,
-                        "architecture": arch,
-                        "from_channel": "candidate",
-                        "version": candidate_ver,
-                        "revision": candidate_info.get("revision"),
-                        "stable_ver": stable_ver,
-                        "can_promote": True,
-                    }
-                )
-
-            # Edge — test-only; only when version differs from candidate for this arch
-            edge_info = _get("edge")
-            edge_ver = edge_info.get("version")
-            if edge_ver and edge_ver != stable_ver and edge_ver != candidate_ver:
-                results.append(
-                    {
-                        "snap": snap,
-                        "architecture": arch,
-                        "from_channel": "edge",
-                        "version": edge_ver,
-                        "revision": edge_info.get("revision"),
-                        "stable_ver": stable_ver,
-                        "can_promote": False,
+                        "architectures": group["architectures"],
+                        "from_channel": channel_name,
+                        "version": ver,
+                        "revisions": group["revisions"],
+                        "stable_ver": (
+                            next(iter(distinct_stable))
+                            if len(distinct_stable) == 1
+                            else group["stable_vers"]
+                        ),
+                        "can_promote": can_promote,
                     }
                 )
 
     return results
 
 
+# Architectures we currently have runner hardware for (see
+# automated_ken_runner.arch.detect_arch and Runner.arch). A snap may ship
+# other architectures (armhf, riscv64, ppc64el, ...) but there's no test
+# device for them yet, so dispatch skips those rather than queuing a job
+# that can never be claimed. Extend this tuple, not its call sites, once a
+# runner for another architecture is enrolled.
+TESTABLE_ARCHITECTURES = ("amd64", "arm64")
+
+
 def get_snap_architectures(session, snap_id: int) -> list[str]:
-    """Return the distinct architectures *snap_id* actually ships, sorted.
+    """Return the architectures to queue YARF tests for, in a stable order.
 
     Sourced from :class:`ChannelMap` (mirrors the Store's real per-arch
     channel map — see collector.py), the same data `find_snaps_needing_tests`
-    already keys off of. Falls back to ``["amd64"]`` for a snap with no
-    channel-map data yet (e.g. never published) so callers always get at
-    least one architecture to test.
+    already keys off of, intersected with :data:`TESTABLE_ARCHITECTURES`
+    since that's all we have runners for today. Falls back to ``["amd64"]``
+    for a snap with no channel-map data at all yet (e.g. never published) so
+    callers always get at least one architecture to test; a snap that *does*
+    have channel-map data but ships none of the testable architectures
+    returns an empty list rather than guessing.
     """
     archs = {
         row[0]
         for row in session.query(ChannelMap.architecture).filter_by(snap_id=snap_id).distinct()
         if row[0]
     }
-    return sorted(archs) if archs else ["amd64"]
+    if not archs:
+        return ["amd64"]
+    return [a for a in TESTABLE_ARCHITECTURES if a in archs]
 
 
 def _path_exists_in_repo(repo: str, path: str, token: str) -> bool:
@@ -354,6 +373,63 @@ def trigger_remote_run(
         session.add(run)
         session.flush()
         return True, "", run.id
+
+
+def queue_yarf_tests_for_bump(
+    snap_id: int,
+    snap_name: str,
+    version: str,
+    user_id: int | None,
+    version_bump_pr_id: int,
+    triggered_by: str = "auto",
+) -> tuple[list[int], list[str]]:
+    """Queue one YARF ``TestRun`` per testable architecture for a version bump.
+
+    Every run is tagged with ``version_bump_pr_id`` so its siblings can be
+    found later (waiting for all of them, reviewing/promoting them as a
+    set — see agents/pr_monitor.py, agents/screenshot_reviewer.py,
+    agents/stable_promoter.py). Shared by the automated PR-monitor pipeline
+    and the manual "Re-run YARF" action so both fan out the same way.
+
+    Returns ``(run_ids, errors)`` — ``run_ids`` for whichever architectures
+    were queued successfully (possibly empty), ``errors`` describing any
+    that failed (or, if the snap ships none of :data:`TESTABLE_ARCHITECTURES`,
+    a single explanatory entry).
+    """
+    with get_session() as session:
+        archs = get_snap_architectures(session, snap_id)
+
+    if not archs:
+        return [], [
+            f"{snap_name} does not ship any of the testable architectures "
+            f"({', '.join(TESTABLE_ARCHITECTURES)})"
+        ]
+
+    run_ids: list[int] = []
+    errors: list[str] = []
+    for arch in archs:
+        ok, err, run_id = trigger_remote_run(
+            snap_name=snap_name,
+            from_channel="edge",
+            version=version,
+            revision=None,
+            architecture=arch,
+            triggered_by=triggered_by,
+            user_id=user_id,
+        )
+        if ok and run_id:
+            run_ids.append(run_id)
+        else:
+            errors.append(f"{arch}: {err}")
+
+    if run_ids:
+        with get_session() as session:
+            for run_id in run_ids:
+                run = session.query(TestRun).get(run_id)
+                if run:
+                    run.version_bump_pr_id = version_bump_pr_id
+
+    return run_ids, errors
 
 
 def poll_for_gh_run_id(

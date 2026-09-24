@@ -52,6 +52,17 @@
         {% if b.bot_pr_url %}
         <a href="{{ b.bot_pr_url }}" target="_blank" rel="noopener" class="link-inline small">PR #{{ b.bot_pr_number }} ↗</a>
         {% endif %}
+        {% if b.architectures %}
+        <span class="arch-badge-row">
+          {% for a in b.architectures %}
+          <span class="arch-badge
+            {% if a.status in ('passed', 'promoted') %}arch-badge--ok
+            {% elif a.status in ('failed', 'error') %}arch-badge--fail
+            {% else %}arch-badge--pending{% endif %}
+          " title="{{ a.architecture }}: {{ a.status }}">{{ a.architecture }}</span>
+          {% endfor %}
+        </span>
+        {% endif %}
       </div>
 
       <div class="bump-meta">

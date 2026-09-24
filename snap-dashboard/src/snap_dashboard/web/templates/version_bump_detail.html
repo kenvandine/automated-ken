@@ -73,6 +73,28 @@
   </div>
 </div>
 
+<!-- Architectures — the whole release set, tested/promoted together -->
+{% if bump.architectures %}
+<div class="card">
+  <h3 class="section-label">Architectures</h3>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;">
+    {% for a in bump.architectures %}
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;">
+      <span class="arch-badge
+        {% if a.status in ('passed', 'promoted') %}arch-badge--ok
+        {% elif a.status in ('failed', 'error') %}arch-badge--fail
+        {% else %}arch-badge--pending{% endif %}
+      ">{{ a.architecture }}</span>
+      <span class="text-muted small">{{ a.status | replace('_', ' ') }}</span>
+      {% if a.revision %}<span class="text-muted small">rev {{ a.revision }}</span>{% endif %}
+      {% if a.promoted %}<span class="text-muted small">✓ promoted</span>{% endif %}
+      <a href="/testing/runs/{{ a.test_run_id }}" class="link-inline small">view run ↗</a>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
 <!-- Agent reasoning -->
 {% if bump.agent_reasoning %}
 <div class="card">
@@ -81,13 +103,23 @@
 </div>
 {% endif %}
 
-<!-- Screenshot comparison -->
-{% if comparison %}
+<!-- Screenshot comparisons — one per architecture, reviewed as a set -->
+{% if comparisons %}
+{% for comparison in comparisons %}
 <div class="card">
-  <h3 class="section-label">Screenshot Comparison</h3>
-  <p class="text-muted small" style="margin-bottom:12px;">
-    Analyzed {{ comparison.analyzed_at.strftime('%Y-%m-%d %H:%M UTC') if comparison.analyzed_at else '' }}
-  </p>
+  <div class="section-header-row">
+    <h3 class="section-label">
+      Screenshot Comparison
+      <span class="arch-badge
+        {% if comparison.decision == 'approve' %}arch-badge--ok
+        {% elif comparison.decision == 'reject' %}arch-badge--fail
+        {% else %}arch-badge--pending{% endif %}
+      " style="margin-left:6px;">{{ comparison.architecture }}</span>
+    </h3>
+    <span class="text-muted small">
+      Analyzed {{ comparison.analyzed_at.strftime('%Y-%m-%d %H:%M UTC') if comparison.analyzed_at else '' }}
+    </span>
+  </div>
   <div class="screenshot-compare">
     <div class="screenshot-pane">
       <p class="screenshot-label">Before ({{ bump.old_version }})</p>
@@ -110,6 +142,7 @@
   <p style="margin-top:14px;font-size:13px;color:var(--text-muted);">{{ comparison.reasoning }}</p>
   {% endif %}
 </div>
+{% endfor %}
 {% else %}
 <div class="card">
   <h3 class="section-label">Screenshot Comparison</h3>
