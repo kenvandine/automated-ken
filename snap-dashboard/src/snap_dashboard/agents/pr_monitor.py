@@ -238,25 +238,22 @@ class PRMonitorAgent(BaseAgent):
             logger.warning("pr_monitor: failed to dispatch Copilot ci_fix task for %s PR #%s", owner_repo, pr["bot_pr_number"])
 
     def _trigger_yarf(self, pr: dict, uc) -> bool:
-        """ci_passed → yarf_running by triggering a YARF test run."""
-        if not uc or not uc.github_token:
-            return False
+        """ci_passed → yarf_running by queuing a YARF test run for a remote runner."""
         snap_name = _snap_name_from_id(pr["snap_id"])
         if snap_name:
-            self._report(f"Triggering YARF test for {snap_name} {pr['new_version']}", snap_name)
+            self._report(f"Queuing YARF test for {snap_name} {pr['new_version']}", snap_name)
         if not snap_name:
             return False
-        from snap_dashboard.testing.orchestrator import trigger_workflow
-        ok, err, run_id = trigger_workflow(
+        # Tests run on a registered remote runner (real hardware polling this
+        # dashboard), not GitHub Actions — see snap_dashboard.db.models.Runner.
+        from snap_dashboard.testing.orchestrator import trigger_remote_run
+        ok, err, run_id = trigger_remote_run(
             snap_name=snap_name,
             from_channel="edge",
             version=pr["new_version"],
             revision=None,
             triggered_by="auto",
-            testing_repo=uc.testing_repo,
-            github_token=uc.github_token,
             user_id=pr["user_id"],
-            packaging_repo=pr.get("packaging_repo"),
         )
         if ok and run_id:
             with get_session() as session:

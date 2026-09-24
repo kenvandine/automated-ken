@@ -217,28 +217,24 @@ async def re_run_yarf(bump_id: int, request: Request) -> RedirectResponse:
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
 
-    uc = get_user_config(user["id"])
-
     with get_session() as session:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump:
             return RedirectResponse(url="/version-bumps", status_code=302)
         snap_name = bump.snap.name if bump.snap else ""
         new_version = bump.new_version or ""
-        packaging_repo = bump.packaging_repo
 
-    if snap_name and uc.github_token:
-        from snap_dashboard.testing.orchestrator import trigger_workflow
-        ok, err, run_id = trigger_workflow(
+    if snap_name:
+        # Tests run on a registered remote runner, not GitHub Actions — see
+        # snap_dashboard.db.models.Runner.
+        from snap_dashboard.testing.orchestrator import trigger_remote_run
+        ok, err, run_id = trigger_remote_run(
             snap_name=snap_name,
             from_channel="edge",
             version=new_version,
             revision=None,
             triggered_by="manual",
-            testing_repo=uc.testing_repo,
-            github_token=uc.github_token,
             user_id=user["id"],
-            packaging_repo=packaging_repo,
         )
         if ok and run_id:
             with get_session() as session:

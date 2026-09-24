@@ -11,14 +11,13 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import Snap, TestRun
+from snap_dashboard.db.models import TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.orchestrator import (
     find_snaps_needing_tests,
-    poll_for_gh_run_id,
     suite_exists_in_repo,
     sync_test_runs,
-    trigger_workflow,
+    trigger_remote_run,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,45 +154,25 @@ async def trigger_test(
     version: str = Form(default=""),
     revision: str = Form(default="0"),
 ) -> RedirectResponse:
-    """Dispatch a YARF workflow for *snap_name* and redirect to the testing page."""
+    """Queue a YARF test run for *snap_name* on a remote runner and redirect to the testing page."""
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
 
     user_id = user["id"]
-    uc = get_user_config(user_id)
     rev: int | None = int(revision) if revision.isdigit() and int(revision) > 0 else None
-    triggered_at = datetime.now(timezone.utc)
-
-    # Capture config values for the background task (session-independent)
-    testing_repo = uc.testing_repo
-    github_token = uc.github_token
-    with get_session() as session:
-        snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
-        packaging_repo = snap.packaging_repo if snap else None
 
     def _bg() -> None:
-        ok, err, db_run_id = trigger_workflow(
+        # Tests run on a registered remote runner (real hardware polling this
+        # dashboard), not GitHub Actions — see snap_dashboard.db.models.Runner.
+        ok, err, db_run_id = trigger_remote_run(
             snap_name, from_channel, version, rev,
             architecture=architecture,
             triggered_by="manual",
-            testing_repo=testing_repo,
-            github_token=github_token,
             user_id=user_id,
-            packaging_repo=packaging_repo,
         )
         if not ok:
             logger.error("Failed to trigger test for %s: %s", snap_name, err)
-            return
-        if db_run_id:
-            with get_session() as session:
-                run = session.query(TestRun).get(db_run_id)
-                resolved_repo = (run.repo if run else None) or testing_repo
-            poll_for_gh_run_id(
-                db_run_id, triggered_at,
-                testing_repo=resolved_repo,
-                github_token=github_token,
-            )
 
     background_tasks.add_task(_bg)
     return RedirectResponse(url="/testing", status_code=303)
