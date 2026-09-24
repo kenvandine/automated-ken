@@ -32,8 +32,8 @@ class TestRunAutoPromoterAgent(BaseAgent):
 
     def _run(self) -> str:
         uc = get_user_config(self.user_id) if self.user_id else None
-        if not uc or not getattr(uc, "auto_promote", False):
-            return "auto-promote disabled"
+        if not uc:
+            return "no user config"
 
         with get_session() as session:
             run = session.query(TestRun).get(self.test_run_id)
@@ -52,7 +52,7 @@ class TestRunAutoPromoterAgent(BaseAgent):
             effective_repo = run.repo or uc.testing_repo
 
         if revision is None:
-            _set_run_note(self.test_run_id, "Auto-promote skipped: candidate revision is missing.")
+            _set_run_note(self.test_run_id, "Review skipped: candidate revision is missing.")
             return f"{snap_name}: missing revision"
 
         baseline_assets = get_or_build_stable_baseline_assets(
@@ -69,7 +69,7 @@ class TestRunAutoPromoterAgent(BaseAgent):
         if not pairs:
             _set_run_note(
                 self.test_run_id,
-                "Auto-promote skipped: no stable baseline or comparable screenshots are available yet.",
+                "Review skipped: no stable baseline or comparable screenshots are available yet.",
             )
             return f"{snap_name}: no comparable screenshots"
 
@@ -77,7 +77,7 @@ class TestRunAutoPromoterAgent(BaseAgent):
         if not lemonade:
             _set_run_note(
                 self.test_run_id,
-                "Auto-promote skipped: no vision model is available for screenshot comparison.",
+                "Review skipped: no vision model is available for screenshot comparison.",
             )
             return f"{snap_name}: no vision model"
 
@@ -97,18 +97,34 @@ class TestRunAutoPromoterAgent(BaseAgent):
         if not decisions:
             _set_run_note(
                 self.test_run_id,
-                "Auto-promote skipped: screenshot comparison did not return a usable decision.",
+                "Review skipped: screenshot comparison did not return a usable decision.",
             )
             return f"{snap_name}: comparison unavailable"
 
         decision = _aggregate_decisions(decisions)
         threshold = float(getattr(uc, "auto_promote_confidence", 0.85) or 0.85)
+
+        # The review itself — and its result — always happens and is always
+        # recorded/displayed, whether or not auto-promote is turned on;
+        # only the actual promotion action below is gated on that setting.
+        with get_session() as session:
+            bump = session.query(VersionBumpPR).filter_by(test_run_id=self.test_run_id).first()
+            if bump:
+                bump.agent_decision = decision["decision"]
+                bump.agent_confidence = decision["confidence"]
+                bump.agent_reasoning = decision["reasoning"]
+
         if decision["decision"] != "approve" or decision["confidence"] < threshold:
+            _set_run_note(self.test_run_id, f"Review complete: {decision['reasoning']}")
+            return f"{snap_name}: requires manual review"
+
+        if not getattr(uc, "auto_promote", False):
             _set_run_note(
                 self.test_run_id,
-                f"Auto-promote skipped: {decision['reasoning']}",
+                f"Reviewed and approved (confidence {decision['confidence']:.2f}): "
+                f"{decision['reasoning']} Auto-promote is off — promote manually when ready.",
             )
-            return f"{snap_name}: requires manual review"
+            return f"{snap_name}: reviewed and approved, awaiting manual promotion"
 
         self._report(f"Promoting {snap_name} rev {revision} to stable…", snap_name)
         ok, output = promote_snap(

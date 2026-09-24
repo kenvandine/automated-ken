@@ -422,7 +422,7 @@ def poll_for_gh_run_id(
         if new_status in ("passed", "failed"):
             ingest_run_screenshots(db_run_id, gh_run_id, owner, repo, github_token)
             if new_status == "passed":
-                maybe_submit_auto_promoter(db_run_id)
+                submit_test_run_reviewer(db_run_id)
             logger.info("poll_for_gh_run_id: run %s finished as %s", gh_run_id, new_status)
             return
 
@@ -537,7 +537,7 @@ def sync_test_runs(
     # auto-promotion for them, and (test_run_id, gh_run_id) pairs whose
     # status just went terminal this pass — populated below and acted on
     # once every DB session in this function has been closed.
-    auto_promote_run_ids: set[int] = set()
+    review_run_ids: set[int] = set()
     screenshot_ingest_targets: list[tuple[int, str]] = []
 
     # Read the in-flight runs into plain dicts and close the session before
@@ -611,7 +611,7 @@ def sync_test_runs(
                 if run.gh_run_id:
                     screenshot_ingest_targets.append((run.id, run.gh_run_id))
                 if gh_status == "passed" and not run.promoted:
-                    auto_promote_run_ids.add(run.id)
+                    review_run_ids.add(run.id)
 
         # Create stubs for externally-triggered PRs we have no record for
         q2 = session.query(TestRun)
@@ -652,37 +652,30 @@ def sync_test_runs(
             if new_run.status in ("passed", "failed") and new_run.gh_run_id:
                 screenshot_ingest_targets.append((new_run.id, new_run.gh_run_id))
             if new_run.status == "passed" and not new_run.promoted:
-                auto_promote_run_ids.add(new_run.id)
+                review_run_ids.add(new_run.id)
 
     for run_id, gh_run_id in screenshot_ingest_targets:
         ingest_run_screenshots(run_id, gh_run_id, owner, repo, github_token)
 
-    for run_id in sorted(auto_promote_run_ids):
-        maybe_submit_auto_promoter(run_id)
+    for run_id in sorted(review_run_ids):
+        submit_test_run_reviewer(run_id)
 
 
-def maybe_submit_auto_promoter(test_run_id: int) -> None:
-    """Queue candidate auto-promotion for a passed test run when configured."""
+def submit_test_run_reviewer(test_run_id: int) -> None:
+    """Queue a screenshot review for any passed candidate test run.
+
+    Review (the LLM screenshot comparison + reasoning) always runs and its
+    result is always recorded/displayed — it's genuinely useful output on
+    its own, independent of whether the run's owner wants promotion
+    automated. Only the *promotion* action itself (inside
+    TestRunAutoPromoterAgent) is gated on the auto-promote setting.
+    """
     with get_session() as session:
         run = session.query(TestRun).get(test_run_id)
         if not run or run.promoted or run.status != "passed" or run.from_channel != "candidate":
             return
         user_id = run.user_id
         if user_id is None:
-            return
-
-    from snap_dashboard.auth import get_user_config
-    uc = get_user_config(user_id)
-    if not getattr(uc, "auto_promote", False):
-        # Leave status as "passed" — flipping to "reviewing" here (as this
-        # used to do unconditionally) left runs stuck showing "reviewing"
-        # forever with no agent ever submitted to act on it, since nothing
-        # ever un-flips a run whose owner has auto-promote turned off.
-        return
-
-    with get_session() as session:
-        run = session.query(TestRun).get(test_run_id)
-        if not run or run.promoted or run.status != "passed":
             return
         run.status = "reviewing"
 
