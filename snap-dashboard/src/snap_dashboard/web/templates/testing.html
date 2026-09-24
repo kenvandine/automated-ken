@@ -16,13 +16,19 @@
   </div>
 </div>
 
-{% if not config.testing_repo %}
-<!-- No testing repo configured — show setup prompt -->
+{% if not config.testing_repo and not any_suite_configured and not all_runs %}
+<!-- Genuinely nothing configured yet: no legacy central testing repo, no
+     snap has colocated tests/suite/, and no runs have ever been recorded.
+     (Colocated per-repo test suites are the primary path now — see
+     testing/orchestrator.py:resolve_test_repo — so this is only shown
+     when there's truly nothing to work with yet.) -->
 <div class="card" style="border-left: 3px solid var(--accent);">
-  <h3 class="section-label">Testing Repository Not Configured</h3>
+  <h3 class="section-label">No Test Suites Found</h3>
   <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-    To use YARF testing you need a GitHub repository that contains your test suites
-    and a GitHub Actions workflow.
+    YARF testing looks for a <code>tests/suite/</code> directory (with a GitHub
+    Actions workflow) colocated in each snap's own packaging repo. Add one to a
+    snap's repo to get started, or configure a shared fallback testing
+    repository in Settings.
   </p>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
     <a href="/settings" class="p-button--positive is-small">Configure in Settings</a>
@@ -125,9 +131,9 @@
           {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
           <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
           {% if run.gh_run_id %}
-          <a href="https://github.com/{{ config.testing_repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
+          <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
           {% else %}
-          <a href="https://github.com/{{ config.testing_repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow">↗</a>
+          <a href="https://github.com/{{ run.repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow">↗</a>
           {% endif %}
           {% elif run.status == 'error' %}
           <span class="p-status-label p-status-label--negative">error</span>
@@ -247,9 +253,9 @@
             <span class="muted small">—</span>
             {% endif %}
             {% if run.gh_run_id %}
-            <a href="https://github.com/{{ config.testing_repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open GitHub Actions run" data-gh-run="1">↗</a>
+            <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open GitHub Actions run" data-gh-run="1">↗</a>
             {% elif run.status in ('pending', 'triggered', 'running') %}
-            <a href="https://github.com/{{ config.testing_repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow" data-gh-run="fallback">↗</a>
+            <a href="https://github.com/{{ run.repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow" data-gh-run="fallback">↗</a>
             {% endif %}
           </td>
           <td class="muted small">
@@ -283,7 +289,7 @@
   {% endif %}
 </div>
 
-{% endif %}{# end if config.testing_repo #}
+{% endif %}{# end if not config.testing_repo and not any_suite_configured and not all_runs #}
 
 {% endblock %}
 
@@ -319,7 +325,7 @@
           if (run.gh_run_id) {
             // Upgrade fallback link or insert specific run link
             const existing = cell.querySelector('a[data-gh-run]');
-            const runUrl = 'https://github.com/' + data.testing_repo + '/actions/runs/' + run.gh_run_id;
+            const runUrl = 'https://github.com/' + (run.repo || data.testing_repo) + '/actions/runs/' + run.gh_run_id;
             if (existing && existing.dataset.ghRun === 'fallback') {
               existing.href = runUrl;
               existing.title = 'Open GitHub Actions run';

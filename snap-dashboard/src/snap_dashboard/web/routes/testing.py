@@ -69,6 +69,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "gh_run_id": existing.gh_run_id,
                     "pr_number": existing.pr_number,
                     "pr_url": existing.pr_url,
+                    "repo": existing.repo or uc.testing_repo,
                 }
                 if existing
                 else None
@@ -116,6 +117,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                 "promoted": r.promoted,
                 "promoted_at": r.promoted_at,
                 "error_msg": r.error_msg,
+                "repo": r.repo or uc.testing_repo,
             }
             for r in all_runs
         ]
@@ -135,6 +137,7 @@ async def testing_index(request: Request) -> HTMLResponse:
             "pending_promotion": pending_promotion,
             "last_run": None,
             "current_user": user,
+            "any_suite_configured": any(s["has_suite"] for s in snaps_needing),
         },
     )
 
@@ -260,6 +263,7 @@ async def testing_status(request: Request) -> JSONResponse:
                 "gh_run_id": r.gh_run_id,
                 "pr_number": r.pr_number,
                 "pr_url": r.pr_url,
+                "repo": r.repo or uc.testing_repo,
             }
             for r in runs
         ]
