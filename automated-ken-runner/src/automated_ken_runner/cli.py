@@ -72,7 +72,10 @@ def enroll(server: str, token: str, name: str) -> None:
     )
     path = save_config(cfg)
     click.echo(f"Enrolled as runner #{cfg.runner_id} ({name}). Credentials saved to {path}.")
-    click.echo("Start the service with: systemctl --user enable --now automated-ken-runner")
+    click.echo(
+        "Start the service with: "
+        "systemctl --user enable --now snap.automated-ken-runner.run.service"
+    )
 
 
 @main.command()
