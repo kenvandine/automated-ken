@@ -162,6 +162,14 @@ async def next_job(
     timeout: int = _DEFAULT_NEXT_JOB_TIMEOUT,
     authorization: str | None = Header(default=None),
 ) -> Response:
+    """Long-poll for a queued job, returning 204 if nothing shows up in time.
+
+    On server shutdown, uvicorn's ``timeout_graceful_shutdown`` (see
+    cli.py) forcibly closes whatever connection this loop is holding open
+    rather than waiting out the full ``timeout`` — the runner client just
+    sees a dropped connection and reconnects, same as any other network
+    hiccup, so a `snap stop`/refresh isn't held up by an in-flight poll.
+    """
     result = _auth_or_401(authorization, runner_id)
     if isinstance(result, JSONResponse):
         return result

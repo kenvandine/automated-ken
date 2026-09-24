@@ -49,6 +49,17 @@ def serve(port: int | None, bind: str | None) -> None:
         port=listen_port,
         reload=False,
         log_level="info",
+        # Bound the "Waiting for connections to close" step on SIGTERM/
+        # SIGINT: without this, uvicorn waits indefinitely for every
+        # in-flight request to return on its own — including runner_api's
+        # long-polling GET /api/runners/{id}/next-job (up to ~25s each,
+        # see web/routes/runner_api.py), which can otherwise make a snap
+        # refresh/stop feel like it hangs. After this many seconds any
+        # still-open connections are forcibly closed so shutdown always
+        # completes quickly. See web/app.py's on_shutdown for the other
+        # half of this (bypassing Python's normal atexit thread-join,
+        # which can otherwise block on a long-running background agent).
+        timeout_graceful_shutdown=10,
     )
 
 

@@ -114,10 +114,27 @@ async def on_startup() -> None:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    """Stop the embedded Lemonade subprocess cleanly."""
+    """Stop the embedded Lemonade subprocess, then hard-exit the process.
+
+    This runs after uvicorn has already drained/force-closed all HTTP
+    connections (see cli.py's ``timeout_graceful_shutdown``) — but a plain
+    ``return`` here would let Python proceed to its *normal* interpreter
+    shutdown, and ``concurrent.futures.ThreadPoolExecutor`` registers an
+    ``atexit`` hook that blocks process exit until every worker thread it
+    ever created finishes — including one still grinding through a
+    long-running background agent (e.g. the fleet-normalization campaign
+    working through dozens of repos), for however long that takes. Calling
+    ``os._exit()`` once our own cleanup is done skips that entirely and
+    exits immediately, the same way a SIGKILL eventually would but without
+    making `snap stop`/refresh wait for it.
+    """
     from snap_dashboard.lemonade.embedded import get_embedded_manager
 
     get_embedded_manager().stop()
+
+    import os
+
+    os._exit(0)
 
 
 # Import and include routers after app is created to avoid circular imports

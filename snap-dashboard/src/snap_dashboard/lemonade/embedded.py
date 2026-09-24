@@ -322,12 +322,19 @@ class EmbeddedLemonadeManager:
                     )
         except httpx.HTTPError as exc:
             logger.info("Embedded Lemonade: background model pull for %s did not complete: %s", model, exc)
+
     def stop(self) -> None:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:
                 self._proc.terminate()
                 try:
-                    self._proc.wait(timeout=10)
+                    # Kept short — this runs synchronously during app
+                    # shutdown (web/app.py's on_shutdown), stacking on top
+                    # of uvicorn's own connection-drain wait. lemond
+                    # normally exits within a second or two of SIGTERM; if
+                    # it hasn't after 5s, just kill it rather than let a
+                    # slow/stuck subprocess make a snap refresh feel stuck.
+                    self._proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
                     self._proc.kill()
             self._proc = None
