@@ -157,17 +157,24 @@ async def testing_index(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/testing/trigger/{snap_name}")
+@router.post("/testing/trigger/{snap_name}", response_model=None)
 async def trigger_test(
     snap_name: str,
     request: Request,
-    background_tasks: BackgroundTasks,
     from_channel: str = Form(default="candidate"),
     architecture: str = Form(default="amd64"),
     version: str = Form(default=""),
     revision: str = Form(default="0"),
-) -> RedirectResponse:
-    """Queue a YARF test run for *snap_name* on a remote runner and redirect to the testing page."""
+) -> JSONResponse | RedirectResponse:
+    """Queue a YARF test run for *snap_name* on a remote runner.
+
+    ``trigger_remote_run()`` is a pure DB insert (no network calls — see its
+    docstring), so it's run synchronously here rather than as a background
+    task. Returns JSON so the testing page's JS can update just this one
+    row instead of reloading the whole page (which used to re-scan every
+    snap and hit GitHub's API for each one — very slow). Falls back to a
+    redirect for non-JS/no-Accept-header callers.
+    """
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -175,19 +182,22 @@ async def trigger_test(
     user_id = user["id"]
     rev: int | None = int(revision) if revision.isdigit() and int(revision) > 0 else None
 
-    def _bg() -> None:
-        # Tests run on a registered remote runner (real hardware polling this
-        # dashboard), not GitHub Actions — see snap_dashboard.db.models.Runner.
-        ok, err, db_run_id = trigger_remote_run(
-            snap_name, from_channel, version, rev,
-            architecture=architecture,
-            triggered_by="manual",
-            user_id=user_id,
-        )
-        if not ok:
-            logger.error("Failed to trigger test for %s: %s", snap_name, err)
+    # Tests run on a registered remote runner (real hardware polling this
+    # dashboard), not GitHub Actions — see snap_dashboard.db.models.Runner.
+    ok, err, db_run_id = trigger_remote_run(
+        snap_name, from_channel, version, rev,
+        architecture=architecture,
+        triggered_by="manual",
+        user_id=user_id,
+    )
+    if not ok:
+        logger.error("Failed to trigger test for %s: %s", snap_name, err)
 
-    background_tasks.add_task(_bg)
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse(
+            {"ok": ok, "error": err, "run_id": db_run_id, "status": "pending"},
+            status_code=200 if ok else 400,
+        )
     return RedirectResponse(url="/testing", status_code=303)
 
 
