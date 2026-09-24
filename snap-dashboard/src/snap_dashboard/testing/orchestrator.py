@@ -536,33 +536,64 @@ def sync_test_runs(
         if snap and version:
             pr_map[(snap, version)] = pr
 
-    with get_session() as session:
-        # Track TestRuns whose status just flipped to "passed" so we can
-        # queue auto-promotion for them once the session below is closed.
-        auto_promote_run_ids: set[int] = set()
-        # (test_run_id, gh_run_id) pairs whose status just went terminal this pass.
-        screenshot_ingest_targets: list[tuple[int, str]] = []
+    # Track TestRuns whose status just flipped to "passed" so we can queue
+    # auto-promotion for them, and (test_run_id, gh_run_id) pairs whose
+    # status just went terminal this pass — populated below and acted on
+    # once every DB session in this function has been closed.
+    auto_promote_run_ids: set[int] = set()
+    screenshot_ingest_targets: list[tuple[int, str]] = []
 
-        # Update runs that are still in-flight
+    # Read the in-flight runs into plain dicts and close the session before
+    # making any GitHub API calls below. _check_gh_run_status() can block
+    # for up to its httpx timeout per in-flight run; doing that inside an
+    # open write transaction would hold SQLite's single writer lock for the
+    # whole loop and starve every other writer (background agents, the web
+    # UI) with "database is locked" until it finally finished or failed.
+    with get_session() as session:
         q = session.query(TestRun).filter(
             TestRun.status.in_(["pending", "triggered", "running"])
         )
         if user_id is not None:
             q = q.filter_by(user_id=user_id)
-        in_flight = q.all()
+        in_flight = [
+            {
+                "id": r.id,
+                "snap_name": r.snap_name,
+                "version": r.version,
+                "status": r.status,
+                "gh_run_id": r.gh_run_id,
+                "promoted": r.promoted,
+            }
+            for r in q.all()
+        ]
 
-        for run in in_flight:
-            # If we have a GH run ID but no PR yet, check GH Actions API directly
-            pr = pr_map.get((run.snap_name, run.version or ""))
-            if not pr and run.gh_run_id:
-                gha_status = _check_gh_run_status(run.gh_run_id, owner, repo, github_token)
-                if gha_status and gha_status != run.status:
-                    run.status = gha_status
-                    if gha_status in ("passed", "failed"):
-                        run.finished_at = datetime.now(timezone.utc)
-                        screenshot_ingest_targets.append((run.id, run.gh_run_id))
+    # Now do all the (potentially slow) GitHub API lookups with no DB
+    # session/transaction open.
+    gh_status_by_run_id: dict[int, str] = {}
+    for run in in_flight:
+        pr = pr_map.get((run["snap_name"], run["version"] or ""))
+        if not pr and run["gh_run_id"]:
+            gha_status = _check_gh_run_status(run["gh_run_id"], owner, repo, github_token)
+            if gha_status and gha_status != run["status"]:
+                gh_status_by_run_id[run["id"]] = gha_status
+
+    with get_session() as session:
+        for run_info in in_flight:
+            pr = pr_map.get((run_info["snap_name"], run_info["version"] or ""))
+            if not pr and run_info["gh_run_id"]:
+                gha_status = gh_status_by_run_id.get(run_info["id"])
+                if gha_status:
+                    run = session.query(TestRun).get(run_info["id"])
+                    if run:
+                        run.status = gha_status
+                        if gha_status in ("passed", "failed"):
+                            run.finished_at = datetime.now(timezone.utc)
+                            screenshot_ingest_targets.append((run.id, run.gh_run_id))
                 continue
             if not pr:
+                continue
+            run = session.query(TestRun).get(run_info["id"])
+            if not run:
                 continue
             meta = parse_pr_metadata(pr.get("body", ""))
             gh_status = meta.get("status", "")
