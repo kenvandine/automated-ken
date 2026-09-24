@@ -29,6 +29,12 @@ _DEFAULT_MODEL = "user.Qwen3.5-35B-A3B-Q4_K_M"
 # multi-gigabyte on-demand download before the first token — give both
 # plenty of headroom rather than failing a cold first request.
 _TIMEOUT = 600
+# Cap on the confidence returned by vision_inspect() (single-screenshot,
+# no-baseline judging) — "a window opened" is a much weaker signal than an
+# actual before/after comparison, so this is kept well below any sane
+# auto_promote_confidence threshold (default 0.85) even for a clean-looking
+# window, ensuring these runs still land in "needs manual review" territory.
+_MAX_SINGLE_IMAGE_CONFIDENCE = 0.35
 
 
 class LemonadeClient:
@@ -223,6 +229,98 @@ class LemonadeClient:
             return _parse_vision_response(content)
         except Exception as exc:
             logger.warning("lemonade vision_compare failed: %s", exc)
+            return None
+
+    # ------------------------------------------------------------------
+    # Vision: inspect a single screenshot (no baseline available)
+    # ------------------------------------------------------------------
+
+    def vision_inspect(
+        self,
+        image_bytes: bytes,
+        snap_name: str,
+        version: str,
+    ) -> dict | None:
+        """Judge a single screenshot with no baseline to compare against.
+
+        Used for the very first tested version of a snap (or any run where
+        no prior stable screenshot exists yet) — there's nothing to diff
+        against, but the model can still tell whether a real application
+        window launched (vs. a blank/black window, crash dialog, or error
+        message). Confidence is deliberately capped low (see
+        ``_MAX_SINGLE_IMAGE_CONFIDENCE``) since "a window appeared" is a much
+        weaker signal than an actual before/after comparison — this keeps
+        such runs below the auto-promote confidence threshold by default,
+        while still surfacing a real score instead of nothing at all.
+
+        Returns the same ``{"decision", "confidence", "reasoning"}`` shape
+        as ``vision_compare``, or None on failure.
+        """
+        b64_image = base64.b64encode(image_bytes).decode()
+
+        prompt = (
+            f"You are reviewing a screenshot taken while testing the snap package "
+            f"'{snap_name}' version {version}. There is no previous screenshot to "
+            "compare against — this is the first time this snap has been tested, "
+            "so you must judge this single image on its own.\n\n"
+            "Look at the screenshot and judge whether it shows a real, usable "
+            "application window (the app appears to have launched successfully), "
+            "as opposed to: a blank/black screen, a crash dialog, a generic error "
+            "message, or a desktop with no application window visible at all.\n\n"
+            "Respond with ONLY a JSON object in this exact format:\n"
+            '{"decision": "approve|reject|needs_review", '
+            '"confidence": 0.0, '
+            '"reasoning": "one paragraph explanation"}\n\n'
+            "Since there is no baseline to compare against, keep confidence low "
+            "(0.1-0.35) even when the window looks fine — this only confirms the "
+            "app opened, not that it behaves correctly."
+        )
+
+        messages: list[dict[str, Any]] = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/png;base64,{b64_image}"},
+                    },
+                ],
+            }
+        ]
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "temperature": 0.1,
+        }
+        try:
+            with httpx.Client(timeout=_TIMEOUT) as client:
+                resp = client.post(
+                    f"{self.base_url}/v1/chat/completions",
+                    json=payload,
+                    headers=self._headers(),
+                )
+            if resp.status_code != 200:
+                logger.warning(
+                    "lemonade vision error %s: %s", resp.status_code, resp.text[:200]
+                )
+                return None
+            resp_json = resp.json()
+            content = resp_json["choices"][0]["message"]["content"]
+            self._record_usage(
+                "vision_inspect",
+                resp_json,
+                prompt_text=prompt,
+                reply_text=content,
+                extra_input_tokens=ESTIMATED_TOKENS_PER_IMAGE,
+            )
+            result = _parse_vision_response(content)
+            if result is not None:
+                result["confidence"] = min(result["confidence"], _MAX_SINGLE_IMAGE_CONFIDENCE)
+            return result
+        except Exception as exc:
+            logger.warning("lemonade vision_inspect failed: %s", exc)
             return None
 
     # ------------------------------------------------------------------
