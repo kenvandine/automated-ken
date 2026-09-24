@@ -50,7 +50,11 @@
     <div class="attention-card" style="border-left-color: #4ade80; min-width: 240px;">
       <div class="attention-card-header">
         <span class="attention-tag" style="background: rgba(74,222,128,0.15); color:#4ade80; border: 1px solid rgba(74,222,128,0.3);">Passed — ready to promote</span>
+        {% if run.pr_number %}
         <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="attention-name">{{ run.snap_name }}</a>
+        {% else %}
+        <span class="attention-name">{{ run.snap_name }}</span>
+        {% endif %}
         <span class="muted small" style="margin-left:6px;">{{ run.architecture or 'amd64' }}</span>
       </div>
       <div class="attention-versions">
@@ -125,9 +129,17 @@
           {% if item.existing_run %}
           {% set run = item.existing_run %}
           {% if run.status == 'passed' %}
+          {% if run.pr_number %}
           <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="p-status-label p-status-label--positive">passed</a>
+          {% else %}
+          <span class="p-status-label p-status-label--positive">passed</span>
+          {% endif %}
           {% elif run.status == 'failed' %}
+          {% if run.pr_number %}
           <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="p-status-label p-status-label--negative">failed</a>
+          {% else %}
+          <span class="p-status-label p-status-label--negative">failed</span>
+          {% endif %}
           {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
           <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
           {% if run.gh_run_id %}
