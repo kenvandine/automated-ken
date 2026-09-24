@@ -1,15 +1,73 @@
-"""Snap promotion via ``snapcraft release``."""
+"""Snap promotion via the authenticated Snap Store publisher API.
+
+This dashboard runs as a strictly-confined snap, which means the
+``snapcraft`` CLI binary is never on ``PATH`` -- even on hosts that
+happen to have it installed as their own snap, strict confinement
+prevents this app from invoking it. Shelling out is also the wrong
+model in general: it would either fail outright or fall back to an
+interactive login flow, when we already hold a valid exported Store
+credential (``UserConfig.snapcraft_macaroon``, produced by
+``snapcraft export-login``).
+
+Instead we talk to the Store's authenticated publisher API directly,
+in-process, via ``craft-store`` -- the same library ``snapcraft``
+itself uses. The endpoint/auth wiring here (``UbuntuOneStoreClient``,
+the ``dashboard.snapcraft.io`` legacy ``/dev/api/snap-release/``
+endpoint, and the ``SNAPCRAFT_STORE_CREDENTIALS`` environment
+variable) mirrors exactly what ``snapcraft release`` does internally
+(see ``snapcraft/store/client.py``'s ``StoreClientCLI.release``), so
+existing exported macaroons work unchanged.
+"""
 
 from __future__ import annotations
 
 import logging
 import os
-import shutil
-import subprocess
+import threading
+
+import craft_store
+from craft_store import endpoints as store_endpoints
+from craft_store import errors as store_errors
 
 from snap_dashboard.github.utils import parse_owner_repo
 
 logger = logging.getLogger(__name__)
+
+_STORE_URL = "https://dashboard.snapcraft.io"
+_STORE_UPLOAD_URL = "https://storage.snapcraftcontent.com"
+_UBUNTU_ONE_SSO_URL = "https://login.ubuntu.com"
+_ENVIRONMENT_STORE_CREDENTIALS = "SNAPCRAFT_STORE_CREDENTIALS"
+_USER_AGENT = "automated-ken-snap-dashboard/1.0"
+
+# ``craft_store.Auth`` reads the credential out of the environment variable
+# once, synchronously, inside the client constructor. Promotions can run
+# concurrently for different snaps/users in the agent runner's thread pool,
+# so this lock serializes the "set env var -> construct client -> clear env
+# var" critical section to avoid one promotion's credential leaking into
+# another's request.
+_ENV_LOCK = threading.Lock()
+
+
+def _build_store_client(store_credentials: str) -> craft_store.UbuntuOneStoreClient:
+    """Construct a Store client authenticated with *store_credentials*."""
+    previous = os.environ.get(_ENVIRONMENT_STORE_CREDENTIALS)
+    os.environ[_ENVIRONMENT_STORE_CREDENTIALS] = store_credentials
+    try:
+        return craft_store.UbuntuOneStoreClient(
+            base_url=_STORE_URL,
+            storage_base_url=_STORE_UPLOAD_URL,
+            auth_url=_UBUNTU_ONE_SSO_URL,
+            application_name="automated-ken",
+            user_agent=_USER_AGENT,
+            endpoints=store_endpoints.U1_SNAP_STORE,
+            environment_auth=_ENVIRONMENT_STORE_CREDENTIALS,
+            ephemeral=True,
+        )
+    finally:
+        if previous is None:
+            os.environ.pop(_ENVIRONMENT_STORE_CREDENTIALS, None)
+        else:
+            os.environ[_ENVIRONMENT_STORE_CREDENTIALS] = previous
 
 
 def promote_snap(
@@ -18,46 +76,48 @@ def promote_snap(
     to_channel: str = "stable",
     store_credentials: str = "",
 ) -> tuple[bool, str]:
-    """Run ``snapcraft release`` to promote *revision* to *to_channel*.
+    """Release *revision* of *snap_name* to *to_channel* via the Store API.
 
     Args:
-        store_credentials: An optional ``snapcraft export-login`` credential
-            (``UserConfig.snapcraft_macaroon``). When set, it's passed to the
-            subprocess as the ``SNAPCRAFT_STORE_CREDENTIALS`` env var so
-            promotion doesn't depend on the dashboard host already having an
-            ambient ``snapcraft login`` session.
+        store_credentials: A ``snapcraft export-login`` credential
+            (``UserConfig.snapcraft_macaroon``). Required -- there's no
+            ambient/CLI login to fall back to.
 
     Returns:
-        A ``(success, output_or_error_message)`` tuple.  On success the combined
-        stdout+stderr from snapcraft is returned as the message.
+        A ``(success, output_or_error_message)`` tuple.
     """
-    snapcraft = shutil.which("snapcraft")
-    if not snapcraft:
-        return False, "snapcraft not found in PATH"
-
-    env = os.environ.copy()
-    if store_credentials:
-        env["SNAPCRAFT_STORE_CREDENTIALS"] = store_credentials
-
-    cmd = [snapcraft, "release", snap_name, str(revision), to_channel]
-    logger.info("Running: %s", " ".join(cmd))
-    try:
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=120,
-            env=env,
+    if not store_credentials:
+        return (
+            False,
+            "No Snap Store credentials configured. Add one on the Settings page.",
         )
-        output = result.stdout + result.stderr
-        if result.returncode == 0:
-            return True, output
-        else:
-            return False, output
-    except subprocess.TimeoutExpired:
-        return False, "snapcraft release timed out after 120s"
-    except Exception as exc:
+
+    try:
+        with _ENV_LOCK:
+            client = _build_store_client(store_credentials)
+            response = client.request(
+                "POST",
+                f"{_STORE_URL}/dev/api/snap-release/",
+                json={
+                    "name": snap_name,
+                    "revision": str(revision),
+                    "channels": [to_channel],
+                },
+            )
+    except store_errors.CraftStoreError as exc:
+        logger.warning("Store release failed for %s: %s", snap_name, exc)
         return False, str(exc)
+    except Exception as exc:
+        logger.warning("Store release failed for %s: %s", snap_name, exc)
+        return False, str(exc)
+
+    try:
+        data = response.json()
+    except ValueError:
+        return True, response.text
+
+    channels = data.get("channel_map_tree", {}) or data.get("opened_channels", data)
+    return True, f"Released {snap_name} revision {revision} to {to_channel}: {channels}"
 
 
 def close_test_pr(
