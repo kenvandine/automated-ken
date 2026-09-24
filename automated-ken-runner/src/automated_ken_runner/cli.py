@@ -18,7 +18,11 @@ Commands:
         Check (and auto-install where possible, e.g. YARF via `snap
         install`) the local prerequisites this runner needs: snapd,
         YARF, and the desktop idle-detection tooling (loginctl/gdbus).
-        The run loop also performs this same check automatically at
+        Also configures the desktop session for unattended GUI testing —
+        installs/enables the screenshot-capture extension, enables
+        autologin, disables screen lock/blanking — and reboots if any of
+        that changed (see desktop_setup.py). The run loop also performs
+        the dependency check (not the desktop setup) automatically at
         startup, so already-enrolled runners self-heal on their next
         service restart without needing this run by hand.
 """
@@ -26,6 +30,7 @@ Commands:
 from __future__ import annotations
 
 import logging
+import subprocess
 import sys
 import time
 
@@ -34,6 +39,7 @@ import httpx
 
 from automated_ken_runner.config import RunnerConfig, clear_config, load_config, save_config
 from automated_ken_runner.deps import ensure_dependencies
+from automated_ken_runner.desktop_setup import ensure_desktop_ready
 from automated_ken_runner.idle import get_idle_state, is_safe_to_claim_job
 from automated_ken_runner.runner import RunnerLoop
 
@@ -113,12 +119,38 @@ def run() -> None:
 
 
 @main.command(name="prepare-machine")
-def prepare_machine() -> None:
-    """Check (and auto-install where possible) prerequisites this runner needs."""
+@click.option(
+    "--reboot/--no-reboot", default=True,
+    help="Reboot automatically if a desktop-setup change needs a fresh session to take "
+    "effect (default: on — with autologin enabled the machine comes back up ready with "
+    "nobody at the keyboard).",
+)
+def prepare_machine(reboot: bool) -> None:
+    """Check (and auto-install where possible) prerequisites this runner needs.
+
+    Also configures the desktop session itself for unattended GUI
+    testing: installs/enables the screenshot-capture extension, turns on
+    autologin, and disables screen lock/blanking (see
+    ``desktop_setup.py``). Safe to re-run any time — every step is a
+    no-op on an already-configured machine.
+    """
     ok = ensure_dependencies(echo=click.echo, auto_install=True)
+    click.echo("\nDesktop session setup:")
+    needs_reboot = ensure_desktop_ready(echo=click.echo)
     if not ok:
         sys.exit(1)
-    click.echo("\nAll prerequisites found.")
+    if not needs_reboot:
+        click.echo("\nAll prerequisites found, desktop already configured.")
+        return
+    if not reboot:
+        click.echo(
+            "\nDesktop setup changed — a reboot is needed before the screenshot extension "
+            "and/or autologin take effect. Run 'sudo reboot' when ready, or re-run "
+            "'prepare-machine' without --no-reboot."
+        )
+        return
+    click.echo("\nDesktop setup changed — rebooting now so it takes effect...")
+    subprocess.run(["sudo", "reboot"], check=False)
 
 
 if __name__ == "__main__":

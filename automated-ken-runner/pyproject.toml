@@ -20,3 +20,6 @@ automated-ken-runner = "automated_ken_runner.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+automated_ken_runner = ["resources/**/*"]

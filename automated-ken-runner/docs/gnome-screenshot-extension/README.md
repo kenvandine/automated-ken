@@ -4,6 +4,12 @@ Exposes a trusted D-Bus method (`io.github.kenvandine.AutomatedKenScreenshot
 .Screenshot`) that the runner calls (see `screenshot_capture.py`) to take a
 full-screen screenshot of the real, autologin desktop session.
 
+The canonical, shipped copy of this extension's source lives in
+`src/automated_ken_runner/resources/gnome-screenshot-extension/` (it's
+packaged inside the runner snap so `prepare-machine` can install it with no
+extra deploy step — see `desktop_setup.py`). This directory only holds
+docs; edit the source there, not here.
+
 ## Why this exists
 
 GNOME Shell's own `org.gnome.Shell.Screenshot` D-Bus API refuses calls from
@@ -16,6 +22,11 @@ D-Bus name for the runner to call non-interactively.
 
 ## Install
 
+Handled automatically by `automated-ken-runner prepare-machine` (see
+`desktop_setup.py`) — installs the extension, enables autologin, disables
+screen lock/blanking, and reboots the machine if anything changed so
+gnome-shell picks it all up fresh. Manual install, if ever needed:
+
 ```
 mkdir -p ~/.local/share/gnome-shell/extensions
 cp -r automated-ken-screenshot@kenvandine.github.io \
@@ -24,7 +35,7 @@ gsettings set org.gnome.shell enabled-extensions \
     "$(gsettings get org.gnome.shell enabled-extensions | sed "s/\]$/, 'automated-ken-screenshot@kenvandine.github.io']/;s/^\[, /[/")"
 ```
 
-## Known issue: not yet confirmed to hot-load
+## Known issue: needs a fresh gnome-shell session to hot-load
 
 On the Ubuntu 26.04 / GNOME Shell 50.1 test host, neither `gnome-extensions
 install/enable` nor a direct `gsettings set org.gnome.shell
@@ -35,9 +46,10 @@ returned none of the manually-installed files, and `org.gnome.Shell.Eval`
 build, so this couldn't be root-caused further without disrupting the live
 session. `automated_ken_runner.screenshot_capture` raises a clear
 `ScreenshotCaptureError` if the extension's D-Bus name isn't present, rather
-than failing silently — that error is a strong signal this needs a session
-logout/login (or an equivalent gnome-shell restart) to pick up a
-newly-installed extension for the first time. Once installed and confirmed
-loaded (e.g. `gnome-extensions list` shows it as enabled after a restart),
-no further re-installation should be needed for subsequent runner-service
-restarts.
+than failing silently. This is why `prepare-machine` reboots the machine
+(with autologin enabled, it comes back up ready — no manual login needed)
+right after installing the extension for the first time, instead of relying
+on a hot-load that doesn't work on this build. Once installed and confirmed
+loaded (`gnome-extensions list` shows it enabled after the reboot), no
+further reinstall/reboot happens on subsequent `prepare-machine` runs.
+
