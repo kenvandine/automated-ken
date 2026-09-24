@@ -6,6 +6,7 @@ import functools
 import logging
 import os
 import random
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -22,8 +23,20 @@ logger = logging.getLogger(__name__)
 _F = TypeVar("_F", bound=Callable)
 
 # How many times to retry a whole db-touching operation that fails with
-# "database is locked" before giving up.
+# "database is locked" before giving up. This remains as a defense-in-depth
+# backstop; the primary fix is _db_lock below.
 _MAX_LOCK_RETRIES = 5
+
+# sqlite only allows one writer at a time; even with WAL + busy_timeout,
+# concurrent commits from different threads in this process were racing
+# and losing (see the retry_on_db_lock() callers). Since snap-dashboard
+# runs as a single process (one `serve` app, no multi-worker uvicorn), we
+# can fully avoid that race by serializing all get_session() usage
+# in-process with a lock, rather than reactively retrying after a
+# collision at the sqlite level. This also closes a check-then-insert
+# TOCTOU race between concurrent sessions (e.g. two release_scanner
+# workers both seeing "not found" before either inserts).
+_db_lock = threading.RLock()
 
 
 def get_db_path() -> Path:
@@ -140,16 +153,23 @@ def _migrate() -> None:
 
 @contextmanager
 def get_session() -> Generator[Session, None, None]:
-    """Context manager that yields a SQLAlchemy session."""
-    session = SessionLocal()
-    try:
-        yield session
-        session.commit()
-    except Exception:
-        session.rollback()
-        raise
-    finally:
-        session.close()
+    """Context manager that yields a SQLAlchemy session.
+
+    Serializes on `_db_lock` for the lifetime of the session — see the
+    comment on `_db_lock` for why: this process is single-threaded from
+    sqlite's point of view even though Python has many threads, so we
+    make that explicit instead of racing at the sqlite layer.
+    """
+    with _db_lock:
+        session = SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            session.close()
 
 
 def _is_db_locked(exc: OperationalError) -> bool:
