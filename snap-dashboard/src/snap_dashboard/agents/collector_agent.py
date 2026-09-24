@@ -14,7 +14,6 @@ import logging
 
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.session import get_session
 
 logger = logging.getLogger(__name__)
 
@@ -36,8 +35,7 @@ class CollectorAgent(BaseAgent):
 
         self._report(f"Refreshing channel maps and issues for publisher {uc.publisher}…")
         config = uc.to_config()
-        with get_session() as session:
-            summary = run_collection(session, config, user_id=self.user_id)
+        summary = run_collection(config, user_id=self.user_id)
 
         return (
             f"status={summary['status']} "

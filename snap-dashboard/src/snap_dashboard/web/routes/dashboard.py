@@ -165,8 +165,7 @@ def _run_collection_sync(user_id: int):
     from snap_dashboard.collector import run_collection
     uc = get_user_config(user_id)
     config = uc.to_config()
-    with get_session() as session:
-        return run_collection(session, config, user_id=user_id)
+    return run_collection(config, user_id=user_id)
 
 
 @router.post("/refresh")

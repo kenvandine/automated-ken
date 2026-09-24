@@ -22,8 +22,7 @@ def collect() -> None:
     from snap_dashboard.collector import run_collection
 
     config = get_config()
-    with get_session() as session:
-        summary = run_collection(session, config)
+    summary = run_collection(config)
 
     click.echo(f"Status:         {summary['status']}")
     click.echo(f"Snaps updated:  {summary['snaps_updated']}")

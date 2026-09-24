@@ -293,8 +293,7 @@ async def snap_refresh(
         from snap_dashboard.collector import collect_one
         uc = get_user_config(user_id)
         config = uc.to_config()
-        with get_session() as session:
-            collect_one(session, config, name, user_id=user_id)
+        collect_one(config, name, user_id=user_id)
 
     background_tasks.add_task(_bg)
     return RedirectResponse(url=f"/snap/{name}", status_code=303)

@@ -109,8 +109,7 @@ async def onboarding_complete(
         from snap_dashboard.collector import run_collection
         uc = get_user_config(user_id)
         config = uc.to_config()
-        with get_session() as session:
-            run_collection(session, config, user_id=user_id)
+        run_collection(config, user_id=user_id)
 
     background_tasks.add_task(_first_collect)
 
