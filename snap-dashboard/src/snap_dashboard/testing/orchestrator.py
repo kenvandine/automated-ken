@@ -11,6 +11,7 @@ import httpx
 
 from snap_dashboard.db.models import ChannelMap, Snap, TestRun, TestRunScreenshot
 from snap_dashboard.db.session import get_session
+from snap_dashboard.github.utils import parse_repo_slug
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +163,9 @@ def resolve_test_repo(
     testing repo to fall back to (it was never used in production). Returns
     ``("", "")`` when neither is available.
     """
-    if packaging_repo and _path_exists_in_repo(packaging_repo, "tests/suite/__init__.robot", token):
-        return packaging_repo, "tests/suite"
+    packaging_slug = parse_repo_slug(packaging_repo) if packaging_repo else ""
+    if packaging_slug and _path_exists_in_repo(packaging_slug, "tests/suite/__init__.robot", token):
+        return packaging_slug, "tests/suite"
     if testing_repo_fallback:
         return testing_repo_fallback, f"suites/{snap_name}/suite"
     return "", ""
