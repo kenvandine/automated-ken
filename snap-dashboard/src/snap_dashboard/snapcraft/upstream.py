@@ -89,9 +89,15 @@ def _github_latest(source: str, token: str = "") -> UpstreamInfo | None:
 
 
 def _gh_slug(source: str) -> str | None:
-    """Extract owner/repo from a GitHub URL."""
-    m = re.search(r"github\.com[/:]([^/]+/[^/\s.]+?)(?:\.git)?$", source)
-    return m.group(1) if m else None
+    """Extract owner/repo from a GitHub URL.
+
+    Handles both bare repo URLs (``.../owner/repo`` or ``.../owner/repo.git``)
+    and longer URLs with additional path segments after the repo name, such
+    as release-asset download links
+    (``.../owner/repo/releases/download/v1.0/asset.tar.gz``).
+    """
+    m = re.search(r"github\.com[/:]([^/\s]+)/([^/\s.]+)(?:\.git)?(?:/|$)", source)
+    return f"{m.group(1)}/{m.group(2)}" if m else None
 
 
 # ---------------------------------------------------------------------------
