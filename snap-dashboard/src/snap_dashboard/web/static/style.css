@@ -7,9 +7,9 @@
 
 /* ---- CSS Variables ----------------------------------------- */
 :root {
-  --bg:           #f7f7f7;
+  --bg:           #ffffff;
   --surface:      #ffffff;
-  --surface2:     #f1f1f1;
+  --surface2:     #f7f7f7;
   --border:       #d9d9d9;
   --text:         #111111;
   --text-muted:   #5e5e5e;
@@ -766,9 +766,14 @@ header {
 }
 
 .filter-tab.active {
-  background: rgba(var(--accent-rgb), 0.12);
+  background: var(--accent);
   border-color: var(--accent);
-  color: var(--accent-hover);
+  color: #fff;
+}
+
+.filter-tab.active .tab-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
 }
 
 .tab-count {
@@ -1602,7 +1607,7 @@ footer a:hover {
   font-size: 12px;
   max-height: 320px;
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px;
