@@ -142,9 +142,9 @@
           {% endif %}
           {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
           <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
-          {% if run.gh_run_id %}
+          {% if run.gh_run_id and run.repo %}
           <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open workflow run">↗</a>
-          {% else %}
+          {% elif run.repo %}
           <a href="https://github.com/{{ run.repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow">↗</a>
           {% endif %}
           {% elif run.status == 'error' %}
@@ -264,9 +264,9 @@
             {% else %}
             <span class="muted small">—</span>
             {% endif %}
-            {% if run.gh_run_id %}
+            {% if run.gh_run_id and run.repo %}
             <a href="https://github.com/{{ run.repo }}/actions/runs/{{ run.gh_run_id }}" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open GitHub Actions run" data-gh-run="1">↗</a>
-            {% elif run.status in ('pending', 'triggered', 'running') %}
+            {% elif run.status in ('pending', 'triggered', 'running') and run.repo %}
             <a href="https://github.com/{{ run.repo }}/actions/workflows/snap-test.yml" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="Open Actions workflow" data-gh-run="fallback">↗</a>
             {% endif %}
           </td>
@@ -334,7 +334,7 @@
           el.textContent = run.status;
           el.className = badgeClass(run.status);
           const cell = el.closest('td');
-          if (run.gh_run_id) {
+          if (run.gh_run_id && (run.repo || data.testing_repo)) {
             // Upgrade fallback link or insert specific run link
             const existing = cell.querySelector('a[data-gh-run]');
             const runUrl = 'https://github.com/' + (run.repo || data.testing_repo) + '/actions/runs/' + run.gh_run_id;
