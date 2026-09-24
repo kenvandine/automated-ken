@@ -74,6 +74,18 @@ parts:
     plugin: python
     source: .
     python-requirements: [requirements.txt]
+    # `bsdtar` (libarchive-tools) is bundled and placed ahead of GNU tar on
+    # PATH for the embedded Lemonade subprocess (see lemonade/embedded.py).
+    # GNU tar 1.35+ preserves permissions during extraction with the
+    # fchmodat2() syscall (Linux 6.6+), which core24's default strict-mode
+    # seccomp profile does not yet allow — this makes `lemond`'s own
+    # internal `backends install llamacpp:rocm` (and any other backend
+    # requiring extraction of an archive containing symlinks, e.g. the
+    # ROCm libllama*.so -> libllama*.so.N shared library symlinks) fail
+    # with "Operation not permitted" for every extracted entry, silently
+    # leaving only the CPU/Vulkan backends installed. bsdtar (libarchive)
+    # does not hit this syscall gap and extracts the same archives fine.
+    stage-packages: [libarchive-tools]
     # `version: git` doesn't work here: snapcraft.yaml lives in a
     # subdirectory (snap-dashboard/) of the git repo, which has no .git of
     # its own, and this repo has no version tags anyway. Pull the version
@@ -83,3 +95,9 @@ parts:
       craftctl default
       version="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
       craftctl set version="${version:-0.0.0}"
+    # Shadow GNU tar with bsdtar on PATH (see embedded.py, which puts
+    # $SNAP/bin ahead of $SNAP/usr/bin on the lemond subprocess's PATH) so
+    # lemond's own internal backend-archive extraction uses bsdtar instead.
+    override-prime: |
+      craftctl default
+      ln -sf ../usr/bin/bsdtar "$CRAFT_PRIME/bin/tar"

@@ -220,6 +220,18 @@ class EmbeddedLemonadeManager:
 
             env = dict(os.environ)
             env["LEMONADE_API_KEY"] = self.api_key
+            # Shadow GNU tar with our bundled bsdtar (see snapcraft.yaml,
+            # which symlinks $SNAP/bin/tar -> bsdtar): GNU tar 1.35+ uses
+            # the fchmodat2() syscall while extracting archives that
+            # contain symlinks (e.g. lib*.so -> lib*.so.N in llama.cpp's
+            # ROCm backend release), which core24's strict-mode seccomp
+            # profile blocks, silently breaking `lemond`'s own internal
+            # `backends install <recipe>:rocm` extraction and leaving only
+            # CPU/Vulkan backends installed. bsdtar doesn't hit this gap.
+            snap_dir = os.environ.get("SNAP")
+            if snap_dir:
+                bin_dir = f"{snap_dir}/bin"
+                env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
 
             try:
                 log_fh = open(log_path, "ab")
