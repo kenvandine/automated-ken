@@ -73,6 +73,7 @@ async def settings_get(request: Request) -> HTMLResponse:
 @router.post("/settings")
 async def settings_post(
     request: Request,
+    section: str = Form(default=""),
     publisher: str = Form(default=""),
     github_token: str = Form(default=""),
     snapcraft_macaroon: str = Form(default=""),
@@ -98,12 +99,31 @@ async def settings_post(
     external_coding_api_base_url: str = Form(default=""),
     external_coding_api_model: str = Form(default=""),
 ) -> RedirectResponse:
-    """Save per-user settings to UserConfig in the database."""
+    """Save per-user settings to UserConfig in the database.
+
+    The settings page is split into several independent ``<form>`` cards
+    (Publisher, GitHub Token, Snapcraft Credential, Testing, Agents & AI),
+    each with its own Save button, but they all post here. Each form only
+    includes its own fields in the submitted body -- notably, unchecked
+    HTML checkboxes are omitted entirely, indistinguishable from a
+    checkbox that simply isn't part of the submitted form. Without knowing
+    which card was submitted, saving e.g. just the "Testing" card would
+    silently reset every checkbox/field belonging to the *other* cards
+    (like "Enable fleet normalization campaign") back to its Form default.
+    Each form therefore carries a hidden ``section`` field so we only
+    touch the fields that actually belong to the submitted card.
+    """
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
 
     user_id = user["id"]
+    # Unknown/missing section (e.g. a stale cached page) -- fall back to
+    # updating every field present, matching the historical behavior of a
+    # single monolithic form, rather than silently doing nothing.
+    all_sections = {"publisher", "github_token", "snapcraft_macaroon", "testing", "agents_ai"}
+    sections_to_apply = {section} if section in all_sections else all_sections
+
     _auto_test = auto_test in ("1", "true", "on", "yes")
     _auto_merge = auto_merge in ("1", "true", "on", "yes")
     _auto_promote = auto_promote in ("1", "true", "on", "yes")
@@ -117,45 +137,52 @@ async def settings_post(
         if uc is None:
             uc = UserConfig(user_id=user_id)
             session.add(uc)
-        if publisher.strip():
-            uc.publisher = publisher.strip()
-        if github_token.strip():
+
+        if "publisher" in sections_to_apply:
+            if publisher.strip():
+                uc.publisher = publisher.strip()
+            uc.collect_interval_hours = interval
+
+        if "github_token" in sections_to_apply and github_token.strip():
             uc.github_token = github_token.strip()
-        if snapcraft_macaroon.strip():
+
+        if "snapcraft_macaroon" in sections_to_apply and snapcraft_macaroon.strip():
             uc.snapcraft_macaroon = snapcraft_macaroon.strip()
-        uc.collect_interval_hours = interval
-        uc.auto_test = _auto_test
-        # Agent / AI settings
-        if lemonade_server_url.strip():
-            uc.lemonade_server_url = lemonade_server_url.strip()
-        if lemonade_model.strip():
-            uc.lemonade_model = lemonade_model.strip()
-        uc.lemonade_backend = lemonade_backend.strip() if lemonade_backend.strip() in ("embedded", "system") else "embedded"
-        if lemonade_api_key.strip():
-            uc.lemonade_api_key = lemonade_api_key.strip()
-        if bot_github_token.strip():
-            uc.bot_github_token = bot_github_token.strip()
-        if bot_github_login.strip():
-            uc.bot_github_login = bot_github_login.strip()
-        uc.agent_interval_hours = agent_interval_hours
-        uc.auto_merge = _auto_merge
-        uc.auto_promote = _auto_promote
-        uc.auto_promote_confidence = max(0.0, min(1.0, auto_promote_confidence))
-        uc.auto_rebuild_stale = _auto_rebuild_stale
-        uc.stale_build_days = max(1, stale_build_days)
-        # Copilot cloud agent delegation toggles (all default off / opt-in)
-        uc.auto_fix_ci_failures = _auto_fix_ci_failures
-        uc.auto_maintain_upstream = _auto_maintain_upstream
-        uc.fleet_normalization_enabled = _fleet_normalization_enabled
-        # Pluggable coding-task backend — see agents/coding_backend.py
-        if coding_task_backend.strip():
-            uc.coding_task_backend = coding_task_backend.strip()
-        if external_coding_api_key.strip():
-            uc.external_coding_api_key = external_coding_api_key.strip()
-        if external_coding_api_base_url.strip():
-            uc.external_coding_api_base_url = external_coding_api_base_url.strip()
-        if external_coding_api_model.strip():
-            uc.external_coding_api_model = external_coding_api_model.strip()
+
+        if "testing" in sections_to_apply:
+            uc.auto_test = _auto_test
+
+        if "agents_ai" in sections_to_apply:
+            if lemonade_server_url.strip():
+                uc.lemonade_server_url = lemonade_server_url.strip()
+            if lemonade_model.strip():
+                uc.lemonade_model = lemonade_model.strip()
+            uc.lemonade_backend = lemonade_backend.strip() if lemonade_backend.strip() in ("embedded", "system") else "embedded"
+            if lemonade_api_key.strip():
+                uc.lemonade_api_key = lemonade_api_key.strip()
+            if bot_github_token.strip():
+                uc.bot_github_token = bot_github_token.strip()
+            if bot_github_login.strip():
+                uc.bot_github_login = bot_github_login.strip()
+            uc.agent_interval_hours = agent_interval_hours
+            uc.auto_merge = _auto_merge
+            uc.auto_promote = _auto_promote
+            uc.auto_promote_confidence = max(0.0, min(1.0, auto_promote_confidence))
+            uc.auto_rebuild_stale = _auto_rebuild_stale
+            uc.stale_build_days = max(1, stale_build_days)
+            # Copilot cloud agent delegation toggles (all default off / opt-in)
+            uc.auto_fix_ci_failures = _auto_fix_ci_failures
+            uc.auto_maintain_upstream = _auto_maintain_upstream
+            uc.fleet_normalization_enabled = _fleet_normalization_enabled
+            # Pluggable coding-task backend — see agents/coding_backend.py
+            if coding_task_backend.strip():
+                uc.coding_task_backend = coding_task_backend.strip()
+            if external_coding_api_key.strip():
+                uc.external_coding_api_key = external_coding_api_key.strip()
+            if external_coding_api_base_url.strip():
+                uc.external_coding_api_base_url = external_coding_api_base_url.strip()
+            if external_coding_api_model.strip():
+                uc.external_coding_api_model = external_coding_api_model.strip()
 
     # Reschedule agents with the new settings
     try:

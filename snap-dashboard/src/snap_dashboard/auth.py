@@ -67,6 +67,15 @@ def get_user_config(user_id: int) -> "UserConfigView":
                 auto_merge=uc.auto_merge or False,
                 auto_promote=uc.auto_promote or False,
                 auto_promote_confidence=uc.auto_promote_confidence or 0.85,
+                auto_rebuild_stale=uc.auto_rebuild_stale or False,
+                stale_build_days=uc.stale_build_days or 30,
+                auto_fix_ci_failures=uc.auto_fix_ci_failures or False,
+                auto_maintain_upstream=uc.auto_maintain_upstream or False,
+                fleet_normalization_enabled=uc.fleet_normalization_enabled or False,
+                coding_task_backend=uc.coding_task_backend or "copilot_cloud_agent",
+                external_coding_api_key=uc.external_coding_api_key or "",
+                external_coding_api_base_url=uc.external_coding_api_base_url or "",
+                external_coding_api_model=uc.external_coding_api_model or "",
             )
         return UserConfigView()
 
@@ -92,6 +101,15 @@ class UserConfigView:
         auto_merge: bool = False,
         auto_promote: bool = False,
         auto_promote_confidence: float = 0.85,
+        auto_rebuild_stale: bool = False,
+        stale_build_days: int = 30,
+        auto_fix_ci_failures: bool = False,
+        auto_maintain_upstream: bool = False,
+        fleet_normalization_enabled: bool = False,
+        coding_task_backend: str = "copilot_cloud_agent",
+        external_coding_api_key: str = "",
+        external_coding_api_base_url: str = "",
+        external_coding_api_model: str = "",
     ) -> None:
         self.publisher = publisher
         self.github_token = github_token
@@ -109,6 +127,15 @@ class UserConfigView:
         self.auto_merge = auto_merge
         self.auto_promote = auto_promote
         self.auto_promote_confidence = auto_promote_confidence
+        self.auto_rebuild_stale = auto_rebuild_stale
+        self.stale_build_days = stale_build_days
+        self.auto_fix_ci_failures = auto_fix_ci_failures
+        self.auto_maintain_upstream = auto_maintain_upstream
+        self.fleet_normalization_enabled = fleet_normalization_enabled
+        self.coding_task_backend = coding_task_backend
+        self.external_coding_api_key = external_coding_api_key
+        self.external_coding_api_base_url = external_coding_api_base_url
+        self.external_coding_api_model = external_coding_api_model
 
     def to_config(self) -> Config:
         """Return a Config object populated from this user config."""

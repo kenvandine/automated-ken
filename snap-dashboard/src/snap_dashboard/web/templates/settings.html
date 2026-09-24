@@ -15,6 +15,7 @@
 <div class="card">
   <h3 class="section-label">Publisher Settings</h3>
   <form method="post" action="/settings">
+    <input type="hidden" name="section" value="publisher">
     <div class="form-row">
       <label class="form-label" for="publisher">Snap Store Publisher</label>
       <input
@@ -50,6 +51,7 @@
 <div class="card">
   <h3 class="section-label">GitHub Token</h3>
   <form method="post" action="/settings">
+    <input type="hidden" name="section" value="github_token">
     <div class="form-row">
       <label class="form-label" for="github_token">Personal Access Token</label>
       <input
@@ -76,6 +78,7 @@
 <div class="card">
   <h3 class="section-label">Snapcraft Store Credential</h3>
   <form method="post" action="/settings">
+    <input type="hidden" name="section" value="snapcraft_macaroon">
     <div class="form-row">
       <label class="form-label" for="snapcraft_macaroon">Store Login Credential</label>
       <textarea
@@ -112,6 +115,7 @@
 <div class="card">
   <h3 class="section-label">Testing Configuration</h3>
   <form method="post" action="/settings">
+    <input type="hidden" name="section" value="testing">
     <div class="form-row">
       <span class="form-hint">
         YARF test suites now live colocated with each snap's packaging repo, under
@@ -162,6 +166,7 @@
 <div class="card">
   <h3 class="section-label">Agents &amp; AI</h3>
   <form method="post" action="/settings">
+    <input type="hidden" name="section" value="agents_ai">
     <div class="form-row">
       <label class="form-label" for="lemonade_backend">Lemonade Backend</label>
       <select id="lemonade_backend" name="lemonade_backend" class="form-input form-select">
