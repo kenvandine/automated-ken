@@ -34,7 +34,8 @@
     <h3 class="section-label">{{ kind }} ({{ tasks | selectattr('kind', 'equalto', kind) | list | length }})</h3>
   </div>
 
-  <table class="p-table">
+  <div class="table-wrapper">
+  <table class="snap-table">
     <thead>
       <tr>
         <th>Repo</th>
@@ -83,6 +84,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endfor %}
 

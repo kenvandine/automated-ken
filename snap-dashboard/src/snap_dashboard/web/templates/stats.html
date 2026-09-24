@@ -54,6 +54,7 @@
       {% if not runs_by_dispatch %}
       <p class="text-muted">No test runs yet.</p>
       {% else %}
+      <div class="table-wrapper">
       <table class="snap-table">
         <thead><tr><th>Target</th><th>Runs</th></tr></thead>
         <tbody>
@@ -62,6 +63,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% endif %}
     </div>
   </div>
@@ -71,6 +73,7 @@
       {% if not agent_run_counts %}
       <p class="text-muted">No agent runs yet.</p>
       {% else %}
+      <div class="table-wrapper">
       <table class="snap-table">
         <thead><tr><th>Agent</th><th>Runs</th></tr></thead>
         <tbody>
@@ -79,6 +82,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
       {% endif %}
     </div>
   </div>
@@ -89,6 +93,7 @@
   {% if not runner_stats %}
   <p class="text-muted">No runners enrolled yet — see the <a href="/runners">Runners</a> page.</p>
   {% else %}
+  <div class="table-wrapper">
   <table class="snap-table">
     <thead><tr><th>Runner</th><th>Status</th><th>Jobs run</th><th>Jobs passed</th></tr></thead>
     <tbody>
@@ -102,6 +107,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
 </div>
 
@@ -110,6 +116,7 @@
   {% if not recent_runs %}
   <p class="text-muted">No test runs yet.</p>
   {% else %}
+  <div class="table-wrapper">
   <table class="snap-table">
     <thead><tr><th>Snap</th><th>Status</th><th>Dispatch</th><th>Started</th></tr></thead>
     <tbody>
@@ -127,6 +134,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
 </div>
 
@@ -166,6 +174,7 @@
   {% if not model_usage %}
   <p class="text-muted">No LLM calls recorded yet.</p>
   {% else %}
+  <div class="table-wrapper">
   <table class="snap-table">
     <thead>
       <tr>
@@ -190,6 +199,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
   {% endif %}
 </div>
 

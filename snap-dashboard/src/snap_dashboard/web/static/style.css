@@ -255,6 +255,14 @@ header {
 
 .snap-table {
   width: 100%;
+  /* Vanilla's base `table` rule sets table-layout:fixed, which divides
+     the table's width evenly across every column regardless of content —
+     on a narrow viewport that crushes an 8-column table into unreadable
+     slivers instead of letting .table-wrapper's overflow-x:auto kick in.
+     table-layout:auto respects each column's min-content width (locked in
+     by white-space:nowrap on th below), so the table only grows past its
+     container — triggering the scrollbar — once columns actually need it. */
+  table-layout: auto;
   border-collapse: collapse;
   font-size: 13px;
 }
@@ -1291,6 +1299,31 @@ footer a:hover {
   .repo-badge {
     margin-left: 0;
   }
+
+  /* Vanilla's grid gives .col-3 a 4-column track below 620px, so four
+     stat cards end up 3/4-width with an orphan column of empty space
+     instead of stacking full-width like .col-6 already does. */
+  .col-3 {
+    grid-column-end: span 4;
+  }
+
+  /* iOS Safari auto-zooms the page on focusing any input under 16px —
+     bump form text up to the zoom threshold only on small screens so
+     desktop keeps its tighter 13px sizing. */
+  .form-input,
+  .form-select,
+  .form-textarea {
+    font-size: 16px;
+  }
+
+  /* Fixed 24px/360px sizing overruns a narrow phone viewport (e.g. a
+     360px-wide phone leaves no side margin at all). */
+  .toast-notification {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: none;
+  }
 }
 
 /* ============================================================
@@ -1775,4 +1808,249 @@ footer a:hover {
 .badge-running {
   background: rgba(var(--amber-rgb), 0.12);
   color: var(--amber);
+}
+
+/* ============================================================
+   Docs / Help page
+   ============================================================ */
+.docs-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 32px;
+  align-items: start;
+}
+
+.docs-nav {
+  position: sticky;
+  top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+
+.docs-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docs-nav-heading {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.docs-nav-link {
+  color: var(--text-muted);
+  font-size: 13px;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border-left: 2px solid transparent;
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+
+.docs-nav-link:hover {
+  color: var(--text);
+  background: var(--surface2);
+  text-decoration: none;
+}
+
+.docs-nav-link.active {
+  color: var(--accent-hover);
+  background: rgba(var(--accent-rgb), 0.08);
+  border-left-color: var(--accent);
+  font-weight: 500;
+}
+
+.docs-content {
+  min-width: 0;
+}
+
+.docs-section {
+  padding-bottom: 28px;
+  margin-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.docs-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.docs-section > p,
+.docs-section > .docs-list,
+.docs-section > .docs-steps,
+.docs-section > .docs-feature-grid,
+.docs-section > .docs-callout,
+.docs-section > .docs-table-wrapper,
+.docs-section > pre.docs-code {
+  margin-bottom: 14px;
+}
+
+.docs-h2 {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  margin-bottom: 12px;
+}
+
+.docs-h3 {
+  font-size: 14px;
+  font-weight: 700;
+  margin: 16px 0 8px;
+}
+
+.docs-section p {
+  line-height: 1.6;
+}
+
+.docs-section code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 0.9em;
+  font-family: "Ubuntu Mono", "Fira Code", monospace;
+  word-break: break-word;
+}
+
+.docs-list,
+.docs-steps {
+  padding-left: 20px;
+  line-height: 1.7;
+}
+
+.docs-list li,
+.docs-steps li {
+  margin-bottom: 4px;
+}
+
+.docs-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.docs-feature-card {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.docs-feature-icon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.docs-feature-card strong {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.docs-feature-card p {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.docs-callout {
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.docs-callout-info {
+  background: rgba(var(--cyan-rgb), 0.08);
+  border: 1px solid rgba(var(--cyan-rgb), 0.3);
+  color: var(--text);
+}
+
+.docs-code {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 12px;
+  font-family: "Ubuntu Mono", "Fira Code", monospace;
+  overflow-x: auto;
+  white-space: pre;
+  line-height: 1.6;
+}
+
+.docs-table-wrapper {
+  overflow-x: auto;
+}
+
+.docs-table {
+  width: 100%;
+  table-layout: auto;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.docs-table th {
+  text-align: left;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.docs-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.docs-table tr:last-child td {
+  border-bottom: none;
+}
+
+@media (max-width: 800px) {
+  .docs-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .docs-nav {
+    position: static;
+    max-height: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+
+  .docs-nav-group {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+  }
+
+  .docs-nav-heading {
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  .docs-feature-grid {
+    grid-template-columns: 1fr;
+  }
 }
