@@ -1,4 +1,4 @@
-"""automate-ken-runner — remote YARF test execution agent.
+"""automated-ken-runner — remote YARF test execution agent.
 
 Installed on an idle desktop/laptop with a real, logged-in graphical
 session. Polls a snap-dashboard server for queued test jobs, runs YARF

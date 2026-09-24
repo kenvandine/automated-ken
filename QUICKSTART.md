@@ -6,7 +6,7 @@ the condensed "just get it running" version.
 
 Artifacts built this session:
 - `snap-dashboard/automated-ken_0.1.0_amd64.snap` (strict confinement)
-- `automate-ken-runner/automate-ken-runner_0.1.0_amd64.snap` (classic confinement)
+- `automated-ken-runner/automated-ken-runner_0.1.0_amd64.snap` (classic confinement)
 
 ## 1. Install the dashboard
 
@@ -35,14 +35,14 @@ Open **http://127.0.0.1:9080**, sign in with GitHub, and complete onboarding
 On a **dedicated** test machine (this disables screen-lock/suspend):
 
 ```bash
-sudo snap install ./automate-ken-runner_0.1.0_amd64.snap --classic --dangerous
+sudo snap install ./automated-ken-runner_0.1.0_amd64.snap --classic --dangerous
 ```
 
 On the dashboard, **Runners → Add runner** for a one-time token, then:
 
 ```bash
-automate-ken-runner enroll --server http://<dashboard-host>:9080 --token <token>
-systemctl --user enable --now automate-ken-runner
+automated-ken-runner enroll --server http://<dashboard-host>:9080 --token <token>
+systemctl --user enable --now automated-ken-runner
 ```
 
 Verify it shows `idle` on the **Runners** page.
@@ -58,10 +58,10 @@ Verify it shows `idle` on the **Runners** page.
 
 ```bash
 cd snap-dashboard && snapcraft pack
-cd ../automate-ken-runner && snapcraft pack
+cd ../automated-ken-runner && snapcraft pack
 ```
 
-Note: `automate-ken-runner` is classic-confinement, so its `snapcraft.yaml`
+Note: `automated-ken-runner` is classic-confinement, so its `snapcraft.yaml`
 explicitly stages a Python interpreter (`stage-packages:
 python3.12-minimal`, etc.) — classic snaps don't get the base snap's
 runtime mounted, so the strict-confinement fallback to `/usr/bin/python3.12`

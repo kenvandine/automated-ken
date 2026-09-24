@@ -1,6 +1,6 @@
-name: automate-ken-runner
+name: automated-ken-runner
 base: core24
-adopt-info: automate-ken-runner
+adopt-info: automated-ken-runner
 title: Automate Ken Runner
 summary: Remote YARF test execution agent for Automated Ken
 description: |
@@ -26,11 +26,21 @@ grade: stable
 confinement: classic
 
 apps:
-  automate-ken-runner:
-    command: bin/automate-ken-runner
+  automated-ken-runner:
+    # Invoke the snap's own bundled interpreter explicitly (bin/python3
+    # -> usr/bin/python3.12) instead of relying on the console-script's
+    # `#!/usr/bin/env python3` shebang, which under classic confinement
+    # resolves to whatever python3 is on the *host's* PATH — a version
+    # that may not match (and won't have the app's packages installed).
+    # command-chain sets PYTHONHOME/PYTHONPATH so that interpreter can
+    # find its own stdlib and the app's site-packages; see
+    # local/command-chain/python-env.sh for why both are needed.
+    command-chain: [command-chain/python-env.sh]
+    command: bin/automated-ken-runner
 
   run:
-    command: bin/automate-ken-runner run
+    command-chain: [command-chain/python-env.sh]
+    command: bin/automated-ken-runner run
     daemon: simple
     # Runs as a `systemctl --user` service under the same graphical
     # session it tests against — it needs the real session D-Bus bus,
@@ -42,7 +52,7 @@ apps:
     restart-delay: 10s
 
 parts:
-  automate-ken-runner:
+  automated-ken-runner:
     plugin: python
     source: .
     python-packages: [click, httpx, pillow]
@@ -58,3 +68,14 @@ parts:
       craftctl default
       version="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
       craftctl set version="${version:-0.0.0}"
+
+  command-chain:
+    # Installs the PYTHONHOME/PYTHONPATH-setting wrapper referenced by
+    # the apps' command-chain above (see that script for why it's
+    # needed under classic confinement).
+    plugin: dump
+    source: snap/local/command-chain
+    organize:
+      python-env.sh: command-chain/python-env.sh
+    stage:
+      - command-chain/python-env.sh

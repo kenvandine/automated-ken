@@ -23,9 +23,9 @@ from pathlib import Path
 
 import httpx
 
-from automate_ken_runner.config import RunnerConfig
-from automate_ken_runner.idle import is_safe_to_claim_job
-from automate_ken_runner.screenshots import extract_screenshots
+from automated_ken_runner.config import RunnerConfig
+from automated_ken_runner.idle import is_safe_to_claim_job
+from automated_ken_runner.screenshots import extract_screenshots
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ class RunnerLoop:
         if now - self._last_heartbeat < _HEARTBEAT_INTERVAL_SECONDS:
             return
         safe = is_safe_to_claim_job(_IDLE_THRESHOLD_SECONDS)
-        from automate_ken_runner.idle import get_idle_state
+        from automated_ken_runner.idle import get_idle_state
 
         state = get_idle_state()
         try:
@@ -128,7 +128,7 @@ class RunnerLoop:
         logger.info("Claimed job %s: %s (%s)", job_id, snap_name, channel)
         self._report_status(job_id, "running")
 
-        with tempfile.TemporaryDirectory(prefix="automate-ken-runner-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="automated-ken-runner-") as tmp:
             tmp_path = Path(tmp)
             try:
                 suite_dir = self._fetch_suite(job_id, tmp_path)

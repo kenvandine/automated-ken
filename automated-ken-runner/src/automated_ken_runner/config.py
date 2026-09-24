@@ -1,8 +1,8 @@
 """Local persistence of this machine's enrollment credentials.
 
 Stored at ``$SNAP_USER_COMMON/config.json`` when running as the
-``automate-ken-runner`` snap (persists across snap refreshes), or
-``~/.local/share/automate-ken-runner/config.json`` otherwise (mode 0600 —
+``automated-ken-runner`` snap (persists across snap refreshes), or
+``~/.local/share/automated-ken-runner/config.json`` otherwise (mode 0600 —
 this file contains the runner's bearer secret).
 """
 
@@ -21,7 +21,7 @@ def _config_dir() -> Path:
         return Path(snap_user_common)
     xdg_data = os.environ.get("XDG_DATA_HOME")
     base = Path(xdg_data) if xdg_data else Path.home() / ".local" / "share"
-    return base / "automate-ken-runner"
+    return base / "automated-ken-runner"
 
 
 def _config_path() -> Path:

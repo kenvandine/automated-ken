@@ -341,7 +341,7 @@ class TestRunScreenshot(Base):
     Populated from either dispatch target:
     - GitHub Actions: :func:`snap_dashboard.testing.orchestrator.ingest_run_screenshots`
       downloads the ``yarf-results-*`` artifact via the Actions API.
-    - Remote runner: uploaded directly by ``automate-ken-runner`` via
+    - Remote runner: uploaded directly by ``automated-ken-runner`` via
       ``POST /api/runners/{id}/jobs/{job_id}/screenshots``.
 
     :func:`snap_dashboard.testing.baselines.load_test_run_screenshots` reads

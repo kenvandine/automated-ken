@@ -128,7 +128,7 @@ async def new_runner(request: Request, name: str = Form(default="")) -> JSONResp
         runner_id = runner.id
 
     server_url = str(request.base_url).rstrip("/")
-    command = f"automate-ken-runner enroll --server {server_url} --token {token}"
+    command = f"automated-ken-runner enroll --server {server_url} --token {token}"
     return JSONResponse({
         "runner_id": runner_id,
         "token": token,

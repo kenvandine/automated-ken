@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "automate-ken-runner"
+name = "automated-ken-runner"
 version = "0.1.0"
 description = "Remote YARF test runner agent for the Automated Ken snap-dashboard"
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-automate-ken-runner = "automate_ken_runner.cli:main"
+automated-ken-runner = "automated_ken_runner.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
