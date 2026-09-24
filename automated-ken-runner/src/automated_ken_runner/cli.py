@@ -15,15 +15,17 @@ Commands:
         Print enrollment + idle-detection status and exit.
 
     automated-ken-runner prepare-machine
-        Best-effort check (and where possible, install) of the local
-        prerequisites this runner needs: snapd, YARF, and the desktop
-        idle-detection tooling (loginctl/gdbus).
+        Check (and auto-install where possible, e.g. YARF via `snap
+        install`) the local prerequisites this runner needs: snapd,
+        YARF, and the desktop idle-detection tooling (loginctl/gdbus).
+        The run loop also performs this same check automatically at
+        startup, so already-enrolled runners self-heal on their next
+        service restart without needing this run by hand.
 """
 
 from __future__ import annotations
 
 import logging
-import shutil
 import sys
 import time
 
@@ -31,6 +33,7 @@ import click
 import httpx
 
 from automated_ken_runner.config import RunnerConfig, clear_config, load_config, save_config
+from automated_ken_runner.deps import ensure_dependencies
 from automated_ken_runner.idle import get_idle_state, is_safe_to_claim_job
 from automated_ken_runner.runner import RunnerLoop
 
@@ -111,27 +114,9 @@ def run() -> None:
 
 @main.command(name="prepare-machine")
 def prepare_machine() -> None:
-    """Best-effort check of prerequisites this runner needs on a test laptop."""
-    checks = {
-        "snap": "Required to install/refresh the snaps under test.",
-        "yarf": "The YARF test-automation tool that drives the app under test.",
-        "loginctl": "Used for idle/lock detection (part of systemd, should always be present).",
-    }
-    missing = []
-    for cmd, why in checks.items():
-        found = shutil.which(cmd)
-        status_str = found or "NOT FOUND"
-        click.echo(f"  {cmd:12s} {status_str:30s} {why}")
-        if not found:
-            missing.append(cmd)
-
-    if "yarf" in missing:
-        click.echo(
-            "\nYARF not found. Install it per https://yarf.readthedocs.io/ "
-            "(this runner does not attempt to install it automatically since "
-            "install methods vary by distro/environment)."
-        )
-    if missing:
+    """Check (and auto-install where possible) prerequisites this runner needs."""
+    ok = ensure_dependencies(echo=click.echo, auto_install=True)
+    if not ok:
         sys.exit(1)
     click.echo("\nAll prerequisites found.")
 

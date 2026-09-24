@@ -24,6 +24,7 @@ from pathlib import Path
 import httpx
 
 from automated_ken_runner.config import RunnerConfig
+from automated_ken_runner.deps import ensure_dependencies
 from automated_ken_runner.idle import is_safe_to_claim_job
 from automated_ken_runner.screenshots import extract_screenshots
 
@@ -58,6 +59,11 @@ class RunnerLoop:
 
     def run_forever(self) -> None:
         logger.info("Runner #%s (%s) starting poll loop against %s", self.cfg.runner_id, self.cfg.name, self.cfg.server_url)
+        # Self-heal already-enrolled runners that are missing a
+        # dependency (e.g. YARF) picked up after enrollment — this way
+        # fixing it just means restarting the service, not re-running
+        # `prepare-machine` by hand on every machine.
+        ensure_dependencies(auto_install=True)
         while True:
             try:
                 self._maybe_heartbeat()
@@ -131,6 +137,12 @@ class RunnerLoop:
         with tempfile.TemporaryDirectory(prefix="automated-ken-runner-") as tmp:
             tmp_path = Path(tmp)
             try:
+                if shutil.which("yarf") is None:
+                    # A dependency (installed at startup or via
+                    # `prepare-machine`) has since gone missing — try once
+                    # more to self-heal rather than failing every job with
+                    # a bare FileNotFoundError until someone notices.
+                    ensure_dependencies(auto_install=True)
                 suite_dir = self._fetch_suite(job_id, tmp_path)
                 self._install_snap(snap_name, channel)
                 yarf_exit, log_html = self._run_yarf(snap_name, suite_dir, tmp_path)
