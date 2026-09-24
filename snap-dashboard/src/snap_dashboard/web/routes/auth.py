@@ -6,6 +6,7 @@ import logging
 import secrets
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Request
@@ -49,11 +50,13 @@ async def login(request: Request) -> HTMLResponse:
 
     state = secrets.token_urlsafe(16)
     request.session["oauth_state"] = state
+    redirect_uri = str(request.url_for("oauth_callback"))
     oauth_url = (
         f"{_GH_AUTHORIZE_URL}"
         f"?client_id={config.github_client_id}"
         f"&scope=read:user"
         f"&state={state}"
+        f"&redirect_uri={quote(redirect_uri, safe='')}"
     )
     return templates.TemplateResponse(
         request,
@@ -91,6 +94,7 @@ async def oauth_callback(request: Request) -> HTMLResponse:
                     "client_id": config.github_client_id,
                     "client_secret": config.github_client_secret,
                     "code": code,
+                    "redirect_uri": str(request.url_for("oauth_callback")),
                 },
                 headers={"Accept": "application/json"},
             )
