@@ -41,7 +41,14 @@ apps:
   serve:
     command: bin/snap-dashboard serve
     daemon: simple
-    plugs: [network-bind, network]
+    extensions: [gpu]
+    # `opengl` + the `gpu` extension's gpu-2404/mesa-2404 content interface
+    # are required so the embedded Lemonade `lemond` subprocess (a
+    # ROCm/AMDGPU-linked binary, targeting AMD Strix Halo) can see host GPU
+    # driver libraries like libdrm_amdgpu.so.1 — without them, strict
+    # confinement hides those libraries and lemond crash-loops on startup.
+    # This mirrors the interface set the upstream lemonade-server snap uses.
+    plugs: [network-bind, network, opengl]
 
 parts:
   snap-dashboard:
