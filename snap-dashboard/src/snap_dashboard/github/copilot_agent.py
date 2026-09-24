@@ -16,6 +16,8 @@ import logging
 
 import httpx
 
+from snap_dashboard.telemetry import estimate_tokens, record_model_usage
+
 logger = logging.getLogger(__name__)
 
 _GH_API = "https://api.github.com"
@@ -63,6 +65,20 @@ class CopilotAgentClient:
                     headers=_headers(self.token),
                 )
             if resp.status_code in (200, 201, 202):
+                # Copilot's cloud-agent task API never reports token usage —
+                # the agent's work happens out-of-band and is only polled
+                # for status/PR-url later (see get_task()) — so this is a
+                # rough, input-only estimate of the dispatched prompt size,
+                # just to surface *some* signal for how much cloud work is
+                # being done vs. local (see snap_dashboard.telemetry).
+                record_model_usage(
+                    provider="copilot",
+                    model=model or "copilot-default",
+                    task="coding_agent",
+                    input_tokens=estimate_tokens(prompt),
+                    output_tokens=0,
+                    estimated=True,
+                )
                 return resp.json()
             logger.warning(
                 "copilot start_task failed %s/%s (%s): %s",

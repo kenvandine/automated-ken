@@ -130,4 +130,67 @@
   {% endif %}
 </div>
 
+<div class="row">
+  <div class="col-3">
+    <div class="card">
+      <h3 class="section-label">Local LLM tokens</h3>
+      <p style="font-size:2rem; margin:0;">{{ "{:,}".format(local_tokens) }}</p>
+      <p class="text-muted small">via lemonade (in + out)</p>
+    </div>
+  </div>
+  <div class="col-3">
+    <div class="card">
+      <h3 class="section-label">Cloud LLM tokens</h3>
+      <p style="font-size:2rem; margin:0;">{{ "{:,}".format(cloud_tokens) }}</p>
+      <p class="text-muted small">via Copilot cloud agent (in + out, est.)</p>
+    </div>
+  </div>
+  <div class="col-3">
+    <div class="card">
+      <h3 class="section-label">Total LLM tokens</h3>
+      <p style="font-size:2rem; margin:0;">{{ "{:,}".format(total_tokens) }}</p>
+      <p class="text-muted small">
+        {% if local_token_share is not none %}{{ local_token_share }}% handled locally{% else %}no LLM calls yet{% endif %}
+      </p>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="section-label">Token usage by model</h3>
+  <p class="text-muted small">
+    Counts are exact when the backend reports real usage; rows marked
+    "est." fall back to a rough ~4-chars/token estimate (always the case
+    for Copilot's cloud-agent task API, which doesn't report usage).
+  </p>
+  {% if not model_usage %}
+  <p class="text-muted">No LLM calls recorded yet.</p>
+  {% else %}
+  <table class="snap-table">
+    <thead>
+      <tr>
+        <th>Provider</th><th>Model</th><th>Calls</th>
+        <th>Input tokens</th><th>Output tokens</th><th>Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in model_usage %}
+      <tr>
+        <td>
+          <span class="p-status-label {{ 'p-status-label--positive' if row.provider == 'lemonade' else 'p-status-label--caution' }}">
+            {{ 'local' if row.provider == 'lemonade' else 'cloud' }}
+          </span>
+        </td>
+        <td>{{ row.model }}</td>
+        <td>{{ row.calls }}</td>
+        <td>{{ "{:,}".format(row.input_tokens) }}</td>
+        <td>{{ "{:,}".format(row.output_tokens) }}</td>
+        <td>{{ "{:,}".format(row.total_tokens) }}{% if row.any_estimated %} <span class="text-muted small">(est.)</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+
 {% endblock %}

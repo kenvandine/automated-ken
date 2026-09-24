@@ -579,6 +579,40 @@ class ScreenshotComparison(Base):
         )
 
 
+class ModelUsage(Base):
+    """Tracks input/output token usage for one LLM call.
+
+    Populated by every LLM invocation in the system — local models via
+    lemonade-server (``provider="lemonade"``) and, when configured, GitHub
+    Copilot cloud agent (``provider="copilot"``) — so the ``/stats`` page
+    can show how much of the platform's AI work is running locally vs. in
+    the cloud, broken down by model and in aggregate. Counts are exact when
+    the backend's API reports real usage (e.g. lemonade's OpenAI-compatible
+    ``usage`` field); otherwise they are a rough ~4-chars/token estimate,
+    flagged via ``estimated`` (Copilot's cloud-agent task API never reports
+    usage, so its rows are always estimated, input-only).
+    """
+
+    __tablename__ = "model_usage"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # "lemonade" (local) | "copilot" (cloud)
+    provider = Column(String(32), nullable=False)
+    model = Column(String(255), nullable=False)
+    # chat | vision_compare | coding_agent
+    task = Column(String(32), nullable=False)
+    input_tokens = Column(Integer, nullable=False, default=0)
+    output_tokens = Column(Integer, nullable=False, default=0)
+    estimated = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, default=_now, nullable=False)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ModelUsage id={self.id} provider={self.provider!r} model={self.model!r}"
+            f" in={self.input_tokens} out={self.output_tokens} estimated={self.estimated}>"
+        )
+
+
 class CopilotTask(Base):
     """Tracks a task dispatched to GitHub Copilot cloud agent.
 

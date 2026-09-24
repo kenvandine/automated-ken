@@ -15,7 +15,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 
 from snap_dashboard.auth import get_current_user
-from snap_dashboard.db.models import AgentRun, Runner, TestRun, VersionBumpPR
+from snap_dashboard.db.models import AgentRun, ModelUsage, Runner, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
 
 router = APIRouter()
@@ -23,6 +23,70 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 
 _PROMOTED_TEST_STATUSES = ("passed", "promoted")
 _FAILED_TEST_STATUSES = ("failed", "error", "cancelled")
+
+
+def _aggregate_model_usage(session) -> dict:
+    """Aggregate ModelUsage rows by model and by provider (local vs. cloud).
+
+    Extracted from stats_page() so the aggregation math is unit-testable
+    without going through the HTTP/template layer.
+    """
+    usage_rows = (
+        session.query(
+            ModelUsage.provider,
+            ModelUsage.model,
+            func.count(ModelUsage.id),
+            func.sum(ModelUsage.input_tokens),
+            func.sum(ModelUsage.output_tokens),
+            func.sum(ModelUsage.estimated),
+        )
+        .group_by(ModelUsage.provider, ModelUsage.model)
+        .order_by(ModelUsage.provider, ModelUsage.model)
+        .all()
+    )
+    model_usage = [
+        {
+            "provider": provider,
+            "model": model,
+            "calls": calls,
+            "input_tokens": int(input_tokens or 0),
+            "output_tokens": int(output_tokens or 0),
+            "total_tokens": int(input_tokens or 0) + int(output_tokens or 0),
+            "any_estimated": bool(estimated_count),
+        }
+        for provider, model, calls, input_tokens, output_tokens, estimated_count in usage_rows
+    ]
+
+    usage_by_provider: dict[str, dict[str, int]] = {}
+    for row in model_usage:
+        bucket = usage_by_provider.setdefault(
+            row["provider"], {"input_tokens": 0, "output_tokens": 0, "calls": 0}
+        )
+        bucket["input_tokens"] += row["input_tokens"]
+        bucket["output_tokens"] += row["output_tokens"]
+        bucket["calls"] += row["calls"]
+
+    local_tokens = sum(
+        b["input_tokens"] + b["output_tokens"]
+        for provider, b in usage_by_provider.items()
+        if provider == "lemonade"
+    )
+    cloud_tokens = sum(
+        b["input_tokens"] + b["output_tokens"]
+        for provider, b in usage_by_provider.items()
+        if provider != "lemonade"
+    )
+    total_tokens = local_tokens + cloud_tokens
+    local_token_share = round(100 * local_tokens / total_tokens, 1) if total_tokens else None
+
+    return {
+        "model_usage": model_usage,
+        "usage_by_provider": usage_by_provider,
+        "local_tokens": local_tokens,
+        "cloud_tokens": cloud_tokens,
+        "total_tokens": total_tokens,
+        "local_token_share": local_token_share,
+    }
 
 
 @router.get("/stats", response_class=HTMLResponse)
@@ -122,6 +186,8 @@ async def stats_page(request: Request) -> HTMLResponse:
             for tr in recent_runs
         ]
 
+        usage_stats = _aggregate_model_usage(session)
+
     return templates.TemplateResponse(
         request,
         "stats.html",
@@ -141,5 +207,6 @@ async def stats_page(request: Request) -> HTMLResponse:
             "version_bumps_needs_review": version_bumps_needs_review,
             "runner_stats": runner_stats,
             "recent_runs": recent_runs_data,
+            **usage_stats,
         },
     )

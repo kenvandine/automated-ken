@@ -15,6 +15,12 @@ from typing import Any
 
 import httpx
 
+from snap_dashboard.telemetry import (
+    ESTIMATED_TOKENS_PER_IMAGE,
+    estimate_tokens,
+    record_model_usage,
+)
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_URL = "http://localhost:13305"
@@ -39,6 +45,38 @@ class LemonadeClient:
         if self.api_key:
             return {"Authorization": f"Bearer {self.api_key}"}
         return {}
+
+    def _record_usage(
+        self,
+        task: str,
+        resp_json: dict,
+        prompt_text: str,
+        reply_text: str,
+        extra_input_tokens: int = 0,
+    ) -> None:
+        """Record this call's token usage, preferring the API's own count.
+
+        lemonade-server's OpenAI-compatible endpoint reports a real
+        ``usage`` object when the underlying backend supports it; when it's
+        missing (or incomplete) we fall back to a rough character-based
+        estimate so local-model usage is never silently unreported.
+        """
+        usage = resp_json.get("usage") or {}
+        input_tokens = usage.get("prompt_tokens")
+        output_tokens = usage.get("completion_tokens")
+        estimated = input_tokens is None or output_tokens is None
+        if input_tokens is None:
+            input_tokens = estimate_tokens(prompt_text) + extra_input_tokens
+        if output_tokens is None:
+            output_tokens = estimate_tokens(reply_text)
+        record_model_usage(
+            provider="lemonade",
+            model=self.model,
+            task=task,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            estimated=estimated,
+        )
 
     # ------------------------------------------------------------------
     # Availability check
@@ -86,7 +124,10 @@ class LemonadeClient:
                     "lemonade chat error %s: %s", resp.status_code, resp.text[:200]
                 )
                 return None
-            return resp.json()["choices"][0]["message"]["content"]
+            resp_json = resp.json()
+            reply = resp_json["choices"][0]["message"]["content"]
+            self._record_usage("chat", resp_json, prompt_text=f"{system}\n{prompt}", reply_text=reply)
+            return reply
         except Exception as exc:
             logger.warning("lemonade chat failed: %s", exc)
             return None
@@ -159,7 +200,15 @@ class LemonadeClient:
                     "lemonade vision error %s: %s", resp.status_code, resp.text[:200]
                 )
                 return None
-            content = resp.json()["choices"][0]["message"]["content"]
+            resp_json = resp.json()
+            content = resp_json["choices"][0]["message"]["content"]
+            self._record_usage(
+                "vision_compare",
+                resp_json,
+                prompt_text=prompt,
+                reply_text=content,
+                extra_input_tokens=2 * ESTIMATED_TOKENS_PER_IMAGE,
+            )
             return _parse_vision_response(content)
         except Exception as exc:
             logger.warning("lemonade vision_compare failed: %s", exc)
