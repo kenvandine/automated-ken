@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import httpx
 
 from snap_dashboard.agents.base import BaseAgent
-from snap_dashboard.agents.coding_backend import get_coding_dispatcher
+from snap_dashboard.agents.coding_backend import get_coding_dispatcher, task_result_fields
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, VersionBumpPR
 from snap_dashboard.db.session import get_session
@@ -226,10 +226,9 @@ class PRMonitorAgent(BaseAgent):
                     snap_id=pr.get("snap_id"),
                     kind="ci_fix",
                     owner_repo=owner_repo,
-                    external_task_id=str(task.get("id")) if task else None,
                     prompt=prompt,
-                    status="queued" if task else "dispatch_failed",
                     issue_number=pr["bot_pr_number"],
+                    **task_result_fields(task),
                 )
             )
         if task:

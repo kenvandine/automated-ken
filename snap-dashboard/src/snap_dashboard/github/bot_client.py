@@ -199,6 +199,29 @@ class BotGitHubClient:
         except Exception as exc:
             return False, str(exc)
 
+    def list_tree(self, owner: str, repo: str, ref: str | None = None) -> list[str]:
+        """Return every file path in the repo at ``ref`` (recursive git tree), or ``[]``.
+
+        Used by the local Lemonade coding backend (see
+        ``lemonade/coding_agent.py``) to give the local model a repo-wide
+        file listing without needing a git clone.
+        """
+        branch = ref or self.get_default_branch(owner, repo)
+        sha = self.get_branch_sha(owner, repo, branch)
+        if not sha:
+            return []
+        url = f"{_GH_API}/repos/{owner}/{repo}/git/trees/{sha}"
+        try:
+            with httpx.Client(timeout=20) as client:
+                resp = client.get(url, params={"recursive": "1"}, headers=_headers(self.token))
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            return [e["path"] for e in data.get("tree", []) if e.get("type") == "blob"]
+        except Exception as exc:
+            logger.warning("list_tree %s/%s failed: %s", owner, repo, exc)
+            return []
+
     def branch_exists(self, owner: str, repo: str, branch: str) -> bool:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{branch}"
         try:

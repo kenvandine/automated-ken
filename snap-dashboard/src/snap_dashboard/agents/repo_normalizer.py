@@ -2,17 +2,25 @@
 
 Early on, snaps in the fleet accumulated their own bespoke per-repo automation
 (most commonly a daily ``sync-release`` workflow that polls upstream for new
-versions). Now that automated-ken drives version-checking, testing, and
-promotion centrally, those repos need to be brought in line. Rather than
-having automated-ken hand-edit files itself (fragile pattern matching for
-"find the sync-release workflow", reinventing doc-writing, etc.), this agent
-delegates the whole first pass to **GitHub Copilot cloud agent** per repo —
-it can actually read the existing workflow, understand what it does, write a
-sensible AGENTS.md, and open a PR, which is squarely "capable coding" work.
+versions) and drifted onto ad-hoc build/publish workflows. Now that
+automated-ken drives version-checking, testing, and promotion centrally,
+those repos need to be brought in line — not just by dropping the stray
+``sync-release`` workflow, but by making sure every repo's build-and-publish
+workflow follows the same canonical pattern (see
+``snapcraft/build_workflow_template.py``), so the whole fleet builds and
+publishes to a consistent channel the same way. Rather than having
+automated-ken hand-edit files itself (fragile pattern matching for "find the
+sync-release workflow", reinventing doc-writing, etc.), this agent delegates
+the whole first pass to a configurable **coding backend** (see
+``agents/coding_backend.py`` — GitHub Copilot cloud agent by default, or a
+local Lemonade model) per repo — it can actually read the existing
+workflow(s), understand what they do, normalize the build/publish workflow,
+write a sensible AGENTS.md, and open a PR, which is squarely "capable
+coding" work.
 
 This is a one-time catch-up campaign, not a periodic agent — it's triggered
 manually from the dashboard (opt-in via ``UserConfig.fleet_normalization_enabled``)
-so each repo's owner can review the PRs Copilot opens before merging them.
+so each repo's owner can review the PRs opened before merging them.
 """
 
 from __future__ import annotations
@@ -24,8 +32,9 @@ from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, Snap
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.bot_client import BotGitHubClient
-from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher
+from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher, task_result_fields
 from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.snapcraft.build_workflow_template import WORKFLOW_PATH, WORKFLOW_YAML
 from snap_dashboard.testing.suite_zip import list_suite_files
 
 logger = logging.getLogger(__name__)
@@ -125,7 +134,18 @@ class RepoNormalizerAgent(BaseAgent):
             "'sync-release'). Remove it — automated-ken now polls for new upstream "
             "releases centrally across the whole snap fleet, so this per-repo "
             "workflow is redundant and would fight with it.\n"
-            "2. Add an AGENTS.md at the repo root explaining that automated-ken now "
+            "2. Make sure the workflow that builds this snap and publishes it to the "
+            "store matches automated-ken's canonical pattern exactly, so every snap in "
+            "the fleet builds/publishes the same way. If "
+            f"`{WORKFLOW_PATH}` doesn't exist yet, or an existing workflow under "
+            ".github/workflows/ serves this same build-and-publish purpose but differs "
+            "from the canonical content below (different triggers, build action, "
+            "publish action, or target channel), replace that file's content with "
+            "exactly the following (rename it to "
+            f"`{WORKFLOW_PATH}` if it currently lives under a different filename, "
+            "rather than adding a duplicate workflow):\n\n"
+            f"```yaml{WORKFLOW_YAML}```\n\n"
+            "3. Add an AGENTS.md at the repo root explaining that automated-ken now "
             "owns version detection, opening version-bump PRs, CI monitoring "
             "(including asking Copilot cloud agent to fix a failing build workflow "
             "on its own follow-up PR), YARF testing, and channel promotion "
@@ -133,11 +153,11 @@ class RepoNormalizerAgent(BaseAgent):
             "agents shouldn't hand-edit the pinned version, and that the removed "
             "workflow's job is now automated-ken's responsibility.\n"
             + (
-                "3. Add the YARF test suite below under tests/ in this repo (create "
+                "4. Add the YARF test suite below under tests/ in this repo (create "
                 "the directory structure exactly as given, preserving relative paths):\n\n"
                 f"{suite_block}\n"
                 if moved_suite
-                else "3. There is no test suite to migrate for this snap right now — skip this step.\n"
+                else "4. There is no test suite to migrate for this snap right now — skip this step.\n"
             )
             + "\nOpen a single pull request with all of the above changes."
         )
@@ -150,9 +170,8 @@ class RepoNormalizerAgent(BaseAgent):
                     snap_id=snap_id,
                     kind="fleet_normalize",
                     owner_repo=owner_repo_str,
-                    external_task_id=str(task.get("id")) if task else None,
                     prompt=prompt,
-                    status="queued" if task else "dispatch_failed",
+                    **task_result_fields(task),
                 )
             )
         if task and moved_suite and testing_repo:
@@ -221,9 +240,8 @@ class RepoNormalizerAgent(BaseAgent):
                     snap_id=snap_id,
                     kind="fleet_normalize",
                     owner_repo=owner_repo_str,
-                    external_task_id=str(task.get("id")) if task else None,
                     prompt=prompt,
-                    status="queued" if task else "dispatch_failed",
                     issue_number=snap_id,  # repurposed here as a "which snap" dedupe key
+                    **task_result_fields(task),
                 )
             )

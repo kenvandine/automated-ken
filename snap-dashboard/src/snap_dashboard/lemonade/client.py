@@ -100,20 +100,31 @@ class LemonadeClient:
         prompt: str,
         system: str = "",
         temperature: float = 0.2,
+        max_tokens: int | None = None,
+        timeout: float | None = None,
     ) -> str | None:
-        """Send a text-only chat request; return the assistant reply or None."""
+        """Send a text-only chat request; return the assistant reply or None.
+
+        ``max_tokens`` and ``timeout`` are optional overrides for callers
+        whose task needs more headroom than the defaults — e.g. the local
+        coding backend (agents/coding_backend.py -> lemonade/coding_agent.py)
+        asks for whole-file rewrites, which can be a lot longer than a PR
+        description and can take longer to generate on CPU/iGPU.
+        """
         messages: list[dict[str, Any]] = []
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
         }
+        if max_tokens:
+            payload["max_tokens"] = max_tokens
         try:
-            with httpx.Client(timeout=_TIMEOUT) as client:
+            with httpx.Client(timeout=timeout or _TIMEOUT) as client:
                 resp = client.post(
                     f"{self.base_url}/v1/chat/completions",
                     json=payload,

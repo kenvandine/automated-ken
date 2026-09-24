@@ -16,6 +16,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from snap_dashboard.agents.coding_backend import extract_pr_url
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import CopilotTask
 from snap_dashboard.db.session import get_session
@@ -29,26 +30,6 @@ templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templa
 
 # States GitHub's Copilot cloud agent task API reports.
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out", "dispatch_failed"}
-
-
-def _extract_pr_url(remote: dict) -> str | None:
-    """Best-effort PR URL extraction.
-
-    The agent-tasks API is documented as "public preview and subject to
-    change" with no fixed schema published for the pull-request field, so
-    this checks a few plausible shapes rather than assuming one.
-    """
-    for key in ("pull_request_url", "html_url"):
-        val = remote.get(key)
-        if isinstance(val, str) and val:
-            return val
-    pr = remote.get("pull_request")
-    if isinstance(pr, dict):
-        return pr.get("html_url") or pr.get("url")
-    if isinstance(pr, str) and pr:
-        return pr
-    return None
-
 
 
 def _serialise(task: CopilotTask) -> dict:
@@ -122,7 +103,7 @@ async def refresh_copilot_task(task_id: int, request: Request) -> RedirectRespon
                         task = session.query(CopilotTask).filter_by(id=task_id, user_id=user_id).first()
                         if task:
                             task.status = remote.get("state") or task.status
-                            task.pr_url = _extract_pr_url(remote) or task.pr_url
+                            task.pr_url = extract_pr_url(remote) or task.pr_url
                             if remote.get("error"):
                                 task.error_msg = str(remote.get("error"))[:2000]
 
@@ -165,7 +146,7 @@ async def refresh_all_copilot_tasks(request: Request) -> RedirectResponse:
             task = session.query(CopilotTask).filter_by(id=task_id, user_id=user_id).first()
             if task:
                 task.status = remote.get("state") or task.status
-                task.pr_url = _extract_pr_url(remote) or task.pr_url
+                task.pr_url = extract_pr_url(remote) or task.pr_url
                 if remote.get("error"):
                     task.error_msg = str(remote.get("error"))[:2000]
 

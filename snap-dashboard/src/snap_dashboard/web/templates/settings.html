@@ -357,10 +357,12 @@
     <h4 class="section-label">Delegated Coding Tasks</h4>
     <p class="form-hint">
       Fixing failing CI, upgrading dependencies, and fixing filed issues require a genuinely
-      capable coding model. The long-term goal is to run this locally as local models become
-      capable enough; today that dispatches to GitHub Copilot cloud agent instead of the
-      lightweight local Lemonade model used elsewhere. All three toggles below are opt-in and
-      off by default — review the PRs they open before merging.
+      capable coding model. GitHub Copilot cloud agent is the most capable option (multi-turn,
+      can run tests, iterate on CI failures). A local Lemonade model (Qwen3-Coder) is also
+      available as a no-subscription-required option — it works in a single best-effort pass
+      (no tool use or test iteration) using the repo's file contents and opens its own PR.
+      All three toggles below are opt-in and off by default — review the PRs they open before
+      merging.
     </p>
 
     <div class="form-row">
@@ -370,7 +372,7 @@
           GitHub Copilot cloud agent (default)
         </option>
         <option value="local_lemonade" {% if config.coding_task_backend == 'local_lemonade' %}selected{% endif %}>
-          Local model (not yet capable — reserved)
+          Local model (Lemonade / Qwen3-Coder — single-shot, no subscription needed)
         </option>
         <option value="external_api" {% if config.coding_task_backend == 'external_api' %}selected{% endif %}>
           External API key (not yet implemented — reserved)

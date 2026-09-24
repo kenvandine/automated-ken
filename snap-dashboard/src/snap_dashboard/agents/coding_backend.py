@@ -2,29 +2,34 @@
 
 This is the single place that decides *which* backend handles "capable
 coding" tasks — fixing failing CI, dependency upgrades, issue fixes, and the
-fleet-normalization campaign. The long-term goal is to run as much of this
-locally as capable local models become available; today, no local model in
-this project (the embedded Lemonade vision/text model) is capable of
-autonomous multi-file code editing, so **GitHub Copilot cloud agent** is the
-practical default — it needs no extra credentials (reuses the existing bot
-GitHub token) and is strictly more capable for this class of work.
+fleet-normalization campaign.
 
 ``UserConfig.coding_task_backend`` selects the backend:
 
-- ``copilot_cloud_agent`` (default): dispatch to GitHub Copilot cloud agent.
-- ``local_lemonade``: reserved for when a local model is capable enough for
-  this. Not implemented yet — returns ``None`` (skip dispatch) with a clear
-  log message rather than pretending to work.
+- ``copilot_cloud_agent`` (default): dispatch to GitHub Copilot cloud agent
+  — an async task, polled later for a PR link (see ``get_task()`` in
+  ``github/copilot_agent.py`` and ``web/routes/copilot_tasks.py``). Needs no
+  extra credentials (reuses the existing bot GitHub token).
+- ``local_lemonade``: a single-shot local coding model (Qwen3-Coder, run via
+  the embedded/self-managed Lemonade server — see ``lemonade/coding_agent.py``).
+  Runs synchronously and opens (or fails to open) its PR before
+  ``start_task()`` returns — no polling needed, but it's necessarily less
+  capable than the cloud agent (no tool use, no running tests, no iterating
+  on CI failures).
 - ``external_api``: reserved for a user-supplied API key to a hosted coding
   model (``external_coding_api_key``/``external_coding_api_base_url``/
-  ``external_coding_api_model``). Not implemented yet, same as above — this
-  is the forward-looking "add an API key to offload some work to cloud
-  models" escalation path the user asked for.
+  ``external_coding_api_model``). Not implemented yet — this is the
+  forward-looking "add an API key to offload some work to cloud models"
+  escalation path the user asked for.
 
 Callers (``agents/pr_monitor.py``, ``agents/upstream_maintainer.py``,
 ``agents/repo_normalizer.py``) should always go through
 ``get_coding_dispatcher()`` rather than constructing ``CopilotAgentClient``
 directly, so a future local/external backend only needs to be added here.
+They should also use ``task_result_fields()`` below to turn a
+``start_task()`` result into ``CopilotTask`` kwargs, since the two
+implemented backends return different result shapes (async id-to-poll vs.
+already-finished state+PR url).
 """
 
 from __future__ import annotations
@@ -70,12 +75,13 @@ def get_coding_dispatcher(uc) -> CodingDispatcher | None:
         return CopilotAgentClient(token)
 
     if backend == "local_lemonade":
-        logger.info(
-            "coding_task_backend=local_lemonade selected, but no local model is "
-            "currently capable of autonomous code-editing tasks — skipping dispatch. "
-            "This is a reserved extension point for future local models."
-        )
-        return None
+        token = getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or ""
+        if not token:
+            logger.info("coding_task_backend=local_lemonade but no GitHub token configured")
+            return None
+        from snap_dashboard.lemonade.coding_agent import LocalLemonadeCodingDispatcher
+
+        return LocalLemonadeCodingDispatcher(uc, token)
 
     if backend == "external_api":
         api_key = getattr(uc, "external_coding_api_key", "") or ""
@@ -90,3 +96,53 @@ def get_coding_dispatcher(uc) -> CodingDispatcher | None:
 
     logger.warning("unknown coding_task_backend %r — skipping dispatch", backend)
     return None
+
+
+def extract_pr_url(remote: dict) -> str | None:
+    """Best-effort PR URL extraction from a coding-backend task result.
+
+    Handles both the GitHub Copilot cloud agent task-status shape (the
+    agent-tasks API is documented as "public preview and subject to change"
+    with no fixed schema for the pull-request field) and the local Lemonade
+    backend's own ``{"html_url": ...}`` shape.
+    """
+    for key in ("pull_request_url", "html_url"):
+        val = remote.get(key)
+        if isinstance(val, str) and val:
+            return val
+    pr = remote.get("pull_request")
+    if isinstance(pr, dict):
+        return pr.get("html_url") or pr.get("url")
+    if isinstance(pr, str) and pr:
+        return pr
+    return None
+
+
+def task_result_fields(task: dict | None) -> dict:
+    """Turn a ``CodingDispatcher.start_task()`` result into ``CopilotTask`` kwargs.
+
+    The two implemented backends return different result shapes:
+
+    - GitHub Copilot cloud agent dispatches an async remote task — the
+      result only has an ``id`` to poll later (see
+      ``web/routes/copilot_tasks.py``), so the initial status is ``queued``
+      with no PR url yet.
+    - The local Lemonade backend does all its work synchronously inside
+      ``start_task()`` itself, so the result already has a terminal
+      ``state`` ("completed"/"failed") and, on success, a PR url — nothing
+      left to poll, and ``external_task_id`` stays unset.
+
+    Returns a dict with ``external_task_id``, ``status``, and ``pr_url``,
+    suitable for ``**``-splatting into a ``CopilotTask(...)`` constructor.
+    """
+    if not task:
+        return {"external_task_id": None, "status": "dispatch_failed", "pr_url": None}
+    state = task.get("state")
+    if state:
+        return {"external_task_id": None, "status": state, "pr_url": extract_pr_url(task)}
+    task_id = task.get("id")
+    return {
+        "external_task_id": str(task_id) if task_id is not None else None,
+        "status": "queued",
+        "pr_url": None,
+    }

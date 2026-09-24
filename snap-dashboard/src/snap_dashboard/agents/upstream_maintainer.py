@@ -25,7 +25,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from snap_dashboard.agents.base import BaseAgent
-from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher
+from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher, task_result_fields
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
@@ -137,9 +137,8 @@ class UpstreamMaintainerAgent(BaseAgent):
                     snap_id=snap_id,
                     kind="dep_update",
                     owner_repo=owner_repo,
-                    external_task_id=str(task.get("id")) if task else None,
                     prompt=prompt,
-                    status="queued" if task else "dispatch_failed",
+                    **task_result_fields(task),
                 )
             )
         return bool(task)
@@ -234,10 +233,9 @@ class UpstreamMaintainerAgent(BaseAgent):
                         snap_id=snap_id,
                         kind="issue_fix",
                         owner_repo=owner_repo,
-                        external_task_id=str(task.get("id")) if task else None,
                         prompt=prompt,
-                        status="queued" if task else "dispatch_failed",
                         issue_number=number,
+                        **task_result_fields(task),
                     )
                 )
             dispatched += 1

@@ -45,10 +45,18 @@ def test_copilot_backend_without_any_token_returns_none() -> None:
     assert get_coding_dispatcher(_uc(bot_github_token="", github_token="")) is None
 
 
-def test_local_lemonade_backend_is_a_reserved_noop() -> None:
-    # Not implemented yet — should skip cleanly (return None) rather than
-    # raising or pretending to dispatch.
-    assert get_coding_dispatcher(_uc(coding_task_backend="local_lemonade")) is None
+def test_local_lemonade_backend_without_token_returns_none() -> None:
+    assert get_coding_dispatcher(
+        _uc(coding_task_backend="local_lemonade", bot_github_token="", github_token="")
+    ) is None
+
+
+def test_local_lemonade_backend_returns_dispatcher_with_token() -> None:
+    from snap_dashboard.lemonade.coding_agent import LocalLemonadeCodingDispatcher
+
+    client = get_coding_dispatcher(_uc(coding_task_backend="local_lemonade", bot_github_token="tok789"))
+    assert isinstance(client, LocalLemonadeCodingDispatcher)
+    assert client.token == "tok789"
 
 
 def test_external_api_backend_is_a_reserved_noop() -> None:
