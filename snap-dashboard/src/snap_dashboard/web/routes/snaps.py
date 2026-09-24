@@ -13,6 +13,10 @@ from fastapi.templating import Jinja2Templates
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap
 from snap_dashboard.db.session import get_session
+from snap_dashboard.github.repo_discovery import (
+    build_packaging_repo_map,
+    get_cached_packaging_repo_map,
+)
 from snap_dashboard.store.client import extract_repo_urls, get_snap_info
 
 logger = logging.getLogger(__name__)
@@ -133,7 +137,7 @@ async def snap_add_post(
 
 
 @router.get("/snap/{name}", response_class=HTMLResponse)
-async def snap_detail(request: Request, name: str) -> HTMLResponse:
+async def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) -> HTMLResponse:
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -202,6 +206,27 @@ async def snap_detail(request: Request, name: str) -> HTMLResponse:
                     snap_data["packaging_repo_suggested"] = repos.get("packaging_repo")
                 if not snap.upstream_repo:
                     snap_data["upstream_repo_suggested"] = repos.get("upstream_repo")
+
+        # Store metadata is often empty for personal snaps (no issues/source
+        # links filled in). Fall back to a cached GitHub-repo scan (matches
+        # a snapcraft.yaml "name:" to this snap) if it's already warm; if
+        # it's cold, kick off a background scan so the next page load has it
+        # without blocking this request on ~150 GitHub API calls.
+        if not snap.packaging_repo and not snap_data["packaging_repo_suggested"]:
+            uc = get_user_config(user_id)
+            token = uc.bot_github_token or uc.github_token
+            if token:
+                cached_map = get_cached_packaging_repo_map(token)
+                if cached_map is not None:
+                    discovered = cached_map.get(snap.name)
+                    if discovered:
+                        snap_data["packaging_repo_suggested"] = discovered
+                else:
+                    def _warm_cache(tok: str = token) -> None:
+                        build_packaging_repo_map(tok)
+
+                    background_tasks.add_task(_warm_cache)
+
 
         issues_data = [
             {

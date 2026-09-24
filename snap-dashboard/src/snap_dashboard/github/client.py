@@ -19,6 +19,7 @@ class GitHubClient:
     """Client for fetching issues and PRs from GitHub and GitLab repos."""
 
     def __init__(self, token: str = "") -> None:
+        self.token = token
         self._token = token
         self._gh_headers: dict[str, str] = {
             "Accept": "application/vnd.github+json",

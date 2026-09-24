@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from snap_dashboard.config import Config
 from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap
 from snap_dashboard.github.client import GitHubClient
+from snap_dashboard.github.repo_discovery import build_packaging_repo_map
 from snap_dashboard.store.client import (
     extract_channel_map,
     extract_repo_urls,
@@ -154,6 +155,16 @@ def _update_snap(session: Session, snap: Snap, gh_client: GitHubClient) -> None:
             )
             session.add(cm)
         session.flush()
+
+    # Store metadata frequently has no links at all for personal snaps
+    # (kenvandine's snaps rarely bother filling in issues/contact/source
+    # links). Fall back to scanning the user's own GitHub repos for a
+    # snapcraft.yaml declaring this snap's name.
+    if not snap.packaging_repo and gh_client.token:
+        repo_map = build_packaging_repo_map(gh_client.token)
+        discovered = repo_map.get(snap.name)
+        if discovered:
+            snap.packaging_repo = discovered
 
     # 2b & 2c: Fetch issues/PRs
     repos_to_fetch: list[tuple[str, str]] = []
