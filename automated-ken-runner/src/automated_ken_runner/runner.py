@@ -48,6 +48,39 @@ def _desktop_env() -> str:
     return os.environ.get("XDG_CURRENT_DESKTOP", "") or os.environ.get("DESKTOP_SESSION", "")
 
 
+def _live_session_env() -> dict[str, str]:
+    """This process's own env, patched with the *current* systemd --user
+    manager environment for graphical-session variables.
+
+    This service can be started (at boot, or by ``systemctl --user
+    restart``) before the desktop session finishes importing DISPLAY/
+    WAYLAND_DISPLAY into the systemd --user manager (that import happens
+    once, typically via gnome-session, some time after login) — a
+    long-running service's own ``os.environ`` never picks those up
+    afterwards even though ``systemctl --user show-environment`` does.
+    Confirmed root cause of yarf silently falling back to its headless
+    "Vnc" platform (no VNC server running) on a real graphical runner,
+    and would equally break ``snap run`` for the no-suite smoke test.
+    """
+    env = dict(os.environ)
+    try:
+        result = subprocess.run(
+            ["systemctl", "--user", "show-environment"],
+            capture_output=True, timeout=10, check=False, text=True,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                key, sep, value = line.partition("=")
+                if sep and key in (
+                    "DISPLAY", "WAYLAND_DISPLAY", "XDG_RUNTIME_DIR",
+                    "XAUTHORITY", "DBUS_SESSION_BUS_ADDRESS",
+                ):
+                    env[key] = value
+    except Exception:
+        logger.debug("Failed to query systemd --user environment; using process env as-is", exc_info=True)
+    return env
+
+
 class RunnerLoop:
     """Owns the long-lived connection to a snap-dashboard server."""
 
@@ -234,14 +267,15 @@ class RunnerLoop:
         # or "Vnc" (headless). Use Mir whenever a real graphical session is
         # present on this machine, otherwise fall back to yarf's own
         # "Vnc" default for headless runners.
-        platform_name = "Mir" if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY") else "Vnc"
+        live_env = _live_session_env()
+        platform_name = "Mir" if live_env.get("WAYLAND_DISPLAY") or live_env.get("DISPLAY") else "Vnc"
         # automated-ken-runner is a classic-confinement snap and sets
         # PYTHONHOME/PYTHONPATH for its own bundled interpreter. yarf is a
         # strictly-confined snap with its own Python — inheriting these
         # vars makes it try (and get AppArmor-denied) to read this
         # snap's site-packages. Strip them so yarf uses its own env.
         yarf_env = {
-            k: v for k, v in os.environ.items() if k not in ("PYTHONHOME", "PYTHONPATH")
+            k: v for k, v in live_env.items() if k not in ("PYTHONHOME", "PYTHONPATH")
         }
         proc = subprocess.run(
             ["yarf", "--platform", platform_name, "--outdir", str(outdir), str(suite_dir)],
@@ -271,7 +305,8 @@ class RunnerLoop:
         dashboard-side once the screenshot is uploaded.
         """
         app_proc = subprocess.Popen(
-            ["snap", "run", snap_name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+            ["snap", "run", snap_name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            env=_live_session_env(),
         )
         try:
             self._wait_for_app_alive(snap_name, timeout=_APP_LAUNCH_TIMEOUT_SECONDS)

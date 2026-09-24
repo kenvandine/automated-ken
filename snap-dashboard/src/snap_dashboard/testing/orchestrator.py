@@ -670,12 +670,21 @@ def maybe_submit_auto_promoter(test_run_id: int) -> None:
         user_id = run.user_id
         if user_id is None:
             return
-        run.status = "reviewing"
 
     from snap_dashboard.auth import get_user_config
     uc = get_user_config(user_id)
     if not getattr(uc, "auto_promote", False):
+        # Leave status as "passed" — flipping to "reviewing" here (as this
+        # used to do unconditionally) left runs stuck showing "reviewing"
+        # forever with no agent ever submitted to act on it, since nothing
+        # ever un-flips a run whose owner has auto-promote turned off.
         return
+
+    with get_session() as session:
+        run = session.query(TestRun).get(test_run_id)
+        if not run or run.promoted or run.status != "passed":
+            return
+        run.status = "reviewing"
 
     from snap_dashboard.agents.runner import get_runner
     from snap_dashboard.agents.test_run_auto_promoter import TestRunAutoPromoterAgent
