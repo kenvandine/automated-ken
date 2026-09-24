@@ -185,9 +185,17 @@ class RunnerLoop:
         # present on this machine, otherwise fall back to yarf's own
         # "Vnc" default for headless runners.
         platform_name = "Mir" if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY") else "Vnc"
+        # automated-ken-runner is a classic-confinement snap and sets
+        # PYTHONHOME/PYTHONPATH for its own bundled interpreter. yarf is a
+        # strictly-confined snap with its own Python — inheriting these
+        # vars makes it try (and get AppArmor-denied) to read this
+        # snap's site-packages. Strip them so yarf uses its own env.
+        yarf_env = {
+            k: v for k, v in os.environ.items() if k not in ("PYTHONHOME", "PYTHONPATH")
+        }
         proc = subprocess.run(
             ["yarf", "--platform", platform_name, "--outdir", str(outdir), str(suite_dir)],
-            capture_output=True, timeout=1800, check=False,
+            capture_output=True, timeout=1800, check=False, env=yarf_env,
         )
         log_html_path = outdir / "log.html"
         log_html = log_html_path.read_text(errors="replace") if log_html_path.exists() else ""
