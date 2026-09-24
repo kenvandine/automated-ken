@@ -174,9 +174,12 @@
             id="packaging_repo"
             name="packaging_repo"
             class="form-input"
-            value="{{ snap.packaging_repo or '' }}"
+            value="{{ snap.packaging_repo or snap.packaging_repo_suggested or '' }}"
             placeholder="https://github.com/owner/snap-repo"
           >
+          {% if not snap.packaging_repo and snap.packaging_repo_suggested %}
+          <p class="form-hint">Auto-detected from Snap Store metadata — review and click Save to confirm.</p>
+          {% endif %}
         </div>
         <div class="form-row">
           <label class="form-label" for="upstream_repo">Upstream Repository URL</label>
@@ -185,9 +188,12 @@
             id="upstream_repo"
             name="upstream_repo"
             class="form-input"
-            value="{{ snap.upstream_repo or '' }}"
+            value="{{ snap.upstream_repo or snap.upstream_repo_suggested or '' }}"
             placeholder="https://github.com/owner/upstream"
           >
+          {% if not snap.upstream_repo and snap.upstream_repo_suggested %}
+          <p class="form-hint">Auto-detected from Snap Store metadata — review and click Save to confirm.</p>
+          {% endif %}
         </div>
         <div class="form-row">
           <label class="form-label" for="notes">Notes</label>

@@ -183,7 +183,25 @@ async def snap_detail(request: Request, name: str) -> HTMLResponse:
             "notes": snap.notes,
             "created_at": snap.created_at,
             "updated_at": snap.updated_at,
+            "packaging_repo_suggested": None,
+            "upstream_repo_suggested": None,
         }
+
+        # If either repo URL is unknown, try to suggest one from Snap Store
+        # metadata so the edit form isn't blank when we actually know it
+        # (e.g. for manually-added snaps, which aren't auto-populated on
+        # collection runs).
+        if not snap.packaging_repo or not snap.upstream_repo:
+            try:
+                info = get_snap_info(snap.name)
+            except Exception:
+                info = None
+            if info:
+                repos = extract_repo_urls(info)
+                if not snap.packaging_repo:
+                    snap_data["packaging_repo_suggested"] = repos.get("packaging_repo")
+                if not snap.upstream_repo:
+                    snap_data["upstream_repo_suggested"] = repos.get("upstream_repo")
 
         issues_data = [
             {
