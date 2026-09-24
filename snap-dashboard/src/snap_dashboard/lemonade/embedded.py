@@ -34,16 +34,19 @@ from pathlib import Path
 import httpx
 
 from snap_dashboard.config import get_config, save_config
+from snap_dashboard.lemonade.models import TASK_CONTEXT_SIZES, TASK_MODELS, TASK_TEXT, default_context_for
 
 logger = logging.getLogger(__name__)
 
 _RELEASES_API = "https://api.github.com/repos/lemonade-sdk/lemonade/releases/latest"
 _HEALTH_TIMEOUT_SECONDS = 90
 _HEALTH_POLL_INTERVAL = 2
+_PULL_TIMEOUT_SECONDS = 1800  # multi-gigabyte model weights can take a while
 
-# Smallest vision-capable model in Lemonade's curated/suggested catalog as of
-# this writing. Overridable per-user via Settings -> Lemonade model.
-DEFAULT_EMBEDDED_MODEL = "Gemma-4-12B-it-GGUF"
+# Kept for backward compatibility with anything importing the old single
+# default model name — opinionated defaults now vary per task, see
+# ``lemonade.models.TASK_MODELS``.
+DEFAULT_EMBEDDED_MODEL = TASK_MODELS[TASK_TEXT]
 
 
 def get_lemonade_data_dir() -> Path:
@@ -176,6 +179,8 @@ class EmbeddedLemonadeManager:
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
         self._start_attempted = False
+        self._pulled_models: set[str] = set()
+        self._pull_lock = threading.Lock()
 
     @staticmethod
     def _generate_and_persist_api_key() -> str:
@@ -241,7 +246,12 @@ class EmbeddedLemonadeManager:
                 "Embedded Lemonade: running on 127.0.0.1:%d (pid=%s)",
                 self.port, self._proc.pid if self._proc else "?",
             )
-            threading.Thread(target=self._pull_default_model, daemon=True).start()
+            # Warm up every opinionated per-task default model (vision, text,
+            # coding) in the background so the first real request for any
+            # task type isn't a cold, multi-gigabyte pull, and so each is
+            # loaded with its opinionated context size at least once.
+            for task, model in TASK_MODELS.items():
+                self.ensure_model_pulled(model, ctx_size=TASK_CONTEXT_SIZES.get(task))
         return healthy
 
     def _wait_until_healthy(self, timeout: int = _HEALTH_TIMEOUT_SECONDS) -> bool:
@@ -260,21 +270,46 @@ class EmbeddedLemonadeManager:
             time.sleep(_HEALTH_POLL_INTERVAL)
         return False
 
-    def _pull_default_model(self, model: str = DEFAULT_EMBEDDED_MODEL) -> None:
-        """Best-effort background warm-up so the first real request isn't a cold pull.
+    def ensure_model_pulled(self, model: str, ctx_size: int | None = None) -> None:
+        """Kick off a best-effort background pull+load of ``model`` if not already done.
 
-        Downloads can be multi-gigabyte, so this runs off the request path
-        entirely; if it hasn't finished by the time an agent needs it, the
-        chat/vision call just takes longer for that first request (lemond
-        pulls-on-demand) rather than failing.
+        Safe to call repeatedly/concurrently for the same or different
+        models -- each distinct model name is only ever pulled once per
+        process lifetime. Downloads can be multi-gigabyte, so this always
+        runs off the request path; if it hasn't finished by the time an
+        agent needs the model, the chat/vision call just takes longer for
+        that first request (lemond pulls-on-demand) rather than failing.
+
+        When ``ctx_size`` is given, also asks lemond to load the model with
+        that context window and persist it (``save_options: true``) so
+        later loads — including lemond's own on-demand ones — keep using
+        it without every caller having to pass ``ctx_size`` on every
+        request. Sized generously by task (see
+        ``lemonade.models.TASK_CONTEXT_SIZES``) since 128GB of unified RAM
+        affords far more headroom than these models' small built-in
+        defaults.
         """
+        if not model:
+            return
+        with self._pull_lock:
+            if model in self._pulled_models:
+                return
+            self._pulled_models.add(model)
+        threading.Thread(target=self._pull_model, args=(model, ctx_size), daemon=True).start()
+
+    def _pull_model(self, model: str, ctx_size: int | None = None) -> None:
+        headers = {"Authorization": f"Bearer {self.api_key}"}
         try:
-            headers = {"Authorization": f"Bearer {self.api_key}"}
-            with httpx.Client(timeout=1800) as client:
-                client.post(f"{self.base_url}/v1/pull", json={"model": model}, headers=headers)
+            with httpx.Client(timeout=_PULL_TIMEOUT_SECONDS) as client:
+                client.post(f"{self.base_url}/v1/pull", json={"model_name": model}, headers=headers)
+                if ctx_size:
+                    client.post(
+                        f"{self.base_url}/v1/load",
+                        json={"model_name": model, "ctx_size": ctx_size, "save_options": True},
+                        headers=headers,
+                    )
         except httpx.HTTPError as exc:
             logger.info("Embedded Lemonade: background model pull for %s did not complete: %s", model, exc)
-
     def stop(self) -> None:
         with self._lock:
             if self._proc is not None and self._proc.poll() is None:

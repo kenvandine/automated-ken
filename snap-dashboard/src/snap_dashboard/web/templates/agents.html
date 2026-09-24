@@ -329,7 +329,8 @@ function updateLemonade(lem) {
     text.style.color = '#52b6ff';
   } else if (lem.available) {
     orb.className = 'lemonade-orb orb-connected';
-    text.textContent = `Connected · ${lem.model}`;
+    const backend = lem.backend === 'system' ? 'System' : 'Embedded';
+    text.textContent = `Connected (${backend}) · ${lem.model}`;
     text.style.color = '#38bd82';
   } else {
     orb.className = 'lemonade-orb orb-offline';

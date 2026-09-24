@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import TestRun
+from snap_dashboard.db.models import Snap, TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.orchestrator import (
     find_snaps_needing_tests,
@@ -84,7 +84,8 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "stable_ver": item["stable_ver"],
                     "can_promote": item["can_promote"],
                     "has_suite": suite_exists_in_repo(
-                        uc.testing_repo, snap_name, uc.github_token
+                        uc.testing_repo, snap_name, uc.github_token,
+                        packaging_repo=item["snap"].packaging_repo,
                     ),
                     "existing_run": existing_run,
                 }
@@ -167,6 +168,9 @@ async def trigger_test(
     # Capture config values for the background task (session-independent)
     testing_repo = uc.testing_repo
     github_token = uc.github_token
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
+        packaging_repo = snap.packaging_repo if snap else None
 
     def _bg() -> None:
         ok, err, db_run_id = trigger_workflow(
@@ -176,14 +180,18 @@ async def trigger_test(
             testing_repo=testing_repo,
             github_token=github_token,
             user_id=user_id,
+            packaging_repo=packaging_repo,
         )
         if not ok:
             logger.error("Failed to trigger test for %s: %s", snap_name, err)
             return
         if db_run_id:
+            with get_session() as session:
+                run = session.query(TestRun).get(db_run_id)
+                resolved_repo = (run.repo if run else None) or testing_repo
             poll_for_gh_run_id(
                 db_run_id, triggered_at,
-                testing_repo=testing_repo,
+                testing_repo=resolved_repo,
                 github_token=github_token,
             )
 
@@ -308,19 +316,21 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
     screenshot_urls: list[str] = []
     metadata: dict = {}
 
-    if uc.testing_repo:
-        pr_data = get_pr_details(uc.testing_repo, pr_number, uc.github_token)
-        metadata = pr_data.get("metadata", {})
-        screenshot_urls = get_pr_screenshot_urls(
-            uc.testing_repo, pr_data, "", uc.github_token
-        )
-
     with get_session() as session:
         run_orm = (
             session.query(TestRun)
             .filter_by(snap_name=snap_name, pr_number=pr_number, user_id=user_id)
             .first()
         )
+        effective_repo = (run_orm.repo if run_orm else None) or uc.testing_repo
+
+        if effective_repo:
+            pr_data = get_pr_details(effective_repo, pr_number, uc.github_token)
+            metadata = pr_data.get("metadata", {})
+            screenshot_urls = get_pr_screenshot_urls(
+                effective_repo, pr_data, "", uc.github_token
+            )
+
         if run_orm:
             run_dict = {
                 "id": run_orm.id,
@@ -347,7 +357,7 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
     pr_info = pr_data.get("pr", {})
     pr_url = pr_info.get(
         "html_url",
-        f"https://github.com/{uc.testing_repo}/pull/{pr_number}",
+        f"https://github.com/{effective_repo}/pull/{pr_number}",
     )
 
     return templates.TemplateResponse(
@@ -361,7 +371,7 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
             "screenshot_urls": screenshot_urls,
             "files": pr_data.get("files", []),
             "comments": pr_data.get("comments", []),
-            "testing_repo": uc.testing_repo,
+            "testing_repo": effective_repo,
             "error": None,
             "last_run": None,
             "current_user": user,
@@ -393,16 +403,22 @@ async def promote_snap_route(
     from snap_dashboard.testing.baselines import persist_stable_baseline_for_run
     from snap_dashboard.testing.promoter import close_test_pr, promote_snap
 
-    ok, output = promote_snap(snap_name, revision, to_channel)
+    ok, output = promote_snap(
+        snap_name, revision, to_channel,
+        store_credentials=getattr(uc, "snapcraft_macaroon", "") or "",
+    )
 
     version = ""
     run_id: int | None = None
+    effective_repo = uc.testing_repo
     with get_session() as session:
         run_orm = (
             session.query(TestRun)
             .filter_by(snap_name=snap_name, pr_number=pr_number, user_id=user_id)
             .first()
         )
+        if run_orm and run_orm.repo:
+            effective_repo = run_orm.repo
         if ok:
             if run_orm:
                 run_id = run_orm.id
@@ -415,17 +431,17 @@ async def promote_snap_route(
                 run_orm.error_msg = output[:500]
 
     if ok:
-        if run_id and uc.testing_repo:
-            persist_stable_baseline_for_run(run_id, uc.testing_repo, uc.github_token)
+        if run_id and effective_repo:
+            persist_stable_baseline_for_run(run_id, effective_repo, uc.github_token)
             with get_session() as session:
                 from snap_dashboard.db.models import VersionBumpPR
 
                 bump = session.query(VersionBumpPR).filter_by(test_run_id=run_id).first()
                 if bump:
                     bump.status = "stable_promoted"
-        if uc.testing_repo:
+        if effective_repo:
             close_test_pr(
-                uc.testing_repo,
+                effective_repo,
                 pr_number,
                 snap_name,
                 version,

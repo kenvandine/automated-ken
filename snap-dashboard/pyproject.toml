@@ -23,6 +23,7 @@ dependencies = [
     "itsdangerous>=2.1.0",
     "pyyaml>=6.0",
     "packaging>=24.0",
+    "pynacl>=1.5.0",
     # htmx is served from CDN in base.html (no Python package needed)
 ]
 

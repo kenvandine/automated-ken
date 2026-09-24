@@ -75,11 +75,13 @@ async def settings_post(
     request: Request,
     publisher: str = Form(default=""),
     github_token: str = Form(default=""),
+    snapcraft_macaroon: str = Form(default=""),
     interval: int = Form(default=6),
-    testing_repo: str = Form(default=""),
     auto_test: str = Form(default=""),
     lemonade_server_url: str = Form(default=""),
     lemonade_model: str = Form(default=""),
+    lemonade_backend: str = Form(default="embedded"),
+    lemonade_api_key: str = Form(default=""),
     bot_github_token: str = Form(default=""),
     bot_github_login: str = Form(default=""),
     agent_interval_hours: int = Form(default=4),
@@ -119,14 +121,18 @@ async def settings_post(
             uc.publisher = publisher.strip()
         if github_token.strip():
             uc.github_token = github_token.strip()
+        if snapcraft_macaroon.strip():
+            uc.snapcraft_macaroon = snapcraft_macaroon.strip()
         uc.collect_interval_hours = interval
-        uc.testing_repo = testing_repo.strip()
         uc.auto_test = _auto_test
         # Agent / AI settings
         if lemonade_server_url.strip():
             uc.lemonade_server_url = lemonade_server_url.strip()
         if lemonade_model.strip():
             uc.lemonade_model = lemonade_model.strip()
+        uc.lemonade_backend = lemonade_backend.strip() if lemonade_backend.strip() in ("embedded", "system") else "embedded"
+        if lemonade_api_key.strip():
+            uc.lemonade_api_key = lemonade_api_key.strip()
         if bot_github_token.strip():
             uc.bot_github_token = bot_github_token.strip()
         if bot_github_login.strip():
@@ -200,4 +206,28 @@ async def settings_run_fleet_normalization(request: Request) -> RedirectResponse
     from snap_dashboard.agents.runner import get_runner
 
     get_runner().submit(RepoNormalizerAgent(user_id=user_id))
+    return RedirectResponse(url="/agents", status_code=303)
+
+
+@router.post("/settings/sync-snapcraft-credentials")
+async def settings_sync_snapcraft_credentials(request: Request) -> RedirectResponse:
+    """Push the stored Snapcraft Store credential out to every packaging repo.
+
+    Runs as a background agent (see ``SnapcraftCredentialSyncAgent``) since
+    it makes GitHub API calls per repo and could take a little while across
+    the whole fleet — progress/result is visible on the Agents page.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+    if not uc or not getattr(uc, "snapcraft_macaroon", ""):
+        return RedirectResponse(url="/settings?error=no_snapcraft_credential", status_code=303)
+
+    from snap_dashboard.agents.snapcraft_credential_sync import SnapcraftCredentialSyncAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(SnapcraftCredentialSyncAgent(user_id=user_id))
     return RedirectResponse(url="/agents", status_code=303)

@@ -42,20 +42,24 @@ class StablePromoterAgent(BaseAgent):
             revision = run.revision
             version = run.version or ""
             pr_number = run.pr_number
+            effective_repo = run.repo or ((uc.testing_repo if uc else "") or "")
 
         if revision is None:
             _mark_promotion_failed(self.version_bump_pr_id, "No candidate revision available for stable promotion.")
             return f"{snap_name}: promotion failed (missing revision)"
 
         self._report(f"Promoting {snap_name} rev {revision} to stable…", snap_name)
-        ok, output = promote_snap(snap_name, revision, "stable")
+        ok, output = promote_snap(
+            snap_name, revision, "stable",
+            store_credentials=getattr(uc, "snapcraft_macaroon", "") or "" if uc else "",
+        )
         if not ok:
             _mark_promotion_failed(self.version_bump_pr_id, output[:500] or "snapcraft release failed")
             return f"{snap_name}: promotion failed"
 
         baseline_count = persist_stable_baseline_for_run(
             self.test_run_id,
-            (uc.testing_repo if uc else "") or "",
+            effective_repo,
             (uc.github_token if uc else "") or "",
         )
 
@@ -76,9 +80,9 @@ class StablePromoterAgent(BaseAgent):
                 else:
                     bump.agent_reasoning = extra.strip()
 
-        if uc and uc.testing_repo and pr_number:
+        if effective_repo and pr_number:
             close_test_pr(
-                uc.testing_repo,
+                effective_repo,
                 pr_number,
                 snap_name,
                 version,

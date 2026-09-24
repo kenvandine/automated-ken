@@ -59,6 +59,8 @@ def get_user_config(user_id: int) -> "UserConfigView":
                 collect_interval_hours=uc.collect_interval_hours,
                 lemonade_server_url=uc.lemonade_server_url or "",
                 lemonade_model=uc.lemonade_model or "",
+                lemonade_backend=uc.lemonade_backend or "embedded",
+                lemonade_api_key=uc.lemonade_api_key or "",
                 bot_github_token=uc.bot_github_token or "",
                 bot_github_login=uc.bot_github_login or "",
                 agent_interval_hours=uc.agent_interval_hours or 4,
@@ -82,6 +84,8 @@ class UserConfigView:
         collect_interval_hours: int = 6,
         lemonade_server_url: str = "",
         lemonade_model: str = "",
+        lemonade_backend: str = "embedded",
+        lemonade_api_key: str = "",
         bot_github_token: str = "",
         bot_github_login: str = "",
         agent_interval_hours: int = 4,
@@ -97,6 +101,8 @@ class UserConfigView:
         self.collect_interval_hours = collect_interval_hours
         self.lemonade_server_url = lemonade_server_url
         self.lemonade_model = lemonade_model
+        self.lemonade_backend = lemonade_backend
+        self.lemonade_api_key = lemonade_api_key
         self.bot_github_token = bot_github_token
         self.bot_github_login = bot_github_login
         self.agent_interval_hours = agent_interval_hours

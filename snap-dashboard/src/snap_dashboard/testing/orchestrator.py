@@ -28,6 +28,17 @@ def _gh_headers(token: str) -> dict[str, str]:
     return h
 
 
+def _default_branch(owner: str, repo: str, token: str) -> str:
+    """Return the default branch name for *owner/repo*, falling back to ``main``."""
+    try:
+        with httpx.Client(timeout=15) as client:
+            resp = client.get(f"{_GH_API}/repos/{owner}/{repo}", headers=_gh_headers(token))
+        resp.raise_for_status()
+        return resp.json().get("default_branch", "main")
+    except httpx.HTTPError:
+        return "main"
+
+
 def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
     """Return snaps where candidate or edge version differs from stable, per architecture.
 
@@ -121,25 +132,63 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
     return results
 
 
-def suite_exists_in_repo(testing_repo: str, snap_name: str, token: str) -> bool:
-    """Return True if ``suites/{snap_name}/suite/__init__.robot`` exists in the testing repo."""
-    if not testing_repo:
-        return False
-    owner, _, repo = testing_repo.partition("/")
-    if not repo:
-        return False
+# Legacy shared repo that used to hold every snap's YARF suite under
+# suites/<snap_name>/suite/. Tests are now colocated in each snap's own
+# packaging repo (tests/suite/) instead — this is only used as a fallback
+# for snaps whose packaging repo hasn't been bootstrapped with colocated
+# tests yet.
+LEGACY_CENTRAL_TESTING_REPO = "kenvandine/automated-ken-tests"
 
-    url = (
-        f"{_GH_API}/repos/{owner}/{repo}/contents"
-        f"/suites/{snap_name}/suite/__init__.robot"
-    )
+
+def _path_exists_in_repo(repo: str, path: str, token: str) -> bool:
+    """Return True if *path* exists in *repo* (``owner/repo`` format)."""
+    owner, _, name = repo.partition("/")
+    if not name:
+        return False
+    url = f"{_GH_API}/repos/{owner}/{name}/contents/{path}"
     try:
         with httpx.Client(timeout=15) as client:
             resp = client.get(url, headers=_gh_headers(token))
             return resp.status_code == 200
     except httpx.RequestError as exc:
-        logger.warning("suite_exists_in_repo request failed for %s: %s", snap_name, exc)
+        logger.warning("_path_exists_in_repo request failed for %s/%s: %s", repo, path, exc)
         return False
+
+
+def resolve_test_repo(
+    packaging_repo: str | None,
+    snap_name: str,
+    token: str,
+    testing_repo_fallback: str = "",
+) -> tuple[str, str]:
+    """Return ``(repo, suite_path)`` for *snap_name*'s YARF test suite.
+
+    Prefers the snap's own ``packaging_repo`` if it has been bootstrapped with
+    colocated tests (``tests/suite/__init__.robot``). Falls back to the legacy
+    shared testing repo (``suites/<snap_name>/suite/``) otherwise, so snaps not
+    yet migrated keep working exactly as before.
+    """
+    if packaging_repo and _path_exists_in_repo(packaging_repo, "tests/suite/__init__.robot", token):
+        return packaging_repo, "tests/suite"
+    fallback = testing_repo_fallback or LEGACY_CENTRAL_TESTING_REPO
+    return fallback, f"suites/{snap_name}/suite"
+
+
+def suite_exists_in_repo(
+    testing_repo: str,
+    snap_name: str,
+    token: str,
+    packaging_repo: str | None = None,
+) -> bool:
+    """Return True if a YARF suite exists for *snap_name*.
+
+    Checks the snap's own ``packaging_repo`` (colocated ``tests/suite/``) first,
+    then falls back to ``suites/{snap_name}/suite/`` in *testing_repo*.
+    """
+    repo, path = resolve_test_repo(packaging_repo, snap_name, token, testing_repo)
+    if not repo:
+        return False
+    return _path_exists_in_repo(repo, f"{path}/__init__.robot", token)
 
 
 def trigger_workflow(
@@ -152,31 +201,39 @@ def trigger_workflow(
     testing_repo: str = "",
     github_token: str = "",
     user_id: int | None = None,
+    packaging_repo: str | None = None,
 ) -> tuple[bool, str, int | None]:
     """Dispatch a ``workflow_dispatch`` event to run YARF tests for the given snap.
 
-    Creates a :class:`TestRun` record in the database before dispatching.
+    Prefers *packaging_repo* if it has been bootstrapped with a colocated
+    YARF suite (``tests/suite/``); falls back to *testing_repo* (or the
+    legacy shared testing repo) otherwise. Creates a :class:`TestRun` record
+    in the database before dispatching, recording which repo was used.
 
     Returns:
         A ``(success, error_message, db_run_id)`` tuple.  ``error_message`` is
         an empty string on success; ``db_run_id`` is the new TestRun PK or None
         on failure.
     """
-    if not testing_repo:
-        # Fall back to global config
+    if not github_token:
         from snap_dashboard.config import get_config
         cfg = get_config()
-        testing_repo = cfg.testing_repo
-        github_token = github_token or cfg.github_token
+        github_token = cfg.github_token
 
-    if not testing_repo:
-        return False, "No testing_repo configured", None
     if not github_token:
         return False, "No GitHub token configured", None
 
-    owner, _, repo = testing_repo.partition("/")
+    resolved_repo, _suite_path = resolve_test_repo(
+        packaging_repo, snap_name, github_token, testing_repo
+    )
+    if not resolved_repo:
+        return False, "No testing repo configured or discoverable", None
+
+    owner, _, repo = resolved_repo.partition("/")
     if not repo:
-        return False, f"Invalid testing_repo format: {testing_repo!r} (expected owner/repo)", None
+        return False, f"Invalid repo format: {resolved_repo!r} (expected owner/repo)", None
+
+    ref = _default_branch(owner, repo, github_token)
 
     # Persist a TestRun record first so we have a run_id to pass as an input.
 
@@ -190,6 +247,7 @@ def trigger_workflow(
             status="pending",
             triggered_by=triggered_by,
             user_id=user_id,
+            repo=resolved_repo,
         )
         session.add(run)
         session.flush()
@@ -197,7 +255,7 @@ def trigger_workflow(
 
     url = f"{_GH_API}/repos/{owner}/{repo}/actions/workflows/snap-test.yml/dispatches"
     payload = {
-        "ref": "main",
+        "ref": ref,
         "inputs": {
             "snap_name": snap_name,
             "from_channel": from_channel,

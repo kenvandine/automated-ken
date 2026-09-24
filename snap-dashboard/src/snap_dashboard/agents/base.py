@@ -104,10 +104,14 @@ class BaseAgent(ABC):
     # Lemonade helper
     # ------------------------------------------------------------------
 
-    def _get_lemonade(self, user_config=None):
-        """Return a LemonadeClient if configured and available, else None."""
+    def _get_lemonade(self, user_config=None, task: str = "text"):
+        """Return a LemonadeClient if configured and available, else None.
+
+        ``task`` selects the opinionated default model for this call
+        ("vision", "text", or "coding") — see ``lemonade.models.TASK_MODELS``.
+        """
         from snap_dashboard.lemonade.client import get_lemonade_client
-        client = get_lemonade_client(user_config, ensure_started=True)
+        client = get_lemonade_client(user_config, ensure_started=True, task=task)
         if client and client.is_available():
             return client
         return None

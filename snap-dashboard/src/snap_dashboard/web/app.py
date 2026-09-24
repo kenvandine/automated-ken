@@ -19,6 +19,25 @@ logger = logging.getLogger(__name__)
 _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
+
+class _RevalidatingStaticFiles(StaticFiles):
+    """StaticFiles that always makes browsers revalidate before using a cached copy.
+
+    Starlette's default StaticFiles response has no ``Cache-Control`` header
+    at all, which leaves browsers free to apply heuristic caching (RFC 7234)
+    and serve a stale ``style.css``/``app.js`` straight from disk cache after
+    a snap rebuild+reinstall — the server-side fix is correct and already
+    being served, but the browser never asks for it again. ``no-cache``
+    still allows cheap conditional GETs (304 Not Modified via the existing
+    ETag/Last-Modified handling) — it just forces a real round-trip to check
+    for changes instead of trusting a heuristic freshness guess.
+    """
+
+    async def get_response(self, path: str, scope) -> object:
+        response = await super().get_response(path, scope)
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
 app = FastAPI(title="Automated Ken", docs_url=None, redoc_url=None)
 
 # Session middleware — secret comes from config.env / SESSION_SECRET env var
@@ -40,7 +59,7 @@ if not _session_secret:
 app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 
 # Mount static files
-app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+app.mount("/static", _RevalidatingStaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 # Jinja2 templates (shared across routes)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
@@ -81,8 +100,9 @@ async def on_startup() -> None:
 
     # Start the bundled/embedded Lemonade server in the background so it
     # doesn't delay web server readiness (first-run installs a ~10MB binary
-    # and warms up a multi-GB vision model). Agents will simply see it as
-    # "not yet available" and fall back to heuristics until it's ready.
+    # and warms up multi-GB opinionated per-task models — vision/text/coding,
+    # see lemonade/models.py). Agents will simply see it as "not yet
+    # available" and fall back to heuristics until it's ready.
     import threading
 
     from snap_dashboard.lemonade.embedded import get_embedded_manager

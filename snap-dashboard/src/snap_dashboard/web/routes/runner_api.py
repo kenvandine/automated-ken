@@ -13,19 +13,21 @@ Auth: every endpoint except ``/enroll`` requires
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 import time
+import zipfile
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, Request, UploadFile
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import Runner, TestRun, TestRunScreenshot
+from snap_dashboard.db.models import Runner, Snap, TestRun, TestRunScreenshot
 from snap_dashboard.db.session import get_session
 from snap_dashboard.runners import generate_token, hash_token
 from snap_dashboard.testing.orchestrator import maybe_submit_auto_promoter
-from snap_dashboard.testing.suite_zip import fetch_suite_zip
+from snap_dashboard.testing.suite_zip import list_suite_files
 
 logger = logging.getLogger(__name__)
 
@@ -214,6 +216,9 @@ async def job_suite(
             return JSONResponse({"error": "job not found"}, status_code=404)
         snap_name = job.snap_name
         user_id = job.user_id
+        job_repo = job.repo
+        snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
+        packaging_repo = snap.packaging_repo if snap else None
 
     uc = get_user_config(user_id) if user_id else None
     testing_repo = getattr(uc, "testing_repo", "") if uc else ""
@@ -223,10 +228,22 @@ async def job_suite(
 
         token = get_config().github_token
 
-    zip_bytes = fetch_suite_zip(testing_repo, snap_name, token)
-    if zip_bytes is None:
+    if job_repo and packaging_repo and job_repo == packaging_repo:
+        # Already resolved to the snap's own colocated repo at dispatch time.
+        files = list_suite_files(job_repo, snap_name, token, packaging_repo=job_repo)
+    elif job_repo:
+        # Already resolved to the legacy shared testing repo at dispatch time.
+        files = list_suite_files(job_repo, snap_name, token)
+    else:
+        files = list_suite_files(testing_repo, snap_name, token, packaging_repo=packaging_repo)
+
+    if not files:
         return JSONResponse({"error": "suite not found"}, status_code=404)
-    return Response(content=zip_bytes, media_type="application/zip")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for arcname, content in files.items():
+            zf.writestr(arcname, content)
+    return Response(content=buf.getvalue(), media_type="application/zip")
 
 
 @router.patch("/{runner_id}/jobs/{job_id}")

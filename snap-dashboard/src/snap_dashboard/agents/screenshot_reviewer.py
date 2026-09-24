@@ -53,6 +53,7 @@ class ScreenshotReviewerAgent(BaseAgent):
             from_channel = (run.from_channel if run else "")
             revision = run.revision if run else None
             pr_number = run.pr_number if run else None
+            testing_repo = (run.repo if run and run.repo else None) or testing_repo
 
         self._report(f"Fetching YARF screenshots for {snap_name}…", snap_name)
         new_screenshots = load_test_run_screenshots(
@@ -69,7 +70,7 @@ class ScreenshotReviewerAgent(BaseAgent):
             )
         comparison_pairs = pair_screenshots(baseline_screenshots, new_screenshots)
 
-        lemonade = self._get_lemonade(uc)
+        lemonade = self._get_lemonade(uc, task="vision")
         decision_dict = None
 
         if lemonade and comparison_pairs:

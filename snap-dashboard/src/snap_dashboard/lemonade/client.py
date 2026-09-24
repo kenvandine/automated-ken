@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_URL = "http://localhost:13305"
 _DEFAULT_MODEL = "user.Qwen3.5-35B-A3B-Q4_K_M"
-_TIMEOUT = 120  # seconds — vision inference can be slow on CPU
+# Generation on CPU/iGPU can be slow, and a not-yet-pulled model triggers a
+# multi-gigabyte on-demand download before the first token — give both
+# plenty of headroom rather than failing a cold first request.
+_TIMEOUT = 600
 
 
 class LemonadeClient:
@@ -223,36 +226,60 @@ def _parse_vision_response(content: str) -> dict | None:
         return None
 
 
-def get_lemonade_client(user_config, ensure_started: bool = False) -> LemonadeClient | None:
-    """Return a LemonadeClient for this user.
+def get_lemonade_client(
+    user_config, ensure_started: bool = False, task: str = "text"
+) -> LemonadeClient | None:
+    """Return a LemonadeClient for this user, configured for ``task``.
 
-    If the user has explicitly configured ``lemonade_server_url`` (Settings ->
-    Agents & AI), that external/self-hosted instance is used as-is (advanced
-    override, e.g. a beefier GPU box). Otherwise this returns a client
-    pointed at our private, bundled "Embedded Lemonade" instance — see
-    ``snap_dashboard.lemonade.embedded`` — which snap-dashboard downloads,
-    runs, and authenticates to on its own, with no host lemonade-server
-    dependency.
+    Backend selection is explicit via ``UserConfig.lemonade_backend``
+    ("embedded" or "system"), defaulting to "embedded" — snap-dashboard's
+    private, bundled "Embedded Lemonade" instance (see
+    ``snap_dashboard.lemonade.embedded``), which is downloaded, run, and
+    authenticated to on its own with no host lemonade-server dependency.
+
+    When ``lemonade_backend`` is "system", the user's own self-managed
+    lemonade-server is used instead — ``lemonade_server_url`` (required)
+    and ``lemonade_api_key`` (optional, only needed if that server enforces
+    one).
+
+    ``task`` selects which opinionated default model to use when the user
+    hasn't set an explicit ``lemonade_model`` override — see
+    ``lemonade.models.TASK_MODELS`` (e.g. "vision" for screenshot review,
+    "text" for PR-description generation, "coding" for the local coding
+    backend).
 
     When ``ensure_started`` is True (safe from background agent threads,
     NOT from request-handling code paths) this will block briefly to start
     the embedded server on first use — on a cold machine this can take a
-    while (binary download), so only pass True where blocking is acceptable.
+    while (binary download) — and kick off a background pull+load of the
+    selected model (sized with its opinionated context window, see
+    ``lemonade.models.TASK_CONTEXT_SIZES``) if it hasn't been fetched yet.
     """
-    url = getattr(user_config, "lemonade_server_url", "") or ""
-    model = getattr(user_config, "lemonade_model", "") or ""
+    from snap_dashboard.lemonade.models import default_context_for, default_model_for
 
-    if url:
-        # Explicit external override — behave exactly as before.
-        return LemonadeClient(base_url=url, model=model or _DEFAULT_MODEL)
+    backend = (getattr(user_config, "lemonade_backend", "") or "embedded").strip().lower()
+    model_override = getattr(user_config, "lemonade_model", "") or ""
+    task_model = model_override or default_model_for(task)
 
-    from snap_dashboard.lemonade.embedded import DEFAULT_EMBEDDED_MODEL, get_embedded_manager
+    if backend == "system":
+        url = getattr(user_config, "lemonade_server_url", "") or ""
+        if url:
+            api_key = getattr(user_config, "lemonade_api_key", "") or ""
+            return LemonadeClient(base_url=url, model=task_model, api_key=api_key)
+        # "system" selected but no URL configured yet — nothing to talk to.
+        logger.warning(
+            "lemonade_backend=system but no lemonade_server_url configured; "
+            "falling back to Embedded Lemonade."
+        )
+
+    from snap_dashboard.lemonade.embedded import get_embedded_manager
 
     manager = get_embedded_manager()
     if ensure_started:
         manager.ensure_started()
+        manager.ensure_model_pulled(task_model, ctx_size=default_context_for(task))
     return LemonadeClient(
         base_url=manager.base_url,
-        model=model or DEFAULT_EMBEDDED_MODEL,
+        model=task_model,
         api_key=manager.api_key,
     )

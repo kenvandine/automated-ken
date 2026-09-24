@@ -82,6 +82,12 @@ class UserConfig(Base):
     # Agent / AI settings
     lemonade_server_url = Column(String(500), nullable=True)
     lemonade_model = Column(String(255), nullable=True)
+    # Which Lemonade instance to talk to: "embedded" (default — our private,
+    # bundled Embedded Lemonade, see lemonade/embedded.py) or "system" (the
+    # user's own self-managed lemonade-server at lemonade_server_url,
+    # optionally protected by lemonade_api_key).
+    lemonade_backend = Column(String(16), default="embedded", nullable=False)
+    lemonade_api_key = Column(Text, nullable=True)
     bot_github_token = Column(Text, nullable=True)
     bot_github_login = Column(String(255), nullable=True)
     agent_interval_hours = Column(Integer, default=4, nullable=False)
@@ -248,6 +254,10 @@ class TestRun(Base):
     from_channel = Column(String(64), nullable=False)  # 'candidate', 'edge'
     version = Column(String(128), nullable=True)
     revision = Column(Integer, nullable=True)
+    # "owner/repo" this run was actually dispatched against — the snap's own
+    # packaging repo when it has colocated YARF tests (tests/suite/), or the
+    # legacy shared testing repo as a fallback for snaps not yet migrated.
+    repo = Column(String(500), nullable=True)
     # statuses: pending, triggered, running, reviewing, passed, failed, error, promoted
     status = Column(String(32), nullable=False, default="pending")
     gh_run_id = Column(String(128), nullable=True)  # GitHub Actions run ID

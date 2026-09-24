@@ -72,25 +72,54 @@
   </form>
 </div>
 
+<!-- Snapcraft Store Credential -->
+<div class="card">
+  <h3 class="section-label">Snapcraft Store Credential</h3>
+  <form method="post" action="/settings">
+    <div class="form-row">
+      <label class="form-label" for="snapcraft_macaroon">Store Login Credential</label>
+      <textarea
+        id="snapcraft_macaroon"
+        name="snapcraft_macaroon"
+        class="form-input"
+        rows="3"
+        placeholder="paste the output of: snapcraft export-login -"
+        autocomplete="off"
+      ></textarea>
+      <span class="form-hint">
+        Stored centrally and used for two things: (1) promoting revisions between channels
+        (<code>snapcraft release</code>, run locally by the dashboard), and (2) automatically
+        pushed out as the <code>SNAPCRAFT_STORE_CREDENTIALS</code> GitHub Actions secret (or a
+        legacy secret name a repo's workflow already uses, e.g. <code>STORE_LOGIN</code>) on
+        every tracked packaging repo, so you don't have to add it to each repo by hand. Generate
+        one credential that covers your whole fleet with
+        <code>snapcraft export-login -</code>, then paste its output here.
+        {% if config.snapcraft_macaroon %}<span class="p-status-label p-status-label--positive">configured</span>{% endif %}
+      </span>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="p-button--positive">Save Credential</button>
+    </div>
+  </form>
+  {% if config.snapcraft_macaroon %}
+  <form method="post" action="/settings/sync-snapcraft-credentials" style="margin-top: 8px;">
+    <button type="submit" class="p-button is-small">Sync to All Packaging Repos Now</button>
+  </form>
+  {% endif %}
+</div>
+
 <!-- Testing Configuration -->
 <div class="card">
   <h3 class="section-label">Testing Configuration</h3>
   <form method="post" action="/settings">
     <div class="form-row">
-      <label class="form-label" for="testing_repo">Testing Repository</label>
-      <input
-        type="text"
-        id="testing_repo"
-        name="testing_repo"
-        class="form-input"
-        value="{{ config.testing_repo }}"
-        placeholder="owner/repo"
-      >
       <span class="form-hint">
-        GitHub repository containing YARF test suites at
-        <code>suites/&lt;snap_name&gt;/suite/</code> and the workflow at
-        <code>.github/workflows/snap-test.yml</code>.
-        Format: <code>owner/repo</code>.
+        YARF test suites now live colocated with each snap's packaging repo, under
+        <code>tests/suite/</code>, alongside a <code>.github/workflows/snap-test.yml</code>
+        workflow. Tests are triggered automatically against each snap's own
+        packaging repository — no central testing repository needs to be configured.
+        Snaps not yet migrated to a colocated suite fall back to the legacy shared
+        <code>kenvandine/automated-ken-tests</code> repo automatically.
       </span>
     </div>
 
@@ -106,8 +135,7 @@
         Enable automatic testing
       </label>
       <span class="form-hint">
-        Automatically trigger tests when a newer version is detected in candidate/beta/edge
-        (requires a testing repository to be configured).
+        Automatically trigger tests when a newer version is detected in candidate/beta/edge.
       </span>
     </div>
 
@@ -120,14 +148,12 @@
   </form>
 
   <div class="setup-instructions" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);">
-    <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px;">Setup Instructions</h4>
+    <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px;">Setup Instructions (per snap)</h4>
     <ol style="font-size: 13px; color: var(--text-muted); line-height: 2; padding-left: 18px;">
-      <li>Create a GitHub repository (e.g. <code>you/snap-tests</code>) for your test suites.</li>
-      <li>Download the workflow template above and commit it to <code>.github/workflows/snap-test.yml</code>.</li>
+      <li>Add the workflow template above to the snap's packaging repo at <code>.github/workflows/snap-test.yml</code>.</li>
       <li>Add a repository secret named <code>SNAP_DASHBOARD_GITHUB_TOKEN</code> with a token that has <code>repo</code> scope.</li>
-      <li>Create YARF test suites under <code>suites/&lt;snap_name&gt;/suite/__init__.robot</code>.</li>
-      <li>Add a label named <code>snap-test-results</code> to the repository.</li>
-      <li>Enter the repository name above and save.</li>
+      <li>Create YARF test suites under <code>tests/suite/__init__.robot</code> in that same repo.</li>
+      <li>Enable "automatic testing" above and save — the dashboard will detect and use the colocated suite automatically.</li>
     </ol>
   </div>
 </div>
@@ -137,7 +163,25 @@
   <h3 class="section-label">Agents &amp; AI</h3>
   <form method="post" action="/settings">
     <div class="form-row">
-      <label class="form-label" for="lemonade_server_url">Lemonade Server URL</label>
+      <label class="form-label" for="lemonade_backend">Lemonade Backend</label>
+      <select id="lemonade_backend" name="lemonade_backend" class="form-input form-select">
+        <option value="embedded" {% if (config.lemonade_backend or 'embedded') == 'embedded' %}selected{% endif %}>
+          Embedded Lemonade (default — bundled, private, zero-setup)
+        </option>
+        <option value="system" {% if config.lemonade_backend == 'system' %}selected{% endif %}>
+          System lemonade-server (self-managed, e.g. a beefier box)
+        </option>
+      </select>
+      <span class="form-hint">
+        <strong>Embedded</strong> downloads, runs, and pulls opinionated default models for its own private
+        <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener" class="link-inline">Lemonade</a>
+        instance automatically — no separate install needed. <strong>System</strong> instead talks to a
+        lemonade-server you run and manage yourself, using the URL/key below.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="lemonade_server_url">System Lemonade Server URL</label>
       <input
         type="text"
         id="lemonade_server_url"
@@ -146,24 +190,41 @@
         value="{{ config.lemonade_server_url }}"
         placeholder="http://localhost:8080"
       >
+      <span class="form-hint">Only used when Lemonade Backend above is set to "System lemonade-server".</span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="lemonade_api_key">System Lemonade API Key</label>
+      <input
+        type="password"
+        id="lemonade_api_key"
+        name="lemonade_api_key"
+        class="form-input"
+        placeholder="optional — only if your server requires one"
+        autocomplete="off"
+      >
       <span class="form-hint">
-        URL of a running <a href="https://github.com/lemonade-hq/lemonade" target="_blank"
-        rel="noopener" class="link-inline">lemonade-server</a> instance.
-        Used for screenshot analysis and PR description generation.
+        Only used with the "System lemonade-server" backend, and only if that server is configured to require a key.
+        {% if config.lemonade_api_key %}<span class="p-status-label p-status-label--positive">configured</span>{% endif %}
       </span>
     </div>
 
     <div class="form-row">
-      <label class="form-label" for="lemonade_model">Vision Model Name</label>
+      <label class="form-label" for="lemonade_model">Model Override (optional)</label>
       <input
         type="text"
         id="lemonade_model"
         name="lemonade_model"
         class="form-input"
         value="{{ config.lemonade_model }}"
-        placeholder="llava"
+        placeholder="leave blank to use opinionated per-task defaults"
       >
-      <span class="form-hint">Model served by lemonade-server (must support vision/images).</span>
+      <span class="form-hint">
+        Leave blank to use opinionated per-task defaults tuned for AMD Strix Halo (128GB RAM) — a vision model for
+        screenshot review, a large reasoning model for PR descriptions, and a coding model reserved for the future
+        local coding backend. Set this to force a single model for all tasks instead (must be available in Lemonade's
+        model catalog; it's pulled automatically if needed).
+      </span>
     </div>
 
     <div class="form-row">
@@ -271,10 +332,11 @@
       </label>
       <span class="form-hint">
         Automatically dispatch a snap-build workflow for snaps that haven't published a new
-        revision within the staleness window. Requires <code>SNAPCRAFT_STORE_CREDENTIALS</code>
-        to be set in each packaging repo (or at the org level if repos are in a GitHub org).
-        The workflow file (<code>.github/workflows/snap-build.yml</code>) will be created
-        automatically if it doesn't exist.
+        revision within the staleness window. Requires the <code>SNAPCRAFT_STORE_CREDENTIALS</code>
+        secret in each packaging repo — set up once above under "Snapcraft Store Credential" and
+        the dashboard provisions it into every repo automatically. The workflow file
+        (<code>.github/workflows/snap-build.yml</code>) will be created automatically if it
+        doesn't exist.
       </span>
     </div>
 

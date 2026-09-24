@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import subprocess
 
@@ -15,8 +16,16 @@ def promote_snap(
     snap_name: str,
     revision: int,
     to_channel: str = "stable",
+    store_credentials: str = "",
 ) -> tuple[bool, str]:
     """Run ``snapcraft release`` to promote *revision* to *to_channel*.
+
+    Args:
+        store_credentials: An optional ``snapcraft export-login`` credential
+            (``UserConfig.snapcraft_macaroon``). When set, it's passed to the
+            subprocess as the ``SNAPCRAFT_STORE_CREDENTIALS`` env var so
+            promotion doesn't depend on the dashboard host already having an
+            ambient ``snapcraft login`` session.
 
     Returns:
         A ``(success, output_or_error_message)`` tuple.  On success the combined
@@ -26,6 +35,10 @@ def promote_snap(
     if not snapcraft:
         return False, "snapcraft not found in PATH"
 
+    env = os.environ.copy()
+    if store_credentials:
+        env["SNAPCRAFT_STORE_CREDENTIALS"] = store_credentials
+
     cmd = [snapcraft, "release", snap_name, str(revision), to_channel]
     logger.info("Running: %s", " ".join(cmd))
     try:
@@ -34,6 +47,7 @@ def promote_snap(
             capture_output=True,
             text=True,
             timeout=120,
+            env=env,
         )
         output = result.stdout + result.stderr
         if result.returncode == 0:

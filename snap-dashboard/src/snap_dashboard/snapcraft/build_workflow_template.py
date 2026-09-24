@@ -11,9 +11,12 @@ Required repository secret:
     snapcraft export-login --snaps <snap-name> \\
       --channels candidate --acls package_upload creds.txt
 
-  Note: GitHub personal accounts do not support account-level secrets.
-  Add the secret to each packaging repo individually, or use a GitHub
-  Organisation so the secret is shared across all repos.
+  Note: GitHub personal accounts do not support account-level secrets, so
+  this still needs to land as a per-repo secret — but you don't have to add
+  it by hand anymore. Paste one credential covering your whole fleet into
+  Settings → "Snapcraft Store Credential" and use "Sync to All Packaging
+  Repos Now"; the dashboard pushes it out to every tracked repo's Actions
+  secrets automatically (see agents/snapcraft_credential_sync.py).
 """
 
 from __future__ import annotations
@@ -24,7 +27,8 @@ WORKFLOW_YAML: str = r"""
 # Automated snap build workflow managed by snap-dashboard.
 # Builds the snap and publishes it to the candidate channel.
 #
-# Required repository secret:
+# Required repository secret (auto-provisioned by the dashboard's Settings
+# page — see "Snapcraft Store Credential" — no manual setup needed):
 #   SNAPCRAFT_STORE_CREDENTIALS
 
 name: Automated Snap Build

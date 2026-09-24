@@ -113,6 +113,7 @@ async def agent_status(request: Request) -> JSONResponse:
     # Lemonade status
     lemonade_url = uc.lemonade_server_url or ""
     lemonade_model = uc.lemonade_model or ""
+    lemonade_backend = getattr(uc, "lemonade_backend", "") or "embedded"
     lemonade_available = False
     try:
         from snap_dashboard.lemonade.client import get_lemonade_client
@@ -136,6 +137,7 @@ async def agent_status(request: Request) -> JSONResponse:
             "available": lemonade_available,
             "url": lemonade_url,
             "model": lemonade_model,
+            "backend": lemonade_backend,
             "inferencing": any(
                 "Lemonade AI" in v.get("task", "") or "⚡" in v.get("task", "")
                 for v in active.values()

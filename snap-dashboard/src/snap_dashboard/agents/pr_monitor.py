@@ -239,7 +239,7 @@ class PRMonitorAgent(BaseAgent):
 
     def _trigger_yarf(self, pr: dict, uc) -> bool:
         """ci_passed → yarf_running by triggering a YARF test run."""
-        if not uc or not uc.testing_repo or not uc.github_token:
+        if not uc or not uc.github_token:
             return False
         snap_name = _snap_name_from_id(pr["snap_id"])
         if snap_name:
@@ -256,6 +256,7 @@ class PRMonitorAgent(BaseAgent):
             testing_repo=uc.testing_repo,
             github_token=uc.github_token,
             user_id=pr["user_id"],
+            packaging_repo=pr.get("packaging_repo"),
         )
         if ok and run_id:
             with get_session() as session:

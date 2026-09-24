@@ -49,6 +49,7 @@ class TestRunAutoPromoterAgent(BaseAgent):
             revision = run.revision
             pr_number = run.pr_number
             version = run.version or ""
+            effective_repo = run.repo or uc.testing_repo
 
         if revision is None:
             _set_run_note(self.test_run_id, "Auto-promote skipped: candidate revision is missing.")
@@ -58,11 +59,11 @@ class TestRunAutoPromoterAgent(BaseAgent):
             self.user_id,
             snap_name,
             architecture,
-            uc.testing_repo,
+            effective_repo,
             uc.github_token,
         )
         new_assets = load_test_run_screenshots(
-            uc.testing_repo, pr_number, uc.github_token, test_run_id=self.test_run_id
+            effective_repo, pr_number, uc.github_token, test_run_id=self.test_run_id
         )
         pairs = pair_screenshots(baseline_assets, new_assets)
         if not pairs:
@@ -72,7 +73,7 @@ class TestRunAutoPromoterAgent(BaseAgent):
             )
             return f"{snap_name}: no comparable screenshots"
 
-        lemonade = self._get_lemonade(uc)
+        lemonade = self._get_lemonade(uc, task="vision")
         if not lemonade:
             _set_run_note(
                 self.test_run_id,
@@ -110,14 +111,17 @@ class TestRunAutoPromoterAgent(BaseAgent):
             return f"{snap_name}: requires manual review"
 
         self._report(f"Promoting {snap_name} rev {revision} to stable…", snap_name)
-        ok, output = promote_snap(snap_name, revision, "stable")
+        ok, output = promote_snap(
+            snap_name, revision, "stable",
+            store_credentials=getattr(uc, "snapcraft_macaroon", "") or "" if uc else "",
+        )
         if not ok:
             _set_run_note(self.test_run_id, f"Auto-promote failed: {output[:500]}")
             return f"{snap_name}: promotion failed"
 
         baseline_count = persist_stable_baseline_for_run(
             self.test_run_id,
-            uc.testing_repo,
+            effective_repo,
             uc.github_token,
         )
         with get_session() as session:
@@ -139,7 +143,7 @@ class TestRunAutoPromoterAgent(BaseAgent):
 
         if pr_number:
             close_test_pr(
-                uc.testing_repo,
+                effective_repo,
                 pr_number,
                 snap_name,
                 version,

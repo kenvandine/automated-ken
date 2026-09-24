@@ -107,6 +107,14 @@ def _migrate() -> None:
         "ALTER TABLE user_configs ADD COLUMN external_coding_api_key TEXT",
         "ALTER TABLE user_configs ADD COLUMN external_coding_api_base_url VARCHAR(500)",
         "ALTER TABLE user_configs ADD COLUMN external_coding_api_model VARCHAR(255)",
+        # Explicit Lemonade backend selection (embedded default vs. system
+        # lemonade-server) — see lemonade/client.py.
+        "ALTER TABLE user_configs ADD COLUMN lemonade_backend VARCHAR(16) DEFAULT 'embedded'",
+        "ALTER TABLE user_configs ADD COLUMN lemonade_api_key TEXT",
+        # Records which repo a test run was actually dispatched against — the
+        # snap's own packaging repo when it has colocated YARF tests, or the
+        # legacy shared testing repo as a fallback. See testing/orchestrator.py.
+        "ALTER TABLE test_runs ADD COLUMN repo VARCHAR(500)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
