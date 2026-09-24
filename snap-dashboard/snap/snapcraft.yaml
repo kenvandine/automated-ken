@@ -43,12 +43,31 @@ apps:
     daemon: simple
     extensions: [gpu]
     # `opengl` + the `gpu` extension's gpu-2404/mesa-2404 content interface
-    # are required so the embedded Lemonade `lemond` subprocess (a
-    # ROCm/AMDGPU-linked binary, targeting AMD Strix Halo) can see host GPU
-    # driver libraries like libdrm_amdgpu.so.1 — without them, strict
-    # confinement hides those libraries and lemond crash-loops on startup.
-    # This mirrors the interface set the upstream lemonade-server snap uses.
-    plugs: [network-bind, network, opengl]
+    # let lemond find host GPU driver libraries like libdrm_amdgpu.so.1
+    # (without them, strict confinement hides those libraries and lemond
+    # crash-loops on startup). `accel` grants access to the AMD ROCm
+    # compute-accelerator device (/dev/kfd) itself — without it lemond can
+    # find its GPU libraries fine but still can't actually dispatch work
+    # to the GPU and silently falls back to a CPU/Vulkan backend instead
+    # of ROCm. `hardware-observe`/`system-observe`/`process-control` let
+    # it do its own hardware inventory and manage backend subprocesses,
+    # and `shared-memory` is used for its inter-process GPU buffers. This
+    # mirrors the full interface set the upstream lemonade-server snap
+    # uses (confirmed via `cat /snap/lemonade-server/current/meta/snap.yaml`,
+    # `daemon` app's plug list — same exact set, minus `removable-media`
+    # which our app has no need to import model files from removable
+    # drives; `home` is already granted at the top-level snap-dashboard
+    # app but lemond needs it too since it inherits this app's plugs).
+    plugs:
+      - network-bind
+      - network
+      - home
+      - opengl
+      - accel
+      - hardware-observe
+      - system-observe
+      - process-control
+      - shared-memory
 
 parts:
   snap-dashboard:
