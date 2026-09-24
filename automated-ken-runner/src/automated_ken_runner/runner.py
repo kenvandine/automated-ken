@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import io
 import logging
-import platform
+import os
 import shutil
 import subprocess
 import tempfile
@@ -180,7 +180,11 @@ class RunnerLoop:
     def _run_yarf(self, snap_name: str, suite_dir: Path, tmp_path: Path) -> tuple[int, str]:
         outdir = tmp_path / "results"
         outdir.mkdir(exist_ok=True)
-        platform_name = "Wayland" if "wayland" in platform.uname().release.lower() else "X11"
+        # yarf only accepts "Mir" (real Wayland display, via WAYLAND_DISPLAY)
+        # or "Vnc" (headless). Use Mir whenever a real graphical session is
+        # present on this machine, otherwise fall back to yarf's own
+        # "Vnc" default for headless runners.
+        platform_name = "Mir" if os.environ.get("WAYLAND_DISPLAY") or os.environ.get("DISPLAY") else "Vnc"
         proc = subprocess.run(
             ["yarf", "--platform", platform_name, "--outdir", str(outdir), str(suite_dir)],
             capture_output=True, timeout=1800, check=False,
