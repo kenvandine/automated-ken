@@ -165,23 +165,31 @@ async def next_job(
     """Long-poll for a queued job, returning 204 if nothing shows up in time.
 
     On server shutdown, uvicorn's ``timeout_graceful_shutdown`` (see
-    cli.py) forcibly closes whatever connection this loop is holding open
-    rather than waiting out the full ``timeout`` — the runner client just
-    sees a dropped connection and reconnects, same as any other network
-    hiccup, so a `snap stop`/refresh isn't held up by an in-flight poll.
+    cli.py) cancels whatever request task is holding this loop open
+    rather than waiting out the full ``timeout``, so a `snap stop`/refresh
+    isn't held up by an in-flight poll. That surfaces here as an
+    ``asyncio.CancelledError`` out of ``asyncio.sleep()`` -- letting it
+    propagate produces a scary (but harmless) "Exception in ASGI
+    application" traceback + 500 in the journal on every shutdown, so we
+    catch it and return a normal empty response instead. The runner
+    client already treats any dropped connection the same as a plain
+    timeout and just reconnects.
     """
     result = _auth_or_401(authorization, runner_id)
     if isinstance(result, JSONResponse):
         return result
 
     deadline = time.monotonic() + min(timeout, 60)
-    while True:
-        job = _try_claim_job(runner_id)
-        if job is not None:
-            return JSONResponse(job)
-        if time.monotonic() >= deadline:
-            return Response(status_code=204)
-        await asyncio.sleep(_NEXT_JOB_POLL_INTERVAL)
+    try:
+        while True:
+            job = _try_claim_job(runner_id)
+            if job is not None:
+                return JSONResponse(job)
+            if time.monotonic() >= deadline:
+                return Response(status_code=204)
+            await asyncio.sleep(_NEXT_JOB_POLL_INTERVAL)
+    except asyncio.CancelledError:
+        return Response(status_code=204)
 
 
 def _try_claim_job(runner_id: int) -> dict | None:
