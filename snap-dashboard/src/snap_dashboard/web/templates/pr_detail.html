@@ -81,6 +81,7 @@
     and close this PR.
   </p>
   <form method="post" action="/testing/promote/{{ run.snap_name }}">
+    <input type="hidden" name="run_id" value="{{ run.id }}">
     <input type="hidden" name="pr_number" value="{{ run.pr_number }}">
     <input type="hidden" name="revision" value="{{ run.revision }}">
     <input type="hidden" name="to_channel" value="stable">
@@ -96,9 +97,10 @@
 {% endif %}
 
 <!-- ================================================================
-     SCREENSHOTS
+     AI REVIEW + SCREENSHOTS (baseline-vs-new comparison, when available)
      ================================================================ -->
-{% if screenshot_urls %}
+{% include "_screenshot_review.html" %}
+{% if not screenshot_pairs and not unpaired_screenshots and screenshot_urls %}
 <div class="card">
   <h3 class="section-label">Screenshots</h3>
   <div style="display: flex; flex-wrap: wrap; gap: 12px;">

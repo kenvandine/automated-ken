@@ -286,6 +286,14 @@ class TestRun(Base):
     # debug a failure from the web UI instead of SSHing into the runner and
     # grepping journalctl. Only populated for dispatch_target=remote_runner.
     log_output = Column(Text, nullable=True)
+    # LLM vision-review outcome — always populated by TestRunAutoPromoterAgent
+    # for any "passed" candidate run once it's reviewed (see
+    # agents/test_run_auto_promoter.py), independent of whether the run has
+    # an associated VersionBumpPR. decision: approve | reject | needs_review,
+    # or None if review hasn't run / was skipped (see review_reasoning for why).
+    review_decision = Column(String(32), nullable=True)
+    review_confidence = Column(Float, nullable=True)
+    review_reasoning = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="test_runs")
     runner = relationship("Runner", foreign_keys=[runner_id])

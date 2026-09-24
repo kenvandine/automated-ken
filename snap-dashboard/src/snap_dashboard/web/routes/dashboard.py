@@ -141,9 +141,12 @@ async def dashboard_index(request: Request) -> HTMLResponse:
         for run in active_runs:
             if run.snap_name not in test_runs_by_snap:
                 test_runs_by_snap[run.snap_name] = {
+                    "id": run.id,
                     "status": run.status,
                     "pr_number": run.pr_number,
                     "version": run.version,
+                    "review_decision": run.review_decision,
+                    "review_confidence": run.review_confidence,
                 }
 
         return templates.TemplateResponse(

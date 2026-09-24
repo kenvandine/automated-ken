@@ -1,0 +1,78 @@
+{# Shared AI screenshot-review + baseline-vs-new comparison block.
+   Included from pr_detail.html and run_detail.html so "ready to promote"
+   is consistently explorable wherever a test run can be viewed in full.
+   Expects: run (dict), review_decision, review_confidence, review_reasoning,
+   screenshot_pairs (list[(baseline_asset, new_asset)]), unpaired_screenshots,
+   has_baseline (bool). #}
+
+{% if review_decision or review_reasoning %}
+<div class="card" style="border-left: 3px solid
+  {%- if review_decision == 'approve' %} #4ade80
+  {%- elif review_decision == 'reject' %} #f87171
+  {%- elif review_decision == 'needs_review' %} #facc15
+  {%- else %} var(--border) {%- endif -%};">
+  <h3 class="section-label">AI Screenshot Review</h3>
+  <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
+    {% if review_decision == 'approve' %}
+    <span class="p-status-label p-status-label--positive">Approved</span>
+    {% elif review_decision == 'reject' %}
+    <span class="p-status-label p-status-label--negative">Rejected</span>
+    {% elif review_decision == 'needs_review' %}
+    <span class="p-status-label p-status-label--caution">Needs manual review</span>
+    {% else %}
+    <span class="muted small">No decision recorded</span>
+    {% endif %}
+    {% if review_confidence is not none %}
+    <span class="muted small">confidence {{ "%.0f"|format(review_confidence * 100) }}%</span>
+    {% endif %}
+  </div>
+  {% if review_reasoning %}
+  <p style="font-size: 13px; color: var(--text-muted); margin: 0;">{{ review_reasoning }}</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if screenshot_pairs %}
+<div class="card">
+  <h3 class="section-label">Screenshot Comparison</h3>
+  {% for baseline, new in screenshot_pairs %}
+  <div class="screenshot-compare" style="margin-bottom: 16px;">
+    <div class="screenshot-pane">
+      <p class="screenshot-label">Stable baseline</p>
+      <img src="data:image/png;base64,{{ baseline.image_b64 }}" alt="stable baseline screenshot" class="screenshot-img" loading="lazy">
+    </div>
+    <div class="screenshot-pane">
+      <p class="screenshot-label">This run{% if run.version %} ({{ run.version }}){% endif %}</p>
+      <img src="data:image/png;base64,{{ new.image_b64 }}" alt="new screenshot" class="screenshot-img" loading="lazy">
+    </div>
+  </div>
+  {% endfor %}
+  {% if unpaired_screenshots %}
+  <p class="muted small" style="margin-top: 4px;">Additional screenshots with no matching baseline:</p>
+  <div style="display:flex; flex-wrap:wrap; gap:12px; margin-top: 6px;">
+    {% for shot in unpaired_screenshots %}
+    <img src="data:image/png;base64,{{ shot.image_b64 }}" alt="{{ shot.image_name }}"
+      style="max-width:320px; max-height:240px; border-radius:6px; border:1px solid var(--border); object-fit:contain; background: var(--surface2);"
+      loading="lazy">
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+{% elif unpaired_screenshots %}
+<div class="card">
+  <h3 class="section-label">Screenshots</h3>
+  {% if not has_baseline %}
+  <p class="muted small" style="margin-bottom: 10px;">
+    No stable baseline screenshot available yet for comparison — this looks like the
+    first tested version of this snap (or none has been promoted to stable before).
+  </p>
+  {% endif %}
+  <div style="display:flex; flex-wrap:wrap; gap:12px;">
+    {% for shot in unpaired_screenshots %}
+    <img src="data:image/png;base64,{{ shot.image_b64 }}" alt="{{ shot.image_name }}"
+      style="max-width:320px; max-height:240px; border-radius:6px; border:1px solid var(--border); object-fit:contain; background: var(--surface2);"
+      loading="lazy">
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

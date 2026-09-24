@@ -50,11 +50,7 @@
     <div class="attention-card" style="border-left-color: #4ade80; min-width: 240px;">
       <div class="attention-card-header">
         <span class="attention-tag" style="background: rgba(74,222,128,0.15); color:#4ade80; border: 1px solid rgba(74,222,128,0.3);">Passed — ready to promote</span>
-        {% if run.pr_number %}
-        <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="attention-name">{{ run.snap_name }}</a>
-        {% else %}
-        <span class="attention-name">{{ run.snap_name }}</span>
-        {% endif %}
+        <a href="/testing/runs/{{ run.id }}" class="attention-name">{{ run.snap_name }}</a>
         <span class="muted small" style="margin-left:6px;">{{ run.architecture or 'amd64' }}</span>
       </div>
       <div class="attention-versions">
@@ -68,20 +64,33 @@
           <span class="ver-value ver-old">target</span>
         </div>
       </div>
-      {% if run.pr_number %}
+      {% if run.review_decision %}
+      <div style="margin-top: 6px;">
+        {% if run.review_decision == 'approve' %}
+        <span class="p-status-label p-status-label--positive">AI: approved</span>
+        {% elif run.review_decision == 'reject' %}
+        <span class="p-status-label p-status-label--negative">AI: rejected</span>
+        {% else %}
+        <span class="p-status-label p-status-label--caution">AI: needs review</span>
+        {% endif %}
+        {% if run.review_confidence is not none %}
+        <span class="muted small">{{ "%.0f"|format(run.review_confidence * 100) }}% confidence</span>
+        {% endif %}
+      </div>
+      {% endif %}
       <form method="post" action="/testing/promote/{{ run.snap_name }}" style="margin-top: 8px;">
-        <input type="hidden" name="pr_number" value="{{ run.pr_number }}">
+        <input type="hidden" name="run_id" value="{{ run.id }}">
+        <input type="hidden" name="pr_number" value="{{ run.pr_number or 0 }}">
         <input type="hidden" name="revision" value="{{ run.revision or 0 }}">
         <input type="hidden" name="to_channel" value="stable">
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="p-button is-small">View PR</a>
+          <a href="/testing/runs/{{ run.id }}" class="p-button is-small">View Screenshots</a>
           <button type="submit" class="p-button--positive is-small"
             onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')">
             Promote to Stable
           </button>
         </div>
       </form>
-      {% endif %}
     </div>
     {% endfor %}
   </div>
@@ -127,17 +136,12 @@
           {% if item.existing_run %}
           {% set run = item.existing_run %}
           {% if run.status == 'passed' %}
-          {% if run.pr_number %}
-          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="p-status-label p-status-label--positive">passed</a>
-          {% else %}
-          <span class="p-status-label p-status-label--positive">passed</span>
+          <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
+          {% if run.review_decision == 'reject' %}
+          <span class="muted small" title="AI review flagged this" style="margin-left:4px;">⚠</span>
           {% endif %}
           {% elif run.status == 'failed' %}
-          {% if run.pr_number %}
-          <a href="/testing/pr/{{ item.snap.name }}/{{ run.pr_number }}" class="p-status-label p-status-label--negative">failed</a>
-          {% else %}
-          <span class="p-status-label p-status-label--negative">failed</span>
-          {% endif %}
+          <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative">failed</a>
           {% if run.has_log %}
           <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="View runner debug log">log</a>
           {% endif %}
@@ -263,6 +267,8 @@
             <a href="/testing/pr/{{ run.snap_name }}/{{ run.pr_number }}" class="link-inline small">
               #{{ run.pr_number }}
             </a>
+            {% elif run.status in ('passed', 'failed', 'promoted') %}
+            <a href="/testing/runs/{{ run.id }}" class="link-inline small">view</a>
             {% else %}
             <span class="muted small">—</span>
             {% endif %}

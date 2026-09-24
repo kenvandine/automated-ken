@@ -144,6 +144,11 @@ def _migrate() -> None:
         # Captured runner-side stdout/stderr/traceback so failures can be
         # debugged from the web UI. See automated_ken_runner.runner._execute_job.
         "ALTER TABLE test_runs ADD COLUMN log_output TEXT",
+        # LLM vision-review outcome, always recorded independent of whether a
+        # VersionBumpPR exists — see agents/test_run_auto_promoter.py.
+        "ALTER TABLE test_runs ADD COLUMN review_decision VARCHAR(32)",
+        "ALTER TABLE test_runs ADD COLUMN review_confidence FLOAT",
+        "ALTER TABLE test_runs ADD COLUMN review_reasoning TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

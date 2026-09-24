@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+
+{% block title %}Test Run — {{ run.snap_name }} — Automated Ken{% endblock %}
+
+{% block content %}
+
+<a href="/testing" class="back-link">&larr; Back to Testing</a>
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">{{ run.snap_name }}</h2>
+    <p class="text-muted">
+      YARF test results &mdash;
+      <span class="p-status-label p-status-label--caution">{{ run.from_channel }}</span>
+      {{ run.version or '' }}
+      {% if run.revision %}&nbsp;(rev {{ run.revision }}){% endif %}
+      &nbsp;<span class="muted small">{{ run.architecture }}</span>
+    </p>
+  </div>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    {% if run.status == 'passed' %}
+    <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
+    {% elif run.status == 'failed' %}
+    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
+    {% elif run.status == 'promoted' %}
+    <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">Promoted to stable</span>
+    {% elif run.status == 'error' %}
+    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">Error</span>
+    {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
+    <span class="p-status-label p-status-label--caution" style="font-size:13px; padding: 4px 12px;">{{ run.status | capitalize }}</span>
+    {% else %}
+    <span class="p-status-label" style="font-size:13px; padding: 4px 12px;">{{ run.status }}</span>
+    {% endif %}
+    {% if run.has_log %}
+    <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="p-button is-small">View Log</a>
+    {% endif %}
+  </div>
+</div>
+
+{% if run.error_msg and run.status != 'failed' %}
+<div class="card" style="border-left: 3px solid var(--accent); margin-bottom: 20px;">
+  <p style="font-size: 13px; color: var(--text-muted); margin: 0;">{{ run.error_msg }}</p>
+</div>
+{% endif %}
+
+<!-- ================================================================
+     PROMOTE TO STABLE
+     ================================================================ -->
+{% if run.status == 'passed' and not run.promoted and run.revision %}
+<div class="card" style="border-left: 3px solid #4ade80;">
+  <h3 class="section-label" style="color: #4ade80;">Promote to Stable</h3>
+  <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
+    All tests passed for <strong>{{ run.snap_name }}</strong> {{ run.version }}.
+    Click below to run <code>snapcraft release {{ run.snap_name }} {{ run.revision }} stable</code>.
+  </p>
+  <form method="post" action="/testing/promote/{{ run.snap_name }}">
+    <input type="hidden" name="run_id" value="{{ run.id }}">
+    <input type="hidden" name="pr_number" value="{{ run.pr_number or 0 }}">
+    <input type="hidden" name="revision" value="{{ run.revision }}">
+    <input type="hidden" name="to_channel" value="stable">
+    <button
+      type="submit"
+      class="p-button--positive"
+      onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')"
+    >
+      Promote {{ run.snap_name }} to Stable
+    </button>
+  </form>
+</div>
+{% endif %}
+
+{% include "_screenshot_review.html" %}
+
+{% endblock %}

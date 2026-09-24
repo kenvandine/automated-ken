@@ -108,6 +108,11 @@ class TestRunAutoPromoterAgent(BaseAgent):
         # recorded/displayed, whether or not auto-promote is turned on;
         # only the actual promotion action below is gated on that setting.
         with get_session() as session:
+            run = session.query(TestRun).get(self.test_run_id)
+            if run:
+                run.review_decision = decision["decision"]
+                run.review_confidence = decision["confidence"]
+                run.review_reasoning = decision["reasoning"]
             bump = session.query(VersionBumpPR).filter_by(test_run_id=self.test_run_id).first()
             if bump:
                 bump.agent_decision = decision["decision"]
@@ -185,3 +190,9 @@ def _set_run_note(test_run_id: int, message: str) -> None:
         if run:
             run.status = "passed"
             run.error_msg = message[:500]
+            # Only record this as the review reasoning when a real decision
+            # wasn't already reached (a genuine approve/reject/needs_review
+            # from _aggregate_decisions() takes priority — see the call
+            # sites above that set run.review_decision directly).
+            if not run.review_decision:
+                run.review_reasoning = message[:2000]

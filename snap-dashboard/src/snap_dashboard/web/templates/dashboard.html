@@ -53,13 +53,22 @@
       {% if snap_run %}
       <div class="attention-test-status">
         {% if snap_run.status == 'passed' %}
-        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="p-status-label p-status-label--positive">Tests passed</a>
+        <a href="/testing/runs/{{ snap_run.id }}" class="p-status-label p-status-label--positive">Tests passed</a>
         {% elif snap_run.status == 'failed' %}
-        <a href="/testing/pr/{{ item.snap.name }}/{{ snap_run.pr_number }}" class="p-status-label p-status-label--negative">Tests failed</a>
+        <a href="/testing/runs/{{ snap_run.id }}" class="p-status-label p-status-label--negative">Tests failed</a>
         {% elif snap_run.status in ('pending', 'triggered', 'running') %}
         <span class="p-status-label p-status-label--caution">Tests running…</span>
         {% elif snap_run.status == 'promoted' %}
         <span class="p-status-label p-status-label--positive">Promoted</span>
+        {% endif %}
+        {% if snap_run.review_decision and snap_run.status in ('passed', 'failed') %}
+        {% if snap_run.review_decision == 'approve' %}
+        <span class="muted small" style="margin-left:4px;">AI: approved{% if snap_run.review_confidence is not none %} ({{ "%.0f"|format(snap_run.review_confidence * 100) }}%){% endif %}</span>
+        {% elif snap_run.review_decision == 'reject' %}
+        <span class="muted small" style="margin-left:4px;">AI: rejected{% if snap_run.review_confidence is not none %} ({{ "%.0f"|format(snap_run.review_confidence * 100) }}%){% endif %}</span>
+        {% else %}
+        <span class="muted small" style="margin-left:4px;">AI: needs review</span>
+        {% endif %}
         {% endif %}
       </div>
       {% elif config.testing_repo %}

@@ -74,6 +74,8 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "pr_url": existing.pr_url,
                     "repo": existing.repo or uc.testing_repo,
                     "has_log": bool(existing.log_output),
+                    "review_decision": existing.review_decision,
+                    "review_confidence": existing.review_confidence,
                 }
                 if existing
                 else None
@@ -124,6 +126,8 @@ async def testing_index(request: Request) -> HTMLResponse:
                 "error_msg": r.error_msg,
                 "repo": r.repo or uc.testing_repo,
                 "has_log": bool(r.log_output),
+                "review_decision": r.review_decision,
+                "review_confidence": r.review_confidence,
             }
             for r in all_runs
         ]
@@ -383,6 +387,126 @@ async def testing_status(request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# Shared screenshot-comparison + review-score context
+# ---------------------------------------------------------------------------
+
+
+def _build_review_context(
+    user_id: int | None,
+    snap_name: str,
+    architecture: str,
+    pr_number: int | None,
+    test_run_id: int,
+    review_decision: str | None,
+    review_confidence: float | None,
+    review_reasoning: str | None,
+    effective_repo: str,
+    uc,
+) -> dict:
+    """Build the AI-review + baseline-vs-new screenshot context for a TestRun.
+
+    Shared by the run-detail page and the PR detail page so "ready to
+    promote" is consistently explorable (review decision/confidence/
+    reasoning, and a side-by-side comparison against the last known-good
+    stable screenshot) no matter which page a user lands on. Takes plain
+    values rather than the ORM row so callers can extract everything they
+    need while their session is still open, then call this afterwards
+    (baseline/screenshot loading can make GitHub API requests).
+    """
+    from snap_dashboard.testing.baselines import (
+        get_or_build_stable_baseline_assets,
+        load_test_run_screenshots,
+        pair_screenshots,
+    )
+
+    baseline_assets = get_or_build_stable_baseline_assets(
+        user_id, snap_name, architecture, effective_repo, uc.github_token if uc else "",
+    )
+    new_assets = load_test_run_screenshots(
+        effective_repo, pr_number, uc.github_token if uc else "", test_run_id=test_run_id,
+    )
+    pairs = pair_screenshots(baseline_assets, new_assets)
+    paired_new_names = {new.image_name for _baseline, new in pairs}
+    unpaired_new = [a for a in new_assets if a.image_name not in paired_new_names]
+
+    return {
+        "review_decision": review_decision,
+        "review_confidence": review_confidence,
+        "review_reasoning": review_reasoning,
+        "screenshot_pairs": pairs,
+        "unpaired_screenshots": unpaired_new,
+        "has_baseline": bool(baseline_assets),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Run detail page — canonical link target for any test run, PR or not
+# ---------------------------------------------------------------------------
+
+
+@router.get("/testing/runs/{run_id}", response_class=HTMLResponse)
+async def view_run(run_id: int, request: Request) -> HTMLResponse:
+    """Render a self-contained detail page for a single test run.
+
+    Unlike ``/testing/pr/{snap_name}/{pr_number}`` (which needs a GitHub PR
+    to look up), this works for every run — including ones with no
+    associated PR (e.g. a manually-triggered smoke test) — since it's the
+    only reliable place to view a run's screenshots and AI review score.
+    Redirects to the PR detail page instead when one exists, since that
+    page has additional GitHub-sourced context (files/comments/PR body).
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        run_orm = session.query(TestRun).filter_by(id=run_id, user_id=user_id).first()
+        if run_orm is None:
+            return PlainTextResponse("Run not found", status_code=404)
+        if run_orm.pr_number:
+            return RedirectResponse(
+                url=f"/testing/pr/{run_orm.snap_name}/{run_orm.pr_number}", status_code=303,
+            )
+        run_data = {
+            "id": run_orm.id,
+            "snap_name": run_orm.snap_name,
+            "architecture": run_orm.architecture or "amd64",
+            "from_channel": run_orm.from_channel,
+            "version": run_orm.version,
+            "revision": run_orm.revision,
+            "status": run_orm.status,
+            "promoted": run_orm.promoted,
+            "error_msg": run_orm.error_msg,
+            "started_at": run_orm.started_at,
+            "finished_at": run_orm.finished_at,
+            "repo": run_orm.repo,
+            "has_log": bool(run_orm.log_output),
+        }
+        review_decision = run_orm.review_decision
+        review_confidence = run_orm.review_confidence
+        review_reasoning = run_orm.review_reasoning
+
+    uc = get_user_config(user_id)
+    effective_repo = run_data["repo"] or uc.testing_repo
+    context = _build_review_context(
+        user_id, run_data["snap_name"], run_data["architecture"], None, run_data["id"],
+        review_decision, review_confidence, review_reasoning, effective_repo, uc,
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "run_detail.html",
+        {
+            "run": run_data,
+            "current_user": user,
+            "last_run": None,
+            **context,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # PR detail page
 # ---------------------------------------------------------------------------
 
@@ -416,6 +540,7 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
             {
                 "id": run_orm.id,
                 "snap_name": run_orm.snap_name,
+                "architecture": run_orm.architecture or "amd64",
                 "pr_number": run_orm.pr_number,
                 "status": run_orm.status,
                 "version": run_orm.version,
@@ -423,6 +548,9 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
                 "revision": run_orm.revision,
                 "promoted": run_orm.promoted,
                 "repo": run_orm.repo,
+                "review_decision": run_orm.review_decision,
+                "review_confidence": run_orm.review_confidence,
+                "review_reasoning": run_orm.review_reasoning,
             }
             if run_orm
             else None
@@ -447,13 +575,25 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
         run_dict = {
             "id": None,
             "snap_name": snap_name,
+            "architecture": "amd64",
             "pr_number": pr_number,
             "status": metadata.get("status", "unknown"),
             "version": metadata.get("version", ""),
             "from_channel": metadata.get("from_channel", ""),
             "revision": metadata.get("revision"),
             "promoted": False,
+            "review_decision": None,
+            "review_confidence": None,
+            "review_reasoning": None,
         }
+
+    review_context: dict = {}
+    if run_dict.get("id"):
+        review_context = _build_review_context(
+            user_id, run_dict["snap_name"], run_dict["architecture"], pr_number, run_dict["id"],
+            run_dict["review_decision"], run_dict["review_confidence"], run_dict["review_reasoning"],
+            effective_repo, uc,
+        )
 
     pr_info = pr_data.get("pr", {})
     pr_url = pr_info.get(
@@ -475,6 +615,7 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
             "testing_repo": effective_repo,
             "error": None,
             "last_run": None,
+            **review_context,
             "current_user": user,
         },
     )
@@ -489,11 +630,17 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
 async def promote_snap_route(
     snap_name: str,
     request: Request,
-    pr_number: int = Form(...),
+    pr_number: int = Form(default=0),
     revision: int = Form(...),
     to_channel: str = Form(default="stable"),
+    run_id_field: int | None = Form(default=None, alias="run_id"),
 ) -> HTMLResponse:
-    """Promote a snap revision to stable via ``snapcraft release`` then close the test PR."""
+    """Promote a snap revision to stable via ``snapcraft release`` then close the test PR.
+
+    Looked up by ``run_id`` when given (works for any run, PR or not — see
+    ``run_detail.html``) and falls back to the legacy ``(snap_name, pr_number)``
+    lookup otherwise (``pr_detail.html``, and older Pending Promotion cards).
+    """
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -511,15 +658,21 @@ async def promote_snap_route(
 
     version = ""
     run_id: int | None = None
+    run_pr_number = pr_number
     effective_repo = uc.testing_repo
     with get_session() as session:
-        run_orm = (
-            session.query(TestRun)
-            .filter_by(snap_name=snap_name, pr_number=pr_number, user_id=user_id)
-            .first()
-        )
+        if run_id_field:
+            run_orm = session.query(TestRun).filter_by(id=run_id_field, user_id=user_id).first()
+        else:
+            run_orm = (
+                session.query(TestRun)
+                .filter_by(snap_name=snap_name, pr_number=pr_number, user_id=user_id)
+                .first()
+            )
         if run_orm and run_orm.repo:
             effective_repo = run_orm.repo
+        if run_orm:
+            run_pr_number = run_orm.pr_number or 0
         if ok:
             if run_orm:
                 run_id = run_orm.id
@@ -540,15 +693,23 @@ async def promote_snap_route(
                 bump = session.query(VersionBumpPR).filter_by(test_run_id=run_id).first()
                 if bump:
                     bump.status = "stable_promoted"
-        if effective_repo:
+        if effective_repo and run_pr_number:
             close_test_pr(
                 effective_repo,
-                pr_number,
+                run_pr_number,
                 snap_name,
                 version,
                 uc.github_token,
             )
         return RedirectResponse(url="/testing", status_code=303)
+
+    # Failed: for a run_id-based (no PR) promote, redirect back to its
+    # run-detail page — run_orm.error_msg was already persisted above and
+    # that page renders it. Otherwise render the legacy PR detail page
+    # inline with the error, since it needs a live pr_number to build a
+    # sensible pr_url.
+    if run_id_field:
+        return RedirectResponse(url=f"/testing/runs/{run_id_field}", status_code=303)
 
     # Render the detail page again with an error message
     return templates.TemplateResponse(
