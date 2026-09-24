@@ -28,6 +28,7 @@
   <div class="section-header-row">
     <h3 class="section-label">
       {% if group.status == 'stable_promoted' %}🚀{% endif %}
+      {% if group.status == 'stable_promoted_partial' %}⚠🚀{% endif %}
       {% if group.status == 'promoting' %}⏳{% endif %}
       {% if group.status == 'promotion_failed' %}🛑{% endif %}
       {% if group.status == 'agent_approved' %}✅{% endif %}
@@ -96,7 +97,7 @@
       </div>
     </div>
 
-    {% if b.agent_reasoning and b.status in ('agent_approved', 'agent_rejected', 'needs_review', 'stable_promoted', 'promoting', 'promotion_failed') %}
+    {% if b.agent_reasoning and b.status in ('agent_approved', 'agent_rejected', 'needs_review', 'stable_promoted', 'stable_promoted_partial', 'promoting', 'promotion_failed') %}
     <div class="bump-reasoning">
       <span class="text-muted small">{{ b.agent_reasoning[:200] }}{% if b.agent_reasoning | length > 200 %}…{% endif %}</span>
     </div>

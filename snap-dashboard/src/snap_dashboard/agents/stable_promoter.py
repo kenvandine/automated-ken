@@ -34,10 +34,18 @@ class StablePromoterAgent(BaseAgent):
         version_bump_pr_id: int,
         test_run_ids: list[int],
         user_id: int | None = None,
+        skipped_architectures: list[str] | None = None,
     ) -> None:
         super().__init__(user_id=user_id)
         self.version_bump_pr_id = version_bump_pr_id
         self.test_run_ids = test_run_ids
+        # Set only for a deliberate manual override (see
+        # web/routes/version_bumps.py:promote_bump) — architectures this
+        # release is going to stable *without*, e.g. because their test
+        # never finished. Drives the "partial" status/messaging below so an
+        # override promotion never looks identical to a clean, fully-tested
+        # one in the UI or audit trail.
+        self.skipped_architectures = skipped_architectures or []
 
     def _run(self) -> str:
         uc = get_user_config(self.user_id) if self.user_id else None
@@ -113,8 +121,15 @@ class StablePromoterAgent(BaseAgent):
                     run.promoted = True
                     run.promoted_at = datetime.now(timezone.utc)
             if bump:
-                bump.status = "stable_promoted"
-                extra = f" Promoted to stable automatically ({arch_list})."
+                if self.skipped_architectures:
+                    bump.status = "stable_promoted_partial"
+                    extra = (
+                        f" ⚠ Manually promoted by override ({arch_list}); "
+                        f"skipped (not promoted): {', '.join(self.skipped_architectures)}."
+                    )
+                else:
+                    bump.status = "stable_promoted"
+                    extra = f" Promoted to stable automatically ({arch_list})."
                 if baseline_count:
                     extra += f" Stored {baseline_count} baseline screenshot(s)."
                 if bump.agent_reasoning:
@@ -148,6 +163,8 @@ class StablePromoterAgent(BaseAgent):
                             f"{bump.agent_reasoning or ''} Packaging PR auto-merged."
                         ).strip()
 
+        if self.skipped_architectures:
+            return f"{snap_name}: promoted {arch_list} to stable (override — skipped {', '.join(self.skipped_architectures)})"
         return f"{snap_name}: promoted to stable ({arch_list})"
 
 

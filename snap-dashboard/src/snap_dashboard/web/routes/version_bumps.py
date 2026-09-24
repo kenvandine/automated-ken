@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -25,6 +25,7 @@ _GH_API = "https://api.github.com"
 # Statuses in priority display order
 _STATUS_GROUPS = [
     ("stable_promoted", "Stable Promoted"),
+    ("stable_promoted_partial", "Partially Promoted (Override)"),
     ("promoting", "Promoting to Stable"),
     ("promotion_failed", "Promotion Failed"),
     ("agent_approved", "Agent Approved"),
@@ -261,6 +262,98 @@ async def re_run_yarf(bump_id: int, request: Request) -> RedirectResponse:
                 if bump:
                     bump.status = "yarf_running"
                     bump.test_run_id = run_ids[0]
+
+    return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
+
+
+@router.post("/version-bumps/{bump_id}/promote")
+async def promote_bump(
+    bump_id: int,
+    request: Request,
+    override: str = Form(default=""),
+) -> RedirectResponse:
+    """Promote every architecture that's passed to stable, together.
+
+    Architectures without a passed, un-promoted run (still running, failed,
+    or never tested) are left alone rather than promoted — unless
+    ``override`` is set, in which case the release goes out *without* them
+    and that's recorded on the bump as a deliberate, visibly different
+    outcome (``stable_promoted_partial``, plus a note naming exactly what
+    was skipped) rather than looking like an ordinary clean promotion.
+    ``override`` is only ever set by the confirmed "Promote (Override)"
+    button in version_bump_detail.html — see the confirm() dialog there
+    that names the skipped architecture(s) before submitting — so a plain
+    "Promote to Stable" click can never silently skip anything.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    is_override = bool(override)
+
+    from snap_dashboard.testing.orchestrator import resolve_channel_map_revision
+
+    with get_session() as session:
+        bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
+        if not bump:
+            return RedirectResponse(url="/version-bumps", status_code=302)
+
+        sibling_runs = session.query(TestRun).filter_by(version_bump_pr_id=bump_id).all()
+        if not sibling_runs and bump.test_run:
+            sibling_runs = [bump.test_run]
+
+        ready_ids: list[int] = []
+        skipped: list[str] = []
+        for run in sibling_runs:
+            arch = run.architecture or "amd64"
+            if run.promoted:
+                continue  # this arch already went out — nothing to do
+            if run.status != "passed":
+                skipped.append(f"{arch} ({run.status})")
+                continue
+            # The version-bump pipeline tests "edge" ahead of a real
+            # release, so the revision to promote may not be recorded on
+            # the TestRun yet even after it passes — fall back to whatever
+            # the Store's channel map (collector.py) has picked up since.
+            revision = run.revision
+            if revision is None:
+                revision = resolve_channel_map_revision(session, bump.snap_id, arch, run.version or "")
+                if revision is not None:
+                    run.revision = revision
+            if revision is None:
+                skipped.append(f"{arch} (no revision available yet)")
+                continue
+            ready_ids.append(run.id)
+
+    if not ready_ids:
+        logger.info("promote_bump: nothing ready to promote for bump %s (skipped: %s)", bump_id, "; ".join(skipped))
+        return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
+
+    if skipped and not is_override:
+        # Blocked: this would be a partial promotion, and the confirmed
+        # override wasn't set. Refuse rather than guess what was intended.
+        logger.warning(
+            "promote_bump: refusing partial promotion for bump %s without override (skipped: %s)",
+            bump_id, "; ".join(skipped),
+        )
+        return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
+
+    with get_session() as session:
+        bump = session.query(VersionBumpPR).get(bump_id)
+        if bump:
+            bump.status = "promoting"
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.stable_promoter import StablePromoterAgent
+
+    get_runner().submit(
+        StablePromoterAgent(
+            version_bump_pr_id=bump_id,
+            test_run_ids=ready_ids,
+            user_id=user["id"],
+            skipped_architectures=skipped if is_override else [],
+        )
+    )
 
     return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
 

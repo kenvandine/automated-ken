@@ -169,6 +169,30 @@ def get_snap_architectures(session, snap_id: int) -> list[str]:
     return [a for a in TESTABLE_ARCHITECTURES if a in archs]
 
 
+def resolve_channel_map_revision(
+    session, snap_id: int, architecture: str, version: str
+) -> int | None:
+    """Look up the Store-published revision for *snap_id*/*architecture*/*version*.
+
+    A ``TestRun`` created by the version-bump pipeline is dispatched before
+    the snap has necessarily been published (it tests ``edge`` ahead of a
+    real release), so ``TestRun.revision`` is often still unset even after
+    the test passes. This is the fallback a manual promotion uses to find
+    the real revision once the Store's channel map (populated by
+    ``collector.py``) has caught up, preferring "candidate" (the promotion
+    source of truth) but checking "edge" and "stable" too.
+    """
+    for channel in ("candidate", "edge", "stable"):
+        cm = (
+            session.query(ChannelMap)
+            .filter_by(snap_id=snap_id, architecture=architecture, channel=channel, version=version)
+            .first()
+        )
+        if cm and cm.revision is not None:
+            return cm.revision
+    return None
+
+
 def _path_exists_in_repo(repo: str, path: str, token: str) -> bool:
     """Return True if *path* exists in *repo* (``owner/repo`` format)."""
     owner, _, name = repo.partition("/")

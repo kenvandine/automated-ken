@@ -16,6 +16,26 @@
     </p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% set promotable = bump.architectures | rejectattr('promoted') | list %}
+    {% set promote_ready = promotable | selectattr('status', 'equalto', 'passed') | list %}
+    {% set promote_blocked = promotable | rejectattr('status', 'equalto', 'passed') | list %}
+    {% if promote_ready and bump.status not in ('merged', 'closed') %}
+    {% set ready_archs = promote_ready | map(attribute='architecture') | join(', ') %}
+    {% set blocked_archs = promote_blocked | map(attribute='architecture') | join(', ') %}
+    <form method="post" action="/version-bumps/{{ bump.id }}/promote"
+          onsubmit="return confirm(
+            {% if promote_blocked %}
+            'This will promote ONLY {{ ready_archs }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_archs }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
+            {% else %}
+            'Promote {{ bump.snap_name }} {{ bump.new_version }} to stable for {{ ready_archs }}?'
+            {% endif %}
+          )">
+      {% if promote_blocked %}<input type="hidden" name="override" value="1">{% endif %}
+      <button type="submit" class="{% if promote_blocked %}p-button{% else %}p-button--positive{% endif %}">
+        {% if promote_blocked %}⚠ Promote (Override — skip {{ blocked_archs }}){% else %}🚀 Promote to Stable{% endif %}
+      </button>
+    </form>
+    {% endif %}
     {% if bump.status in ('agent_approved', 'needs_review', 'yarf_passed', 'stable_promoted') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/merge"
           onsubmit="return confirm('Merge this PR?')">
@@ -47,9 +67,9 @@
       <span class="p-status-label
         {% if bump.status in ('agent_approved', 'stable_promoted') %}p-status-label--positive
         {% elif bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed', 'promotion_failed') %}badge-fail
-        {% elif bump.status == 'needs_review' %}p-status-label--caution
+        {% elif bump.status in ('needs_review', 'stable_promoted_partial') %}p-status-label--caution
         {% else %}badge-muted{% endif %}
-      ">{{ bump.status | replace('_', ' ') }}</span>
+      ">{{ bump.status | replace('_', ' ') }}{% if bump.status == 'stable_promoted_partial' %} ⚠{% endif %}</span>
     </div>
     {% if bump.agent_decision %}
     <div>
@@ -164,7 +184,7 @@
 <div class="card">
   <h3 class="section-label">Actions</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    {% if bump.status not in ('merged', 'closed', 'agent_approved', 'needs_review', 'stable_promoted') %}
+    {% if bump.status not in ('merged', 'closed', 'agent_approved', 'needs_review', 'stable_promoted', 'stable_promoted_partial') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/request-review">
       <button type="submit" class="p-button">Flag for Manual Review</button>
     </form>
