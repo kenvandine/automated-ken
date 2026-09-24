@@ -38,6 +38,40 @@ class ExtractedScreenshot:
     is_valid: bool
 
 
+def analyze_screenshot_png(raw_png_bytes: bytes, image_name: str) -> ExtractedScreenshot | None:
+    """Crop/validate one raw PNG's bytes into an ``ExtractedScreenshot``.
+
+    Shared by both screenshot-sourcing paths: YARF ``log.html`` extraction
+    (below) and native full-screen capture (see
+    ``automated_ken_runner.screenshot_capture``) — both need the exact same
+    "crop out the black desktop background, then flag suspiciously dark
+    results as invalid" logic, so it lives in one place. Returns None if
+    ``raw_png_bytes`` isn't a decodable image.
+    """
+    try:
+        img = Image.open(io.BytesIO(raw_png_bytes))
+        rgb = img.convert("RGB")
+        brightness = sum(ImageStat.Stat(rgb).mean) / 3
+        # Crop out the black desktop background, keeping only the app window.
+        bbox = rgb.getbbox()
+        cropped = img.crop(bbox) if bbox else img
+        buf = io.BytesIO()
+        cropped.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+        width, height = cropped.size
+    except Exception:
+        return None
+
+    return ExtractedScreenshot(
+        image_name=image_name,
+        png_bytes=png_bytes,
+        width=width,
+        height=height,
+        brightness_mean=brightness,
+        is_valid=brightness >= _BLACK_BRIGHTNESS_THRESHOLD,
+    )
+
+
 def extract_screenshots(log_html: str) -> list[ExtractedScreenshot]:
     """Parse a YARF ``log.html`` document and return its embedded screenshots.
 
@@ -62,29 +96,8 @@ def extract_screenshots(log_html: str) -> list[ExtractedScreenshot]:
                 continue
 
     for i, raw in enumerate(raw_pngs):
-        try:
-            img = Image.open(io.BytesIO(raw))
-            rgb = img.convert("RGB")
-            brightness = sum(ImageStat.Stat(rgb).mean) / 3
-            # Crop out the black desktop background, keeping only the app window.
-            bbox = rgb.getbbox()
-            cropped = img.crop(bbox) if bbox else img
-            buf = io.BytesIO()
-            cropped.save(buf, format="PNG")
-            png_bytes = buf.getvalue()
-            width, height = cropped.size
-        except Exception:
-            continue
-
-        results.append(
-            ExtractedScreenshot(
-                image_name=f"screenshot-{i + 1:03d}.png",
-                png_bytes=png_bytes,
-                width=width,
-                height=height,
-                brightness_mean=brightness,
-                is_valid=brightness >= _BLACK_BRIGHTNESS_THRESHOLD,
-            )
-        )
+        shot = analyze_screenshot_png(raw, f"screenshot-{i + 1:03d}.png")
+        if shot is not None:
+            results.append(shot)
 
     return results

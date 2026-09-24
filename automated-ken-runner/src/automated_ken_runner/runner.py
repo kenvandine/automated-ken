@@ -28,13 +28,18 @@ import httpx
 from automated_ken_runner.config import RunnerConfig
 from automated_ken_runner.deps import ensure_dependencies
 from automated_ken_runner.idle import is_safe_to_claim_job
-from automated_ken_runner.screenshots import extract_screenshots
+from automated_ken_runner.screenshot_capture import ScreenshotCaptureError, capture_screenshot
+from automated_ken_runner.screenshots import analyze_screenshot_png, extract_screenshots
 
 logger = logging.getLogger(__name__)
 
 _HEARTBEAT_INTERVAL_SECONDS = 15
 _POLL_TIMEOUT_SECONDS = 25
 _IDLE_THRESHOLD_SECONDS = 120
+# How long to let a newly-launched app finish rendering before screenshotting
+# it in the generic (no-suite) desktop smoke test.
+_APP_SETTLE_SECONDS = 15
+_APP_LAUNCH_TIMEOUT_SECONDS = 30
 
 
 def _desktop_env() -> str:
@@ -145,29 +150,57 @@ class RunnerLoop:
         with tempfile.TemporaryDirectory(prefix="automated-ken-runner-") as tmp:
             tmp_path = Path(tmp)
             try:
-                if shutil.which("yarf") is None:
-                    # A dependency (installed at startup or via
-                    # `prepare-machine`) has since gone missing — try once
-                    # more to self-heal rather than failing every job with
-                    # a bare FileNotFoundError until someone notices.
-                    ensure_dependencies(auto_install=True)
                 suite_dir = self._fetch_suite(job_id, tmp_path)
                 self._install_snap(snap_name, channel, _log)
-                yarf_exit, log_html = self._run_yarf(snap_name, suite_dir, tmp_path, _log)
-                shots = extract_screenshots(log_html) if log_html else []
-                passed = yarf_exit == 0 and all(s.is_valid for s in shots)
-                self._upload_screenshots(job_id, shots)
-                self._report_status(
-                    job_id, "passed" if passed else "failed",
-                    yarf_exit_code=yarf_exit, log="\n".join(log_lines),
-                )
+                if suite_dir is not None:
+                    # The packaging repo opted in to a custom Robot/YARF
+                    # suite (real interaction beyond a plain smoke test) —
+                    # keep using it as-is.
+                    if shutil.which("yarf") is None:
+                        # A dependency (installed at startup or via
+                        # `prepare-machine`) has since gone missing — try
+                        # once more to self-heal rather than failing every
+                        # job with a bare FileNotFoundError until someone
+                        # notices.
+                        ensure_dependencies(auto_install=True)
+                    yarf_exit, log_html = self._run_yarf(snap_name, suite_dir, tmp_path, _log)
+                    shots = extract_screenshots(log_html) if log_html else []
+                    passed = yarf_exit == 0 and all(s.is_valid for s in shots)
+                    self._upload_screenshots(job_id, shots)
+                    self._report_status(
+                        job_id, "passed" if passed else "failed",
+                        yarf_exit_code=yarf_exit, log="\n".join(log_lines),
+                    )
+                else:
+                    # No suite configured for this repo — this is the
+                    # common/default case for a plain desktop (GUI) app:
+                    # launch it on the real desktop session, let it
+                    # render, capture a screenshot natively, and do a
+                    # basic sanity check. This is all generic, reusable
+                    # logic that every packaging repo gets for free with
+                    # no suite of its own to write or maintain — deeper
+                    # pass/fail inference (LLM screenshot comparison
+                    # against the stable baseline) happens dashboard-side
+                    # once the screenshot is uploaded.
+                    passed, shots = self._run_desktop_smoke_test(snap_name, tmp_path, _log)
+                    self._upload_screenshots(job_id, shots)
+                    self._report_status(
+                        job_id, "passed" if passed else "failed", log="\n".join(log_lines),
+                    )
             except Exception as exc:  # noqa: BLE001 — never crash the loop over one bad job
                 logger.exception("Job %s failed with an unexpected error", job_id)
                 _log("traceback", traceback.format_exc())
                 self._report_status(job_id, "failed", error=str(exc), log="\n".join(log_lines))
 
-    def _fetch_suite(self, job_id: int, tmp_path: Path) -> Path:
+    def _fetch_suite(self, job_id: int, tmp_path: Path) -> Path | None:
+        """Fetch and unzip this job's suite, or None if the repo has none.
+
+        A suite is optional — see ``_execute_job()`` — so a 404 here just
+        means "run the generic desktop smoke test instead," not a failure.
+        """
         resp = self.client.get(f"/{self.cfg.runner_id}/jobs/{job_id}/suite")
+        if resp.status_code == 404:
+            return None
         resp.raise_for_status()
         suite_dir = tmp_path / "suite"
         with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
@@ -221,6 +254,58 @@ class RunnerLoop:
         log_html_path = outdir / "log.html"
         log_html = log_html_path.read_text(errors="replace") if log_html_path.exists() else ""
         return proc.returncode, log_html
+
+    def _run_desktop_smoke_test(
+        self, snap_name: str, tmp_path: Path, log: Callable[[str, str], None]
+    ) -> tuple[bool, list]:
+        """Generic "launch a GUI app, capture a screenshot" flow.
+
+        This is the default test for any packaging repo with no custom
+        suite of its own — it needs no per-repo test code at all. Launches
+        ``snap_name`` on the runner's real desktop session, waits for it to
+        appear and settle, takes one native screenshot (see
+        ``screenshot_capture``), and does the same basic
+        brightness/blank-frame sanity check YARF-sourced screenshots get
+        (see ``screenshots.analyze_screenshot_png``) — deeper pass/fail
+        inference (LLM comparison against the stable baseline) happens
+        dashboard-side once the screenshot is uploaded.
+        """
+        app_proc = subprocess.Popen(
+            ["snap", "run", snap_name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT
+        )
+        try:
+            self._wait_for_app_alive(snap_name, timeout=_APP_LAUNCH_TIMEOUT_SECONDS)
+            time.sleep(_APP_SETTLE_SECONDS)
+            shot_path = tmp_path / "screenshot.png"
+            try:
+                raw_png = capture_screenshot(shot_path)
+            except ScreenshotCaptureError as exc:
+                log("screenshot capture", str(exc))
+                return False, []
+            shot = analyze_screenshot_png(raw_png, "screenshot-001.png")
+            if shot is None:
+                log("screenshot analysis", "captured screenshot could not be decoded as an image")
+                return False, []
+            return shot.is_valid, [shot]
+        finally:
+            app_proc.terminate()
+            try:
+                app_proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                app_proc.kill()
+                app_proc.wait(timeout=5)
+            subprocess.run(["pkill", "-f", f"/snap/{snap_name}/"], check=False)
+
+    @staticmethod
+    def _wait_for_app_alive(snap_name: str, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if subprocess.run(
+                ["pgrep", "-f", f"/snap/{snap_name}/"], capture_output=True, check=False
+            ).returncode == 0:
+                return
+            time.sleep(1)
+        raise RuntimeError(f"Timed out waiting for {snap_name} process to appear")
 
     def _upload_screenshots(self, job_id: int, shots: list) -> None:
         for shot in shots:

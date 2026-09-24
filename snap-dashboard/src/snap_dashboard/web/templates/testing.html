@@ -156,15 +156,17 @@
           {% endif %}
         </td>
         <td class="js-actions-cell" data-snap="{{ item.snap.name }}" data-arch="{{ item.architecture }}">
-          <span class="muted small js-actions-checking">checking…</span>
-          <form method="post" action="/testing/trigger/{{ item.snap.name }}" class="js-trigger-form" style="display:none">
+          <!-- The runner runs a generic launch+screenshot smoke test when a
+               repo has no suite of its own, so triggering is always
+               available — has_suite only affects the informational label
+               in the "Suite" column, not whether this button shows. -->
+          <form method="post" action="/testing/trigger/{{ item.snap.name }}" class="js-trigger-form">
             <input type="hidden" name="from_channel" value="{{ item.from_channel }}">
             <input type="hidden" name="architecture" value="{{ item.architecture }}">
             <input type="hidden" name="version" value="{{ item.version }}">
             <input type="hidden" name="revision" value="{{ item.revision or '' }}">
             <button type="submit" class="p-button is-small">Run Tests</button>
           </form>
-          <span class="muted small js-no-suite" style="display:none">No suite</span>
         </td>
       </tr>
       {% endfor %}
@@ -378,7 +380,10 @@
 
   // Suite existence is checked async (see /testing/api/suite-status) so
   // the page renders instantly instead of blocking on N GitHub API calls.
-  // Fill in the "checking…" placeholders once results arrive.
+  // This only fills in the informational "Suite" column label — it no
+  // longer gates the "Run Tests" button (always shown), since the
+  // runner falls back to a generic launch+screenshot smoke test for any
+  // repo with no suite of its own.
   function loadSuiteStatus() {
     const suiteCells = document.querySelectorAll('.js-suite-cell');
     if (!suiteCells.length) return;
@@ -394,15 +399,7 @@
           const hasSuite = byKey[key];
           cell.innerHTML = hasSuite
             ? '<span class="p-status-label p-status-label--positive">yes</span>'
-            : '<span class="p-status-label" title="No suite found in testing repo">no suite</span>';
-        });
-
-        document.querySelectorAll('.js-actions-cell').forEach(cell => {
-          const key = cell.dataset.snap + '|' + cell.dataset.arch;
-          const hasSuite = byKey[key];
-          cell.querySelector('.js-actions-checking').style.display = 'none';
-          cell.querySelector('.js-trigger-form').style.display = hasSuite ? '' : 'none';
-          cell.querySelector('.js-no-suite').style.display = hasSuite ? 'none' : '';
+            : '<span class="muted small" title="No suite found — will run a generic launch+screenshot smoke test instead">smoke test</span>';
         });
       })
       .catch(() => {

@@ -1,0 +1,7 @@
+{
+  "uuid": "automated-ken-screenshot@kenvandine.github.io",
+  "name": "Automated Ken Screenshot Helper",
+  "description": "Exposes a trusted D-Bus method the automated-ken-runner uses to capture full-screen screenshots on this desktop session for automated snap testing, bypassing the interactive-only org.gnome.Shell.Screenshot D-Bus API restriction.",
+  "shell-version": ["50"],
+  "version": 1
+}
