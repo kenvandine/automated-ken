@@ -20,6 +20,7 @@
   <h3 class="section-label">Run this on the new machine</h3>
   <pre id="enroll-command" style="white-space: pre-wrap; word-break: break-all; background: var(--bg-code, #1a1a1a); padding: 10px; border-radius: 6px;"></pre>
   <p class="text-muted small">Token expires in <span id="enroll-ttl"></span> minutes — one-time use.</p>
+  <button class="p-button is-small" onclick="dismissEnrollResult()">Got it</button>
 </div>
 
 <div class="card">
@@ -124,20 +125,43 @@
 
 {% block scripts %}
 <script>
-async function newRunner() {
-  const name = prompt('Name for this runner (e.g. its hostname):', '');
-  if (name === null) return;
-  const form = new FormData();
-  form.append('name', name);
-  const r = await fetch('/runners/new', { method: 'POST', body: form });
-  if (!r.ok) { alert('Failed to create enrollment token'); return; }
-  const d = await r.json();
-  document.getElementById('enroll-command').textContent = d.command;
-  document.getElementById('enroll-ttl').textContent = d.expires_in_minutes;
-  document.getElementById('enroll-result').style.display = 'block';
+// Live-refresh runner/queue status without a full page reload. Paused
+// while the enrollment flow is open, since `prompt()` blocks this
+// script for as long as the user takes to respond, and a reload firing
+// right after would wipe the newly-issued (one-time-use) token before
+// it's ever seen.
+let refreshTimer = setInterval(() => { location.reload(); }, 15000);
+
+function dismissEnrollResult() {
+  document.getElementById('enroll-result').style.display = 'none';
+  refreshTimer = setInterval(() => { location.reload(); }, 15000);
 }
 
-// Live-refresh runner/queue status without a full page reload.
-setInterval(() => { location.reload(); }, 15000);
+async function newRunner() {
+  clearInterval(refreshTimer);
+  const name = prompt('Name for this runner (e.g. its hostname):', '');
+  if (name === null) { refreshTimer = setInterval(() => { location.reload(); }, 15000); return; }
+  try {
+    const form = new FormData();
+    form.append('name', name);
+    const r = await fetch('/runners/new', { method: 'POST', body: form });
+    if (!r.ok) {
+      let detail = '';
+      try { detail = (await r.json()).error || ''; } catch (e) { /* non-JSON error body */ }
+      alert(`Failed to create enrollment token (HTTP ${r.status}). ${detail}`);
+      refreshTimer = setInterval(() => { location.reload(); }, 15000);
+      return;
+    }
+    const d = await r.json();
+    document.getElementById('enroll-command').textContent = d.command;
+    document.getElementById('enroll-ttl').textContent = d.expires_in_minutes;
+    document.getElementById('enroll-result').style.display = 'block';
+    // Auto-refresh stays paused until the user clicks "Got it" above,
+    // so the one-time token can't be wiped by a background reload.
+  } catch (err) {
+    alert(`Network error creating enrollment token: ${err}`);
+    refreshTimer = setInterval(() => { location.reload(); }, 15000);
+  }
+}
 </script>
 {% endblock %}
