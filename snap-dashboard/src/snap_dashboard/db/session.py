@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+import functools
+import logging
 import os
+import random
+import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Generator
+from typing import Callable, Generator, TypeVar
 
 from sqlalchemy import create_engine, event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
 from snap_dashboard.db.models import Base
+
+logger = logging.getLogger(__name__)
+
+_F = TypeVar("_F", bound=Callable)
+
+# How many times to retry a whole db-touching operation that fails with
+# "database is locked" before giving up.
+_MAX_LOCK_RETRIES = 5
 
 
 def get_db_path() -> Path:
@@ -137,3 +150,45 @@ def get_session() -> Generator[Session, None, None]:
         raise
     finally:
         session.close()
+
+
+def _is_db_locked(exc: OperationalError) -> bool:
+    return "database is locked" in str(exc).lower()
+
+
+def retry_on_db_lock(max_attempts: int = _MAX_LOCK_RETRIES, base_delay: float = 0.2):
+    """Retry a whole function from scratch if it fails with sqlite's
+    "database is locked" error.
+
+    Important: this re-runs the *entire* decorated function (including
+    opening a brand-new `get_session()`), not just a failed commit. A
+    failed flush/commit leaves the SQLAlchemy Session's pending objects
+    expunged, so retrying only `session.commit()` after a `rollback()`
+    would silently drop the write; re-running the whole operation from a
+    fresh session is the only way to retry that is actually correct. Only
+    use this to decorate idempotent operations (e.g. a single UPDATE, or a
+    check-then-insert-if-missing) where re-running on retry is safe.
+    """
+
+    def decorator(fn: _F) -> _F:
+        @functools.wraps(fn)
+        def wrapper(*args, **kwargs):
+            for attempt in range(max_attempts):
+                try:
+                    return fn(*args, **kwargs)
+                except OperationalError as exc:
+                    if not _is_db_locked(exc) or attempt == max_attempts - 1:
+                        raise
+                    delay = (base_delay * (2**attempt)) + random.uniform(0, base_delay)
+                    logger.warning(
+                        "%s: hit 'database is locked', retrying (attempt %d/%d) after %.2fs",
+                        fn.__qualname__,
+                        attempt + 1,
+                        max_attempts,
+                        delay,
+                    )
+                    time.sleep(delay)
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorator

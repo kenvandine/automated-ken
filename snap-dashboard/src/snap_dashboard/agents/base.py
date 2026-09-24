@@ -7,7 +7,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timezone
 
 from snap_dashboard.db.models import AgentRun
-from snap_dashboard.db.session import get_session
+from snap_dashboard.db.session import get_session, retry_on_db_lock
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,7 @@ class BaseAgent(ABC):
     # DB helpers
     # ------------------------------------------------------------------
 
+    @retry_on_db_lock()
     def _start_run(self) -> int:
         with get_session() as session:
             run = AgentRun(
@@ -67,6 +68,7 @@ class BaseAgent(ABC):
             session.flush()
             return run.id
 
+    @retry_on_db_lock()
     def _finish_run(self, summary: str) -> None:
         if self._run_id is None:
             return
@@ -77,6 +79,7 @@ class BaseAgent(ABC):
                 run.result_summary = summary
                 run.finished_at = datetime.now(timezone.utc)
 
+    @retry_on_db_lock()
     def _error_run(self, error_msg: str) -> None:
         if self._run_id is None:
             return

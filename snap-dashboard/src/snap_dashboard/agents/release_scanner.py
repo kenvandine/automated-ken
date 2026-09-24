@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import Snap, UpstreamRelease
-from snap_dashboard.db.session import get_session
+from snap_dashboard.db.session import get_session, retry_on_db_lock
 from snap_dashboard.snapcraft.fetcher import fetch_snapcraft_yaml
 from snap_dashboard.snapcraft.parser import parse_snapcraft_yaml
 from snap_dashboard.snapcraft.upstream import get_latest_version, is_newer
@@ -107,34 +107,9 @@ class ReleaseScannerAgent(BaseAgent):
             if not is_newer(latest, current):
                 continue
 
-            # Check we haven't already recorded this release
-            with get_session() as session:
-                existing = (
-                    session.query(UpstreamRelease)
-                    .filter_by(
-                        snap_id=snap["id"],
-                        part_name=part.part_name,
-                        latest_version=latest,
-                    )
-                    .first()
-                )
-                if existing:
-                    continue
-
-                release = UpstreamRelease(
-                    snap_id=snap["id"],
-                    part_name=part.part_name,
-                    source_type=part.source_type,
-                    source_url=part.source,
-                    current_version=current,
-                    latest_version=latest,
-                    release_url=info.release_url,
-                    release_notes=info.release_notes,
-                    acted_on=False,
-                )
-                session.add(release)
-                session.flush()
-                release_id = release.id
+            release_id = self._record_release_if_new(snap, part, current, latest, info)
+            if release_id is None:
+                continue
 
             logger.info(
                 "release_scanner: new release for %s/%s: %s → %s",
@@ -146,6 +121,37 @@ class ReleaseScannerAgent(BaseAgent):
             self._spawn_bumper(snap, release_id, part, latest, info)
 
         return found
+
+    @retry_on_db_lock()
+    def _record_release_if_new(self, snap: dict, part, current: str, latest: str, info) -> int | None:
+        """Insert an UpstreamRelease row if one doesn't already exist; return its id, or None if it already existed."""
+        with get_session() as session:
+            existing = (
+                session.query(UpstreamRelease)
+                .filter_by(
+                    snap_id=snap["id"],
+                    part_name=part.part_name,
+                    latest_version=latest,
+                )
+                .first()
+            )
+            if existing:
+                return None
+
+            release = UpstreamRelease(
+                snap_id=snap["id"],
+                part_name=part.part_name,
+                source_type=part.source_type,
+                source_url=part.source,
+                current_version=current,
+                latest_version=latest,
+                release_url=info.release_url,
+                release_notes=info.release_notes,
+                acted_on=False,
+            )
+            session.add(release)
+            session.flush()
+            return release.id
 
     def _spawn_bumper(self, snap: dict, release_id: int, part, latest: str, info) -> None:
         from snap_dashboard.agents.version_bumper import VersionBumperAgent

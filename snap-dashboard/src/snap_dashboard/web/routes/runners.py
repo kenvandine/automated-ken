@@ -12,7 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user
 from snap_dashboard.db.models import Runner, TestRun
-from snap_dashboard.db.session import get_session
+from snap_dashboard.db.session import get_session, retry_on_db_lock
 from snap_dashboard.runners import effective_status, generate_token, hash_token
 
 logger = logging.getLogger(__name__)
@@ -142,8 +142,14 @@ async def revoke_runner(runner_id: int, request: Request) -> RedirectResponse:
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
+    _revoke_runner_db(runner_id, user["id"])
+    return RedirectResponse(url="/runners", status_code=303)
+
+
+@retry_on_db_lock()
+def _revoke_runner_db(runner_id: int, user_id: int) -> None:
     with get_session() as session:
-        runner = session.query(Runner).filter_by(id=runner_id, user_id=user["id"]).first()
+        runner = session.query(Runner).filter_by(id=runner_id, user_id=user_id).first()
         if runner:
             runner.revoked_at = datetime.now(timezone.utc)
             runner.secret_hash = None
@@ -153,7 +159,6 @@ async def revoke_runner(runner_id: int, request: Request) -> RedirectResponse:
                     job.status = "cancelled"
                     job.cancel_requested = True
                 runner.current_test_run_id = None
-    return RedirectResponse(url="/runners", status_code=303)
 
 
 @router.post("/runners/jobs/{job_id}/cancel")
