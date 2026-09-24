@@ -283,7 +283,7 @@ function updateAgentCards(active, schedules) {
     const card  = document.getElementById('card-' + type);
     const dot   = document.getElementById('dot-' + type);
     const task  = document.getElementById('task-' + type);
-    const p-status-label = document.getElementById('badge-' + type);
+    const badgeLabel = document.getElementById('badge-' + type);
     const sched = document.getElementById('sched-' + type);
     const thinking = document.getElementById('thinking-' + type);
 
@@ -296,9 +296,9 @@ function updateAgentCards(active, schedules) {
       dot.classList.toggle('dot-pulse', isActive);
     }
     if (task) task.textContent = isActive ? (active[type].task || 'Running…') : 'Idle';
-    if (p-status-label) {
-      p-status-label.textContent = isActive ? 'RUNNING' : 'IDLE';
-      p-status-label.style.color = isActive ? AGENT_COLORS[type] : 'var(--text-muted)';
+    if (badgeLabel) {
+      badgeLabel.textContent = isActive ? 'RUNNING' : 'IDLE';
+      badgeLabel.style.color = isActive ? AGENT_COLORS[type] : 'var(--text-muted)';
     }
 
     // Lemonade inference indicator
