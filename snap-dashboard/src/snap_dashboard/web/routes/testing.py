@@ -44,10 +44,10 @@ async def testing_index(request: Request) -> HTMLResponse:
     with get_session() as session:
         snaps_needing_raw = find_snaps_needing_tests(session, user_id=user_id)
 
-        # Annotate each item with suite existence and any active run,
-        # and replace the ORM Snap object with a plain dict to avoid
-        # DetachedInstanceError after the session closes.
-        snaps_needing = []
+        # Gather plain data only (no network calls) while the session/lock
+        # is held; suite_exists_in_repo() below hits the GitHub API and
+        # must run *after* the session closes — see the comment there.
+        prepared = []
         for item in snaps_needing_raw:
             snap_name = item["snap"].name
             existing = (
@@ -74,7 +74,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                 if existing
                 else None
             )
-            snaps_needing.append(
+            prepared.append(
                 {
                     "snap": {"name": snap_name},
                     "architecture": item["architecture"],
@@ -83,10 +83,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                     "revision": item["revision"],
                     "stable_ver": item["stable_ver"],
                     "can_promote": item["can_promote"],
-                    "has_suite": suite_exists_in_repo(
-                        uc.testing_repo, snap_name, uc.github_token,
-                        packaging_repo=item["snap"].packaging_repo,
-                    ),
+                    "packaging_repo": item["snap"].packaging_repo,
                     "existing_run": existing_run,
                 }
             )
@@ -121,6 +118,19 @@ async def testing_index(request: Request) -> HTMLResponse:
             }
             for r in all_runs
         ]
+
+    # suite_exists_in_repo() makes GitHub API requests — this must run with
+    # no session/lock held, since get_session() now serializes all sqlite
+    # access process-wide and doing blocking network I/O under that lock
+    # would stall every other request, agent, and runner heartbeat in the
+    # app for the duration of every GitHub call.
+    snaps_needing = []
+    for item in prepared:
+        item["has_suite"] = suite_exists_in_repo(
+            uc.testing_repo, item["snap"]["name"], uc.github_token,
+            packaging_repo=item["packaging_repo"],
+        )
+        snaps_needing.append(item)
 
     pending_promotion = [
         r for r in runs_data
@@ -305,17 +315,8 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
             .filter_by(snap_name=snap_name, pr_number=pr_number, user_id=user_id)
             .first()
         )
-        effective_repo = (run_orm.repo if run_orm else None) or uc.testing_repo
-
-        if effective_repo:
-            pr_data = get_pr_details(effective_repo, pr_number, uc.github_token)
-            metadata = pr_data.get("metadata", {})
-            screenshot_urls = get_pr_screenshot_urls(
-                effective_repo, pr_data, "", uc.github_token
-            )
-
-        if run_orm:
-            run_dict = {
+        run_data = (
+            {
                 "id": run_orm.id,
                 "snap_name": run_orm.snap_name,
                 "pr_number": run_orm.pr_number,
@@ -324,18 +325,38 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
                 "from_channel": run_orm.from_channel,
                 "revision": run_orm.revision,
                 "promoted": run_orm.promoted,
+                "repo": run_orm.repo,
             }
-        else:
-            run_dict = {
-                "id": None,
-                "snap_name": snap_name,
-                "pr_number": pr_number,
-                "status": metadata.get("status", "unknown"),
-                "version": metadata.get("version", ""),
-                "from_channel": metadata.get("from_channel", ""),
-                "revision": metadata.get("revision"),
-                "promoted": False,
-            }
+            if run_orm
+            else None
+        )
+
+    # get_pr_details()/get_pr_screenshot_urls() make GitHub API requests —
+    # these must run with no session/lock held; see the comment on
+    # get_session() for why holding it across network I/O would stall
+    # every other request/agent/runner heartbeat in the app.
+    effective_repo = (run_data["repo"] if run_data else None) or uc.testing_repo
+
+    if effective_repo:
+        pr_data = get_pr_details(effective_repo, pr_number, uc.github_token)
+        metadata = pr_data.get("metadata", {})
+        screenshot_urls = get_pr_screenshot_urls(
+            effective_repo, pr_data, "", uc.github_token
+        )
+
+    if run_data:
+        run_dict = {k: v for k, v in run_data.items() if k != "repo"}
+    else:
+        run_dict = {
+            "id": None,
+            "snap_name": snap_name,
+            "pr_number": pr_number,
+            "status": metadata.get("status", "unknown"),
+            "version": metadata.get("version", ""),
+            "from_channel": metadata.get("from_channel", ""),
+            "revision": metadata.get("revision"),
+            "promoted": False,
+        }
 
     pr_info = pr_data.get("pr", {})
     pr_url = pr_info.get(
