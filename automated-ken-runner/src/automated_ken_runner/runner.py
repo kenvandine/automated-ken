@@ -42,13 +42,17 @@ _APP_SETTLE_SECONDS = 15
 _APP_LAUNCH_TIMEOUT_SECONDS = 30
 # Terminal emulator used to run "console app" snaps (see Snap.is_console_app)
 # so their text UI actually renders on-screen for the screenshot instead of
-# running headless with nothing to capture. xterm is used rather than
-# gnome-terminal because it *is* the window process itself (killing it
-# reliably closes the window); gnome-terminal is a client of a persistent
-# gnome-terminal-server, so killing the launching process doesn't
-# necessarily close the window it opened. xterm runs fine under GNOME's
-# Wayland session via XWayland, which every stock Ubuntu GNOME desktop has.
-_CONSOLE_TERMINAL = "xterm"
+# running headless with nothing to capture. `ptyxis -- CMD` (rather than
+# `gnome-terminal -- CMD`) is used because it *is* the window process itself
+# — killing it reliably closes the window; gnome-terminal is a client of a
+# persistent gnome-terminal-server, so killing the launching process doesn't
+# necessarily close the window it opened. Using `--` (rather than `--tab`/
+# `--new-window`, which reuse an existing running instance) implies single-
+# instance/standalone mode, so this spawns its own dedicated window process
+# — confirmed it exits (and closes its window) as soon as that process is
+# killed, same as xterm. ptyxis is the default terminal on stock Ubuntu
+# GNOME desktops (24.04+), unlike xterm which usually isn't installed.
+_CONSOLE_TERMINAL = "ptyxis"
 
 
 def _desktop_env() -> str:
@@ -371,7 +375,7 @@ class RunnerLoop:
                     f"install it with 'sudo apt install {_CONSOLE_TERMINAL}'",
                 )
                 return False, []
-            cmd = [_CONSOLE_TERMINAL, "-e", "snap", "run", snap_name]
+            cmd = [_CONSOLE_TERMINAL, "--", "snap", "run", snap_name]
         else:
             cmd = ["snap", "run", snap_name]
         # Logged unconditionally (not just on failure) — a launch that never

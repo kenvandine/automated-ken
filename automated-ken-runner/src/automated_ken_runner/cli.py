@@ -15,7 +15,7 @@ Commands:
         Print enrollment + idle-detection status and exit.
 
     automated-ken-runner prepare-machine
-        Check the local prerequisites this runner needs: snapd, xterm
+        Check the local prerequisites this runner needs: snapd, ptyxis
         (for console-app snaps), and the desktop idle-detection tooling
         (loginctl/gdbus). Also configures the desktop session for
         unattended GUI testing — installs/enables the screenshot-capture
