@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import (
     CollectionRun,
+    PromotionDismissal,
     Runner,
     Snap,
     StableScreenshotBaseline,
@@ -255,6 +256,9 @@ async def settings_remove_snap(snap_name: str, request: Request):
                     TestRun.id.in_(run_ids)
                 ).delete(synchronize_session=False)
             session.query(StableScreenshotBaseline).filter_by(
+                snap_name=snap_name, user_id=user_id
+            ).delete(synchronize_session=False)
+            session.query(PromotionDismissal).filter_by(
                 snap_name=snap_name, user_id=user_id
             ).delete(synchronize_session=False)
             session.delete(snap)

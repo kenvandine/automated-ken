@@ -549,6 +549,39 @@ class VersionBumpPR(Base):
         )
 
 
+class PromotionDismissal(Base):
+    """A "not now" on a Testing page Pending Promotion card.
+
+    Keyed by ``(user_id, snap_name, version)`` rather than a run/set id
+    since a release set has no single row of its own — it's just every
+    ``TestRun`` sharing a ``(snap_name, version)`` (see
+    ``testing/release_set.py``). Scoped to keep matching the *current*
+    candidate version only: once a snap ships a newer candidate version,
+    its card reappears, since a dismissal was about "not this build" not
+    "never tell me about this snap again".
+    """
+
+    __tablename__ = "promotion_dismissals"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "snap_name", "version", name="uq_promotion_dismissal"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    snap_name = Column(String(255), nullable=False)
+    version = Column(String(128), nullable=False)
+    dismissed_at = Column(DateTime, default=_now, nullable=False)
+
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<PromotionDismissal snap={self.snap_name!r} version={self.version!r}>"
+
+
 class StaleBuildTrigger(Base):
     """Records a workflow_dispatch trigger sent for a snap that hasn't published in N days."""
 

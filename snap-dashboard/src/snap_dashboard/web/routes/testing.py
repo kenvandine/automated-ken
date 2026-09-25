@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import TestRun
+from snap_dashboard.db.models import PromotionDismissal, Snap, TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.orchestrator import (
     find_snaps_needing_tests,
@@ -156,7 +156,18 @@ async def testing_index(request: Request) -> HTMLResponse:
         ]
 
         # One card per candidate release set (snap + version) with at least
-        # one passed, un-promoted architecture — promoted as a set.
+        # one passed, un-promoted architecture — promoted as a set. Only
+        # for snaps still tracked (TestRun rows outlive a removed Snap —
+        # see settings.settings_remove_snap — and this is keyed by the
+        # snap_name string, not a live FK, so it needs an explicit check)
+        # and not explicitly dismissed for this exact version.
+        tracked_snap_names = {
+            s.name for s in session.query(Snap.name).filter_by(user_id=user_id).all()
+        }
+        dismissed = {
+            (d.snap_name, d.version)
+            for d in session.query(PromotionDismissal).filter_by(user_id=user_id).all()
+        }
         pending_promotion = []
         seen: set[tuple[str, str]] = set()
         for r in runs_data:
@@ -164,6 +175,8 @@ async def testing_index(request: Request) -> HTMLResponse:
             if (
                 r["status"] != "passed" or r["promoted"] or r["from_channel"] != "candidate"
                 or not r["version"] or key in seen
+                or r["snap_name"] not in tracked_snap_names
+                or key in dismissed
             ):
                 continue
             seen.add(key)
@@ -765,6 +778,37 @@ def promote_set(
         skipped=blocked if override else None,
     )
     return RedirectResponse(url=return_to, status_code=303)
+
+
+@router.post("/testing/dismiss-promotion")
+def dismiss_promotion(
+    request: Request,
+    snap_name: str = Form(...),
+    version: str = Form(...),
+) -> RedirectResponse:
+    """Hide a Pending Promotion card for this exact (snap, version) build.
+
+    Purely a per-user "not now" — it doesn't touch the underlying
+    TestRuns, so the release set can still be promoted manually via its
+    run-detail page, and a later candidate *version* for the same snap
+    will show its own card as usual (see PromotionDismissal docstring).
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    user_id = user["id"]
+
+    with get_session() as session:
+        existing = (
+            session.query(PromotionDismissal)
+            .filter_by(user_id=user_id, snap_name=snap_name, version=version)
+            .first()
+        )
+        if existing is None:
+            session.add(
+                PromotionDismissal(user_id=user_id, snap_name=snap_name, version=version)
+            )
+    return RedirectResponse(url="/testing", status_code=303)
 
 
 @router.post("/testing/promote/{snap_name}", response_model=None)
