@@ -365,6 +365,7 @@
           <label class="form-label checkbox-label">
             <input
               type="checkbox"
+              id="is_console_app"
               name="is_console_app"
               value="true"
               {% if snap.is_console_app %}checked{% endif %}
@@ -379,6 +380,25 @@
             it inside a terminal window instead and screenshot that.
           </span>
         </div>
+        <div class="form-row">
+          <label class="form-label checkbox-label">
+            <input
+              type="checkbox"
+              id="is_service"
+              name="is_service"
+              value="true"
+              {% if snap.is_service %}checked{% endif %}
+              style="margin-right: 6px;"
+            >
+            Service (no UI)
+          </label>
+          <span class="form-hint">
+            For daemons with no user-facing UI at all — nothing to launch on a
+            desktop or in a terminal, and nothing to screenshot. Check this and the
+            runner skips the smoke test entirely: it still installs the snap to
+            confirm the package itself is good, then reports the run as passed.
+          </span>
+        </div>
         <div class="form-actions">
           <button type="submit" class="p-button--positive">Save Changes</button>
         </div>
@@ -389,6 +409,19 @@
 </div>
 
 <script>
+// Console app / Service are mutually exclusive — a snap can't be both.
+(function () {
+  const consoleBox = document.getElementById('is_console_app');
+  const serviceBox = document.getElementById('is_service');
+  if (!consoleBox || !serviceBox) return;
+  consoleBox.addEventListener('change', function () {
+    if (this.checked) serviceBox.checked = false;
+  });
+  serviceBox.addEventListener('change', function () {
+    if (this.checked) consoleBox.checked = false;
+  });
+})();
+
 // Filter tabs for issues
 document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
   const tab = e.target.closest('.filter-tab');

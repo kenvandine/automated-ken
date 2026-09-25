@@ -172,6 +172,9 @@ def _migrate() -> None:
         # runners page so it's easy to ssh into a specific machine — see
         # web/routes/runner_api.py.
         "ALTER TABLE runners ADD COLUMN ip_address VARCHAR(64)",
+        # Service snaps (daemon-only, no UI) skip the smoke test entirely
+        # — see Snap.is_service in db/models.py.
+        "ALTER TABLE snaps ADD COLUMN is_service BOOLEAN DEFAULT 0",
     ]
     with engine.connect() as conn:
         for sql in migrations:

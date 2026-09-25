@@ -283,6 +283,7 @@ def _try_claim_job(runner_id: int) -> dict | None:
             "architecture": candidate.architecture or "amd64",
             "testing_repo": testing_repo,
             "is_console_app": bool(snap_row.is_console_app) if snap_row else False,
+            "is_service": bool(snap_row.is_service) if snap_row else False,
         }
 
 

@@ -216,6 +216,7 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             "upstream_repo": snap.upstream_repo,
             "notes": snap.notes,
             "is_console_app": snap.is_console_app,
+            "is_service": snap.is_service,
             "created_at": snap.created_at,
             "updated_at": snap.updated_at,
             "packaging_repo_suggested": None,
@@ -476,6 +477,7 @@ async def snap_edit(
     upstream_repo: str = Form(default=""),
     notes: str = Form(default=""),
     is_console_app: str = Form(default=""),
+    is_service: str = Form(default=""),
 ) -> RedirectResponse:
     """Update snap metadata."""
     user = get_current_user(request)
@@ -491,6 +493,10 @@ async def snap_edit(
         snap.packaging_repo = packaging_repo.strip() or None
         snap.upstream_repo = upstream_repo.strip() or None
         snap.notes = notes.strip() or None
-        snap.is_console_app = is_console_app == "true"
+        snap.is_service = is_service == "true"
+        # A snap can't be both a console app and a service — service wins
+        # if the form somehow submits both (shouldn't happen; the UI
+        # treats them as mutually exclusive).
+        snap.is_console_app = is_console_app == "true" and not snap.is_service
 
     return RedirectResponse(url=f"/snap/{name}", status_code=303)

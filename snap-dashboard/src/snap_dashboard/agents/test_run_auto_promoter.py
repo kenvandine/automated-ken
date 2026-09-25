@@ -7,7 +7,7 @@ import logging
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.agents.screenshot_reviewer import _aggregate_decisions
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import TestRun
+from snap_dashboard.db.models import Snap, TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.baselines import (
     get_or_build_stable_baseline_assets,
@@ -54,85 +54,106 @@ class TestRunAutoPromoterAgent(BaseAgent):
             pr_number = run.pr_number
             version = run.version or ""
             effective_repo = run.repo or uc.testing_repo
+            snap_row = (
+                session.query(Snap).filter_by(name=snap_name, user_id=self.user_id).first()
+            )
+            is_service = bool(snap_row.is_service) if snap_row else False
 
         if revision is None:
             _set_run_note(self.test_run_id, "Review skipped: candidate revision is missing.")
             return f"{snap_name}: missing revision"
 
-        baseline_assets = get_or_build_stable_baseline_assets(
-            self.user_id,
-            snap_name,
-            architecture,
-            effective_repo,
-            uc.github_token,
-        )
-        new_assets = load_test_run_screenshots(
-            effective_repo, pr_number, uc.github_token, test_run_id=self.test_run_id
-        )
-        if not new_assets:
-            _set_run_note(
-                self.test_run_id,
-                "Review skipped: no screenshots are available yet for this run.",
-            )
-            return f"{snap_name}: no comparable screenshots"
-
-        pairs = pair_screenshots(baseline_assets, new_assets)
-
-        lemonade = self._get_lemonade(uc, task="vision")
-        if not lemonade:
-            _set_run_note(
-                self.test_run_id,
-                "Review skipped: no vision model is available for screenshot comparison.",
-            )
-            return f"{snap_name}: no vision model"
-
-        decisions = []
-        if pairs:
-            # Normal path: a known-good stable screenshot exists, so the
-            # model does a real before/after comparison.
-            self._report(f"Reviewing candidate screenshots for {snap_name}…", snap_name)
-            for baseline_asset, new_asset in pairs:
-                result = lemonade.vision_compare(
-                    baseline_bytes=baseline_asset.image_bytes,
-                    new_bytes=new_asset.image_bytes,
-                    snap_name=snap_name,
-                    old_version="stable",
-                    new_version=version,
-                )
-                if result:
-                    decisions.append(result)
+        if is_service:
+            # Service snaps have no UI at all, so there's nothing to visually
+            # review — the install-only smoke test in
+            # automated_ken_runner.runner._run_job passing is the whole test.
+            # Treat that as an automatic approval so promotion works exactly
+            # like any other snap (still gated on the user's auto_promote
+            # setting below), instead of getting stuck waiting forever for
+            # screenshots that will never show up.
+            decision = {
+                "decision": "approve",
+                "confidence": 1.0,
+                "reasoning": (
+                    "Service snap with no UI to test — approved automatically "
+                    "since the smoke test is install-only."
+                ),
+            }
         else:
-            # No baseline yet (e.g. the very first tested version of this
-            # snap) — there's nothing to diff against, but the model can
-            # still judge each screenshot on its own (did a real
-            # application window launch, vs. a blank screen/crash/error).
-            # vision_inspect() caps confidence low for exactly this reason.
-            self._report(
-                f"No baseline yet for {snap_name} — inspecting screenshot(s) alone…", snap_name
+            baseline_assets = get_or_build_stable_baseline_assets(
+                self.user_id,
+                snap_name,
+                architecture,
+                effective_repo,
+                uc.github_token,
             )
-            for new_asset in new_assets:
-                result = lemonade.vision_inspect(
-                    image_bytes=new_asset.image_bytes,
-                    snap_name=snap_name,
-                    version=version,
+            new_assets = load_test_run_screenshots(
+                effective_repo, pr_number, uc.github_token, test_run_id=self.test_run_id
+            )
+            if not new_assets:
+                _set_run_note(
+                    self.test_run_id,
+                    "Review skipped: no screenshots are available yet for this run.",
                 )
-                if result:
-                    decisions.append(result)
+                return f"{snap_name}: no comparable screenshots"
 
-        if not decisions:
-            _set_run_note(
-                self.test_run_id,
-                "Review skipped: screenshot comparison did not return a usable decision.",
-            )
-            return f"{snap_name}: comparison unavailable"
+            pairs = pair_screenshots(baseline_assets, new_assets)
 
-        decision = _aggregate_decisions(decisions)
-        if not pairs:
-            decision["reasoning"] = (
-                "No stable baseline was available for comparison, so this only "
-                "confirms an application window appears to have launched "
-                f"(confidence intentionally kept low): {decision['reasoning']}"
-            )
+            lemonade = self._get_lemonade(uc, task="vision")
+            if not lemonade:
+                _set_run_note(
+                    self.test_run_id,
+                    "Review skipped: no vision model is available for screenshot comparison.",
+                )
+                return f"{snap_name}: no vision model"
+
+            decisions = []
+            if pairs:
+                # Normal path: a known-good stable screenshot exists, so the
+                # model does a real before/after comparison.
+                self._report(f"Reviewing candidate screenshots for {snap_name}…", snap_name)
+                for baseline_asset, new_asset in pairs:
+                    result = lemonade.vision_compare(
+                        baseline_bytes=baseline_asset.image_bytes,
+                        new_bytes=new_asset.image_bytes,
+                        snap_name=snap_name,
+                        old_version="stable",
+                        new_version=version,
+                    )
+                    if result:
+                        decisions.append(result)
+            else:
+                # No baseline yet (e.g. the very first tested version of this
+                # snap) — there's nothing to diff against, but the model can
+                # still judge each screenshot on its own (did a real
+                # application window launch, vs. a blank screen/crash/error).
+                # vision_inspect() caps confidence low for exactly this reason.
+                self._report(
+                    f"No baseline yet for {snap_name} — inspecting screenshot(s) alone…", snap_name
+                )
+                for new_asset in new_assets:
+                    result = lemonade.vision_inspect(
+                        image_bytes=new_asset.image_bytes,
+                        snap_name=snap_name,
+                        version=version,
+                    )
+                    if result:
+                        decisions.append(result)
+
+            if not decisions:
+                _set_run_note(
+                    self.test_run_id,
+                    "Review skipped: screenshot comparison did not return a usable decision.",
+                )
+                return f"{snap_name}: comparison unavailable"
+
+            decision = _aggregate_decisions(decisions)
+            if not pairs:
+                decision["reasoning"] = (
+                    "No stable baseline was available for comparison, so this only "
+                    "confirms an application window appears to have launched "
+                    f"(confidence intentionally kept low): {decision['reasoning']}"
+                )
         threshold = float(getattr(uc, "auto_promote_confidence", 0.85) or 0.85)
 
         # The review itself — and its result — always happens and is always

@@ -260,10 +260,11 @@ class RunnerLoop:
         snap_name = job["snap_name"]
         channel = job.get("channel", "stable")
         is_console_app = bool(job.get("is_console_app", False))
+        is_service = bool(job.get("is_service", False))
         logger.info(
             "Claimed job %s: %s (%s, %s)%s",
             job_id, snap_name, channel, job.get("architecture", ""),
-            " [console app]" if is_console_app else "",
+            " [service]" if is_service else " [console app]" if is_console_app else "",
         )
         self._report_status(job_id, "running")
 
@@ -278,6 +279,18 @@ class RunnerLoop:
             try:
                 self._install_snap(snap_name, channel, _log)
                 self._check_cancelled()
+                if is_service:
+                    # Services (Snap.is_service) have no UI at all — nothing
+                    # to launch on a desktop or in a terminal, and nothing to
+                    # screenshot. The install above already confirms the
+                    # package itself is good, so that's the whole test.
+                    _log(
+                        "smoke test",
+                        "Skipped — this snap is marked as a service with no "
+                        "UI to test. Install succeeded, so this run passes.",
+                    )
+                    self._report_status(job_id, "passed", log="\n".join(log_lines))
+                    return
                 # Every snap gets the same generic smoke test now — no
                 # per-repo Robot/YARF suite support. yarf has no working
                 # platform against a real GNOME session anyway (see

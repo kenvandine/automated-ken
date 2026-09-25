@@ -164,6 +164,14 @@ class Snap(Base):
     # being launched inside a terminal emulator instead — see
     # automated_ken_runner.runner._run_desktop_smoke_test.
     is_console_app = Column(Boolean, default=False, nullable=False)
+    # Services (e.g. daemons run via a systemd/dbus snap "daemon:" app,
+    # with no user-facing UI at all) have nothing to launch on a desktop
+    # or in a terminal and nothing to screenshot — so they get no smoke
+    # test whatsoever. See automated_ken_runner.runner._run_job, which
+    # skips straight from install to "passed" for these. Mutually
+    # exclusive with is_console_app in practice (the UI only lets one be
+    # set at a time), but this flag always wins if both are somehow set.
+    is_service = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=_now, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
 
