@@ -265,22 +265,41 @@ class RunnerLoop:
                 self._report_status(job_id, "failed", error=str(exc), log="\n".join(log_lines))
 
     def _install_snap(self, snap_name: str, channel: str, log: Callable[[str, str], None]) -> None:
-        subprocess.run(
+        info = subprocess.run(
             ["snap", "info", snap_name], capture_output=True, timeout=30, check=False
+        )
+        needs_classic = self._snap_needs_classic(
+            (info.stdout or b"").decode(errors="replace")
         )
         installed = subprocess.run(
             ["snap", "list", snap_name], capture_output=True, timeout=15, check=False
         ).returncode == 0
         action = "refresh" if installed else "install"
-        proc = subprocess.run(
-            ["sudo", "snap", action, snap_name, f"--channel={channel}"],
-            capture_output=True, timeout=300, check=False,
-        )
+        cmd = ["sudo", "snap", action, snap_name, f"--channel={channel}"]
+        if needs_classic:
+            cmd.append("--classic")
+        proc = subprocess.run(cmd, capture_output=True, timeout=300, check=False)
         log(
             f"snap {action} {snap_name}",
             (proc.stdout or b"").decode(errors="replace") + (proc.stderr or b"").decode(errors="replace"),
         )
         proc.check_returncode()
+
+    @staticmethod
+    def _snap_needs_classic(snap_info_output: str) -> bool:
+        """Return True if ``snap info``'s output reports classic confinement.
+
+        Classic-confinement snaps (e.g. fresh-editor) refuse ``snap
+        install``/``refresh`` without an explicit ``--classic`` flag —
+        this reads that requirement straight from the store metadata
+        every job already fetches, so no per-snap runner config is
+        needed to know which ones need it.
+        """
+        for line in snap_info_output.splitlines():
+            key, sep, value = line.partition(":")
+            if sep and key.strip() == "confinement":
+                return value.strip() == "classic"
+        return False
 
     def _run_desktop_smoke_test(
         self, snap_name: str, is_console_app: bool, tmp_path: Path, log: Callable[[str, str], None]
@@ -314,6 +333,17 @@ class RunnerLoop:
             cmd = [_CONSOLE_TERMINAL, "-e", "snap", "run", snap_name]
         else:
             cmd = ["snap", "run", snap_name]
+        # Logged unconditionally (not just on failure) — a launch that never
+        # appears is often an interface that didn't auto-connect (wayland,
+        # opengl, desktop, ...); having this in every job's log means that
+        # doesn't require reproducing the failure to diagnose.
+        conns = subprocess.run(
+            ["snap", "connections", snap_name], capture_output=True, timeout=15, check=False,
+        )
+        log(
+            "snap connections",
+            (conns.stdout or b"").decode(errors="replace") + (conns.stderr or b"").decode(errors="replace"),
+        )
         app_proc = subprocess.Popen(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
         )
@@ -335,10 +365,19 @@ class RunnerLoop:
         finally:
             app_proc.terminate()
             try:
-                app_proc.wait(timeout=10)
+                output, _ = app_proc.communicate(timeout=10)
             except subprocess.TimeoutExpired:
                 app_proc.kill()
-                app_proc.wait(timeout=5)
+                try:
+                    output, _ = app_proc.communicate(timeout=5)
+                except subprocess.TimeoutExpired:
+                    output = b""
+            # Captured regardless of pass/fail — a process that never
+            # "appears" to pgrep (e.g. flash-cards/drawing timing out
+            # above) still often prints why on stdout/stderr before dying,
+            # and that was previously discarded unread.
+            if output:
+                log("snap run output", output.decode(errors="replace"))
             subprocess.run(["pkill", "-f", f"/snap/{snap_name}/"], check=False)
 
     @staticmethod
