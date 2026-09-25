@@ -91,11 +91,23 @@ parts:
     # subdirectory (snap-dashboard/) of the git repo, which has no .git of
     # its own, and this repo has no version tags anyway. Pull the version
     # straight out of pyproject.toml instead, so there's exactly one place
-    # (pyproject.toml) to bump it.
+    # (pyproject.toml) to bump it. Append the commit that was actually
+    # built (so both the Snap Store revision and the running app's own
+    # /settings footer — see snap_dashboard/version.py, which reads
+    # $SNAP_VERSION at runtime — can be traced back to an exact commit).
+    # The `.git-commit` file is written by CI (see .github/workflows/
+    # snap-publish.yml) into this source dir *before* invoking snapcraft,
+    # since by the time this script runs, `source: .` has already been
+    # copied out of the full git checkout and has no .git of its own.
     override-pull: |
       craftctl default
       version="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
-      craftctl set version="${version:-0.0.0}"
+      version="${version:-0.0.0}"
+      if [ -f .git-commit ]; then
+        commit="$(cat .git-commit)"
+        version="${version}+git${commit}"
+      fi
+      craftctl set version="${version}"
     # Shadow GNU tar with bsdtar on PATH (see embedded.py, which puts
     # $SNAP/bin ahead of $SNAP/usr/bin on the lemond subprocess's PATH) so
     # lemond's own internal backend-archive extraction uses bsdtar instead.

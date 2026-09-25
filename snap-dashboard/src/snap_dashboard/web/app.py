@@ -64,6 +64,12 @@ app.mount("/static", _RevalidatingStaticFiles(directory=str(_STATIC_DIR)), name=
 # Jinja2 templates (shared across routes)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
+# Exposed as `app_version()` in every template (see base.html's footer)
+# without every route needing to pass it through its own context.
+from snap_dashboard.version import get_app_version  # noqa: E402
+
+templates.env.globals["app_version"] = get_app_version
+
 
 @app.on_event("startup")
 async def on_startup() -> None:
