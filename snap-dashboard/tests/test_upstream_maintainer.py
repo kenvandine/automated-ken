@@ -164,7 +164,6 @@ def test_dep_update_respects_cooldown(isolated_session, monkeypatch) -> None:
 def test_triage_issues_caps_per_run_and_dedupes(isolated_session, monkeypatch) -> None:
     user_id = _seed_user_and_snap(isolated_session, "https://github.com/kenvandine/gemini-desktop")
     session = isolated_session()
-    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
     snap = session.query(Snap).filter_by(user_id=user_id).first()
     snap_id = snap.id
     session.close()
