@@ -276,6 +276,7 @@ async def trigger_test(
     architecture: str = Form(default="amd64"),
     version: str = Form(default=""),
     revision: str = Form(default="0"),
+    force: str = Form(default=""),
 ) -> JSONResponse | RedirectResponse:
     """Queue a YARF test run for *snap_name* on a remote runner.
 
@@ -285,6 +286,10 @@ async def trigger_test(
     row instead of reloading the whole page (which used to re-scan every
     snap and hit GitHub's API for each one — very slow). Falls back to a
     redirect for non-JS/no-Accept-header callers.
+
+    Normally refuses to queue a duplicate for a revision that already has
+    an active/finished run (``skip_if_exists``); ``force=true`` bypasses
+    that so the page's "re-run anyway?" confirm can actually do something.
     """
     user = get_current_user(request)
     if user is None:
@@ -300,7 +305,7 @@ async def trigger_test(
         architecture=architecture,
         triggered_by="manual",
         user_id=user_id,
-        skip_if_exists=True,
+        skip_if_exists=force != "true",
     )
     if not ok:
         logger.error("Failed to trigger test for %s: %s", snap_name, err)
@@ -321,6 +326,7 @@ async def trigger_test_group(
     version: str = Form(default=""),
     architecture: list[str] = Form(default=[]),
     revision: list[str] = Form(default=[]),
+    force: str = Form(default=""),
 ) -> JSONResponse:
     """Queue one YARF test run per architecture for a "needs testing" row.
 
@@ -330,6 +336,9 @@ async def trigger_test_group(
     requiring a separate click per arch. ``architecture``/``revision`` are
     parallel lists (same order, one hidden input pair per arch — see
     testing.html) so each run gets its own recorded revision.
+
+    ``force=true`` bypasses the "already tested this revision" dedup guard
+    (``skip_if_exists``) — see the JS "re-run anyway?" confirm below.
     """
     user = get_current_user(request)
     if user is None:
@@ -345,7 +354,7 @@ async def trigger_test_group(
             architecture=arch,
             triggered_by="manual",
             user_id=user_id,
-            skip_if_exists=True,
+            skip_if_exists=force != "true",
         )
         if not ok:
             logger.error("Failed to trigger test for %s (%s): %s", snap_name, arch, err)

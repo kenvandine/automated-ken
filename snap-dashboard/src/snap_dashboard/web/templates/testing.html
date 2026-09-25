@@ -497,7 +497,45 @@ This is an intentional override of the normal all-architectures gate. Continue?{
         .then(data => {
           const failed = (data.results || []).filter(r => !r.ok);
           if (failed.length) {
-            alert('Failed to trigger test for: ' + failed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', '));
+            const dup = failed.filter(r => (r.error || '').includes('use Re-run'));
+            if (dup.length && confirm(
+              'Failed to trigger test for: '
+              + failed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', ')
+              + '\n\nRe-run anyway?'
+            )) {
+              const fd = new FormData(form);
+              fd.set('force', 'true');
+              button.disabled = true;
+              button.textContent = 'Queuing…';
+              fetch(form.action, { method: 'POST', headers: { 'Accept': 'application/json' }, body: fd })
+                .then(r => r.json())
+                .then(data2 => {
+                  const stillFailed = (data2.results || []).filter(r => !r.ok);
+                  if (stillFailed.length) {
+                    alert('Failed to trigger test for: ' + stillFailed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', '));
+                  }
+                  if (cell) {
+                    const lines2 = (data2.results || []).map(r => {
+                      if (!r.ok) return '<div><span class="muted small">' + r.architecture + ':</span> <span class="p-status-label p-status-label--negative">error</span></div>';
+                      return '<div><span class="muted small">' + r.architecture + ':</span> '
+                        + '<span class="p-status-label p-status-label--caution js-run-status" data-run-id="' + r.run_id + '">' + r.status + '</span></div>';
+                    });
+                    if (lines2.length) cell.innerHTML = lines2.join('');
+                  }
+                  button.disabled = false;
+                  button.textContent = originalLabel;
+                  poll();
+                })
+                .catch(() => {
+                  alert('Failed to trigger test — network error.');
+                  button.disabled = false;
+                  button.textContent = originalLabel;
+                });
+              return;
+            }
+            if (!dup.length) {
+              alert('Failed to trigger test for: ' + failed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', '));
+            }
           }
           if (cell) {
             const lines = (data.results || []).map(r => {

@@ -439,12 +439,19 @@ async def snap_trigger_test(
     architecture: str = Form(default="amd64"),
     version: str = Form(default=""),
     revision: str = Form(default="0"),
+    force: str = Form(default=""),
 ) -> RedirectResponse:
     """Queue a YARF test run for this snap directly from its detail page.
 
     Thin wrapper around the same remote-runner dispatch used by the
     Testing page (see testing.trigger_test) — kept here so the redirect
     lands back on /snap/{name} instead of /testing.
+
+    Normally refuses to queue a duplicate for a revision that already has
+    an active/finished run (``skip_if_exists``) — but that guard makes
+    the "Run test" link a dead end when you *do* want to re-test an
+    already-promoted revision, so ``force=true`` (set by the "Re-run
+    anyway" button the error message links to) bypasses it.
     """
     user = get_current_user(request)
     if user is None:
@@ -460,11 +467,17 @@ async def snap_trigger_test(
         architecture=architecture,
         triggered_by="manual",
         user_id=user_id,
-        skip_if_exists=True,
+        skip_if_exists=force != "true",
     )
     if not ok:
         logger.error("Failed to trigger test for %s: %s", name, err)
-        return RedirectResponse(url=f"/snap/{name}?error={quote(err or 'trigger_failed')}", status_code=303)
+        retry_qs = (
+            f"&retry_channel={quote(from_channel)}&retry_arch={quote(architecture)}"
+            f"&retry_version={quote(version)}&retry_revision={quote(revision)}"
+        )
+        return RedirectResponse(
+            url=f"/snap/{name}?error={quote(err or 'trigger_failed')}{retry_qs}", status_code=303,
+        )
 
     return RedirectResponse(url=f"/snap/{name}?notice=test_queued", status_code=303)
 
