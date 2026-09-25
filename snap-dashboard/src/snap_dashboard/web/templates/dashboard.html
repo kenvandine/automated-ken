@@ -95,6 +95,7 @@
           <th>Issues</th>
           <th>PRs</th>
           <th>Updated</th>
+          <th>Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -167,6 +168,13 @@
             —
             {% endif %}
           </td>
+          <td>
+            {% if row.snap.packaging_repo %}
+            <form method="post" action="/snap/{{ row.snap.name }}/rebuild" class="js-rebuild-form" style="display:inline">
+              <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild via the packaging repo's automated-snap-build.yml workflow">Rebuild</button>
+            </form>
+            {% endif %}
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -210,6 +218,37 @@ document.querySelectorAll('.js-refresh-form').forEach(form => {
         button.disabled = false;
         button.textContent = original;
         alert('Failed to queue collection — check your connection and try again.');
+      });
+  });
+});
+
+// Same "don't navigate away, just confirm it's queued" treatment for the
+// per-row Rebuild button — it dispatches a background agent (see
+// RebuildOneSnapAgent), so there's nothing new to show immediately and no
+// reason to leave the dashboard (progress/result shows up on /agents).
+document.querySelectorAll('.js-rebuild-form').forEach(form => {
+  form.addEventListener('submit', evt => {
+    evt.preventDefault();
+    const button = form.querySelector('button[type="submit"]');
+    const original = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Starting…';
+    fetch(form.action, { method: 'POST', headers: { 'X-Requested-With': 'fetch' } })
+      .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, body })))
+      .then(({ ok, body }) => {
+        if (!ok) {
+          alert(`Failed to trigger rebuild: ${body.error || 'unknown error'}`);
+          button.disabled = false;
+          button.textContent = original;
+          return;
+        }
+        button.textContent = 'Started ✓';
+        setTimeout(() => { button.disabled = false; button.textContent = original; }, 4000);
+      })
+      .catch(() => {
+        button.disabled = false;
+        button.textContent = original;
+        alert('Network error triggering rebuild — check your connection and try again.');
       });
   });
 });

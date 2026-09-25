@@ -8,7 +8,7 @@ from html import escape
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
@@ -362,6 +362,48 @@ async def snap_check_updates(name: str, request: Request) -> RedirectResponse:
 
     get_runner().submit(ReleaseScannerAgent(user_id=user_id, snap_id=snap_id))
     return RedirectResponse(url=f"/snap/{name}?notice=scan_started", status_code=303)
+
+
+@router.post("/snap/{name}/rebuild")
+async def snap_rebuild(name: str, request: Request):
+    """Manually trigger an immediate rebuild for this one snap — the
+    single-snap counterpart of Settings → "Rebuild All Snaps Now"
+    (RebuildAllSnapsAgent). Ignores publish staleness and doesn't create
+    the build workflow if the packaging repo doesn't have it yet.
+
+    Called via ``fetch()`` from the snap detail page and the Tracked
+    Snaps table (Settings) so it doesn't reload the whole page — respond
+    with JSON when ``X-Requested-With`` is present. Non-JS form
+    submissions still get a redirect fallback.
+    """
+    is_fetch = bool(request.headers.get("X-Requested-With"))
+
+    user = get_current_user(request)
+    if user is None:
+        if is_fetch:
+            return JSONResponse({"error": "not authenticated"}, status_code=401)
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            if is_fetch:
+                return JSONResponse({"error": "snap not found"}, status_code=404)
+            return RedirectResponse(url="/", status_code=303)
+        if not snap.packaging_repo:
+            if is_fetch:
+                return JSONResponse({"error": "no_packaging_repo"}, status_code=400)
+            return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.stale_build_scanner import RebuildOneSnapAgent
+
+    get_runner().submit(RebuildOneSnapAgent(user_id=user_id, snap_id=snap_id))
+    if is_fetch:
+        return JSONResponse({"started": True})
+    return RedirectResponse(url=f"/snap/{name}?notice=rebuild_started", status_code=303)
 
 
 @router.post("/snap/{name}/trigger-test")

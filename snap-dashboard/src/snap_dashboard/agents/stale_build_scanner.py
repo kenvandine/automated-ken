@@ -237,6 +237,45 @@ class StaleSnapScannerAgent(BaseAgent):
         return created
 
 
+def _dispatch_rebuild_for_snap(client, snap: dict) -> tuple[str, str | None]:
+    """Dispatch an immediate rebuild for one snap that already has the
+    automated build/publish workflow in its packaging repo.
+
+    Shared by :class:`RebuildAllSnapsAgent` (loops over every snap) and
+    :class:`RebuildOneSnapAgent` (a single snap, from its detail page or
+    the snaps list). Returns ``(status, error)`` where ``status`` is one
+    of ``"triggered"``, ``"no_repo"`` (no/non-GitHub packaging repo),
+    ``"no_workflow"`` (repo has no automated-snap-build.yml yet — this
+    deliberately does not create it, unlike the staleness scanner), or
+    ``"error"`` (dispatch itself failed).
+    """
+    owner_repo = _parse_github_owner_repo(snap["packaging_repo"])
+    if not owner_repo:
+        return "no_repo", None
+    owner, repo = owner_repo
+
+    if not client.file_exists(owner, repo, WORKFLOW_PATH):
+        logger.debug(
+            "rebuild: %s has no %s, skipping", snap["name"], WORKFLOW_PATH
+        )
+        return "no_workflow", None
+
+    default_branch = client.get_default_branch(owner, repo)
+    success, err = client.dispatch_workflow(
+        owner, repo, _BUILD_WORKFLOW,
+        ref=default_branch,
+        inputs={"dashboard_trigger_id": str(snap["id"])},
+    )
+    if success:
+        _record_trigger(snap, channel=_BUILD_CHANNEL, status="triggered")
+        logger.info("rebuild: triggered rebuild for %s", snap["name"])
+        return "triggered", None
+    else:
+        _record_trigger(snap, channel=_BUILD_CHANNEL, status="failed", error=err)
+        logger.warning("rebuild: dispatch failed for %s: %s", snap["name"], err)
+        return "error", err
+
+
 class RebuildAllSnapsAgent(BaseAgent):
     """Manually triggers an immediate rebuild for every snap with a GitHub
     packaging repo that already has the automated build/publish workflow.
@@ -288,36 +327,73 @@ class RebuildAllSnapsAgent(BaseAgent):
 
         for i, snap in enumerate(snaps, 1):
             self._report(f"Checking {i}/{total}: {snap['name']}", snap["name"])
-            owner_repo = _parse_github_owner_repo(snap["packaging_repo"])
-            if not owner_repo:
-                no_repo += 1
-                continue
-            owner, repo = owner_repo
-
-            if not client.file_exists(owner, repo, WORKFLOW_PATH):
-                logger.debug(
-                    "rebuild_all_snaps: %s has no %s, skipping", snap["name"], WORKFLOW_PATH
-                )
-                no_workflow += 1
-                continue
-
-            default_branch = client.get_default_branch(owner, repo)
-            success, err = client.dispatch_workflow(
-                owner, repo, _BUILD_WORKFLOW,
-                ref=default_branch,
-                inputs={"dashboard_trigger_id": str(snap["id"])},
-            )
-            if success:
-                _record_trigger(snap, channel=_BUILD_CHANNEL, status="triggered")
-                logger.info("rebuild_all_snaps: triggered rebuild for %s", snap["name"])
+            status, _err = _dispatch_rebuild_for_snap(client, snap)
+            if status == "triggered":
                 triggered += 1
+            elif status == "no_workflow":
+                no_workflow += 1
+            elif status == "no_repo":
+                no_repo += 1
             else:
-                _record_trigger(snap, channel=_BUILD_CHANNEL, status="failed", error=err)
-                logger.warning("rebuild_all_snaps: dispatch failed for %s: %s", snap["name"], err)
                 errors += 1
 
         return (
             f"{triggered} rebuild(s) triggered, {no_workflow} skipped (no build workflow), "
             f"{no_repo} skipped (no GitHub packaging repo), {errors} error(s)"
         )
+
+
+class RebuildOneSnapAgent(BaseAgent):
+    """Manually triggers an immediate rebuild for a single snap, the same
+    way :class:`RebuildAllSnapsAgent` does for the whole fleet — used by
+    the per-snap "Rebuild Now" button on the snap detail page and the
+    Tracked Snaps table (Settings). Requires the snap to already have a
+    GitHub packaging repo with the automated build/publish workflow; it
+    does not create the workflow if missing (use "Check Updates"/the
+    stale-build scanner for that).
+    """
+
+    agent_type = "rebuild_one_snap"
+
+    def __init__(self, user_id: int | None = None, snap_id: int | None = None) -> None:
+        super().__init__(user_id=user_id)
+        self.snap_id = snap_id
+
+    def _run(self) -> str:
+        uc = get_user_config(self.user_id) if self.user_id else None
+        token = (getattr(uc, "github_token", "") or "") if uc else ""
+        if not token:
+            return "no GitHub token configured — skipping"
+
+        with get_session() as session:
+            q = session.query(Snap).filter_by(id=self.snap_id)
+            if self.user_id:
+                q = q.filter_by(user_id=self.user_id)
+            s = q.first()
+            if not s:
+                return "snap not found — skipping"
+            snap = {
+                "id": s.id,
+                "name": s.name,
+                "packaging_repo": s.packaging_repo or "",
+                "user_id": s.user_id,
+            }
+
+        if not snap["packaging_repo"]:
+            return f"{snap['name']}: no GitHub packaging repo configured — skipping"
+
+        self._report(f"Rebuilding {snap['name']}…", snap["name"])
+
+        from snap_dashboard.github.bot_client import BotGitHubClient
+        client = BotGitHubClient(token=token)
+
+        status, err = _dispatch_rebuild_for_snap(client, snap)
+        if status == "triggered":
+            return f"{snap['name']}: rebuild triggered"
+        elif status == "no_workflow":
+            return f"{snap['name']}: skipped — no automated-snap-build.yml in packaging repo"
+        elif status == "no_repo":
+            return f"{snap['name']}: skipped — packaging repo isn't a GitHub URL"
+        else:
+            return f"{snap['name']}: dispatch failed — {err}"
 

@@ -10,12 +10,13 @@
 <div class="p-notification--positive detail-section" style="padding:8px 12px; border-radius:4px;">
   {% if notice == 'test_queued' %}Test run queued — see it in the Test Run History below.
   {% elif notice == 'scan_started' %}Checking for a newer upstream version — a version-bump PR will open automatically if one is found.
+  {% elif notice == 'rebuild_started' %}Rebuild triggered — see it on the <a href="/agents" class="link-inline">Agents</a> page.
   {% else %}{{ notice }}{% endif %}
 </div>
 {% endif %}
 {% if page_error %}
 <div class="p-notification--negative detail-section" style="padding:8px 12px; border-radius:4px;">
-  {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for upstream updates.
+  {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for updates or triggering a rebuild.
   {% elif page_error == 'trigger_failed' %}Failed to queue the test run — check that a runner is enrolled and online.
   {% else %}{{ page_error }}{% endif %}
 </div>
@@ -49,6 +50,11 @@
           hx-post="/snap/{{ snap.name }}/check-updates" hx-target="#page-content" hx-select="#page-content"
           hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button is-small" title="Scan the packaging repo for a newer upstream version and open a version-bump PR if found">Check for updates</button>
+    </form>
+    <form method="post" action="/snap/{{ snap.name }}/rebuild" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/rebuild" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild via the packaging repo's automated-snap-build.yml workflow">Rebuild Now</button>
     </form>
     {% endif %}
     <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
