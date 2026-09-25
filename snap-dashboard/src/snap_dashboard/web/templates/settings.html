@@ -360,9 +360,8 @@
       <span class="form-hint">
         Snaps with no new publication older than this threshold will have a rebuild triggered.
       </span>
-      <form method="post" action="/settings/rebuild-all-snaps" style="margin-top: 8px;">
-        <button type="submit" class="p-button is-small">Rebuild All Snaps Now</button>
-      </form>
+      <button type="button" onclick="runBackgroundAction(event, '/settings/rebuild-all-snaps', 'rebuild-all-snaps-status')" class="p-button is-small" style="margin-top: 8px;">Rebuild All Snaps Now</button>
+      <span id="rebuild-all-snaps-status" class="form-hint"></span>
       <span class="form-hint">
         Immediately dispatches a rebuild for every snap that already has the
         <code>automated-snap-build.yml</code> workflow in its packaging repo — regardless of
@@ -493,9 +492,8 @@
         suite (if a legacy shared testing repo has one) into <code>tests/</code>. Review each PR before merging.
       </span>
       {% if config.fleet_normalization_enabled %}
-      <form method="post" action="/settings/run-fleet-normalization" style="margin-top: 8px;">
-        <button type="submit" class="p-button is-small">Run Fleet Normalization Now</button>
-      </form>
+      <button type="button" onclick="runBackgroundAction(event, '/settings/run-fleet-normalization', 'run-fleet-normalization-status')" class="p-button is-small" style="margin-top: 8px;">Run Fleet Normalization Now</button>
+      <span id="run-fleet-normalization-status" class="form-hint"></span>
       {% endif %}
     </div>
 
@@ -566,6 +564,35 @@
 
 {% block scripts %}
 <script>
+async function runBackgroundAction(evt, url, statusElId) {
+  // Dispatches a one-off background agent (rebuild-all-snaps /
+  // run-fleet-normalization) via fetch instead of a plain form POST, so
+  // the button doesn't navigate away / reload the whole Settings page.
+  const button = evt.target;
+  const statusEl = document.getElementById(statusElId);
+  button.disabled = true;
+  if (statusEl) statusEl.textContent = 'Starting…';
+
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'fetch' },
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (statusEl) statusEl.textContent = `Failed to start: ${body.error || r.status}`;
+      return;
+    }
+    if (statusEl) {
+      statusEl.innerHTML = 'Started — track progress on the <a href="/agents" class="link-inline">Agents</a> page.';
+    }
+  } catch (err) {
+    if (statusEl) statusEl.textContent = `Network error: ${err}`;
+  } finally {
+    button.disabled = false;
+  }
+}
+
 async function removeSnap(evt, snapName) {
   evt.preventDefault();
   if (!confirm(`Remove ${snapName} from tracking?`)) return false;
