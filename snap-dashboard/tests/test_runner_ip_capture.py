@@ -16,6 +16,7 @@ from sqlalchemy.orm import sessionmaker
 from snap_dashboard.db.models import Base, Runner, User
 from snap_dashboard.runners import generate_token, hash_token
 from snap_dashboard.web.routes import runner_api
+from snap_dashboard.web.routes.runners import _runner_dict
 
 
 @pytest.fixture
@@ -119,3 +120,13 @@ async def test_heartbeat_records_ip_address(db, monkeypatch):
     with db() as session:
         runner = session.query(Runner).get(runner_id)
         assert runner.ip_address == "192.168.1.77"
+
+
+def test_runner_dict_includes_captured_ip_address():
+    """Regression test: the /runners page route builds a plain dict per
+    runner for the template (see web/routes/runners.py) — it must forward
+    ``ip_address`` too, otherwise a captured IP silently never reaches the
+    page even though it's correctly stored in the DB."""
+    runner = Runner(user_id=1, name="laptop-4", ip_address="192.168.1.88")
+    row = _runner_dict(runner)
+    assert row["ip_address"] == "192.168.1.88"

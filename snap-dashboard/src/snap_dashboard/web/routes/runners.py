@@ -30,6 +30,7 @@ def _runner_dict(runner: Runner) -> dict:
         "os_name": runner.os_name or "",
         "desktop_env": runner.desktop_env or "",
         "idle_seconds": runner.idle_seconds,
+        "ip_address": runner.ip_address,
         "last_heartbeat_at": (
             runner.last_heartbeat_at.strftime("%H:%M:%S") if runner.last_heartbeat_at else None
         ),
