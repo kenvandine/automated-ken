@@ -130,4 +130,4 @@ changes are additive `ALTER TABLE` migrations applied at startup
 
 ## License
 
-GPL-3.0-or-later (see `pyproject.toml`).
+GPL-3.0-or-later — see [`LICENSE`](../LICENSE).

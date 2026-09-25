@@ -14,6 +14,7 @@ issues: https://github.com/kenvandine/automated-ken/issues
 source-code: https://github.com/kenvandine/automated-ken
 grade: stable
 confinement: strict
+license: GPL-3.0-or-later
 
 # Required snap options (snap set automated-ken <key>=<value>):
 #   github-client-id:     OAuth App client ID (create one at

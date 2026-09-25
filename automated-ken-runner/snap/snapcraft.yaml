@@ -24,6 +24,7 @@ issues: https://github.com/kenvandine/automated-ken/issues
 source-code: https://github.com/kenvandine/automated-ken
 grade: stable
 confinement: classic
+license: GPL-3.0-or-later
 
 apps:
   automated-ken-runner:

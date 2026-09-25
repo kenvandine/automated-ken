@@ -72,4 +72,4 @@ snapcraft pack        # build the snap
 
 ## License
 
-MIT (see `pyproject.toml`).
+GPL-3.0-or-later — see [`LICENSE`](../LICENSE).

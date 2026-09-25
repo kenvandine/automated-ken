@@ -187,5 +187,4 @@ Each has a status note at the top describing how the shipped system differs.
 
 ## License
 
-The server (`snap-dashboard/`) is GPL-3.0-or-later and the runner
-(`automated-ken-runner/`) is MIT, as declared in each `pyproject.toml`.
+GPL-3.0-or-later — see [`LICENSE`](LICENSE).
