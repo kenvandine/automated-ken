@@ -13,7 +13,9 @@
       model, see <a href="/settings">Settings</a> to configure the coding-task backend.
     </p>
   </div>
-  <form method="post" action="/copilot-tasks/refresh-all">
+  <form method="post" action="/copilot-tasks/refresh-all"
+        hx-post="/copilot-tasks/refresh-all" hx-target="#page-content" hx-select="#page-content"
+        hx-swap="innerHTML" hx-disabled-elt="find button">
     <button type="submit" class="p-button">Refresh All Statuses</button>
   </form>
 </div>
@@ -70,7 +72,9 @@
         <td class="text-muted small">{{ t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '' }}</td>
         <td>
           {% if not t.is_terminal %}
-          <form method="post" action="/copilot-tasks/{{ t.id }}/refresh">
+          <form method="post" action="/copilot-tasks/{{ t.id }}/refresh"
+                hx-post="/copilot-tasks/{{ t.id }}/refresh" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button">
             <button type="submit" class="p-button is-small">Refresh</button>
           </form>
           {% endif %}

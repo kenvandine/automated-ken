@@ -18,16 +18,20 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
     {% if not bump.merged_at and bump.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/merge"
-          onsubmit="return confirm('Merge this PR?')">
+          hx-post="/version-bumps/{{ bump.id }}/merge" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button" hx-confirm="Merge this PR?" hx-push-url="true">
       <button type="submit" class="p-button--positive">✓ Merge PR</button>
     </form>
     <form method="post" action="/version-bumps/{{ bump.id }}/reject"
-          onsubmit="return confirm('Close this PR?')">
+          hx-post="/version-bumps/{{ bump.id }}/reject" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button" hx-confirm="Close this PR?" hx-push-url="true">
       <button type="submit" class="p-button--negative is-small" style="font-size:13px;padding:6px 14px;">✗ Reject</button>
     </form>
     {% endif %}
     {% if bump.status in ('agent_rejected', 'yarf_failed') or (bump.merged_at and bump.status == 'needs_review') %}
-    <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
+    <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf"
+          hx-post="/version-bumps/{{ bump.id }}/re-run-yarf" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button">↺ Re-run {% if bump.merged_at %}candidate tests{% else %}YARF{% endif %}</button>
     </form>
     {% endif %}
@@ -101,13 +105,13 @@
   {% if ready %}
   {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
   <form method="post" action="/testing/promote-set/{{ bump.snap_name }}"
-        onsubmit="return confirm(
-          {% if blocked %}
-          'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-          {% else %}
-          'Promote {{ bump.snap_name }} {{ bump.new_version }} to stable for {{ ready | join(', ') }}?'
-          {% endif %}
-        )">
+        hx-post="/testing/promote-set/{{ bump.snap_name }}" hx-target="#page-content" hx-select="#page-content"
+        hx-swap="innerHTML" hx-disabled-elt="find button"
+        hx-confirm="{% if blocked %}This will promote ONLY {{ ready | join(', ') }} to stable.
+
+The following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.
+
+This is an intentional override of the normal all-architectures gate. Continue?{% else %}Promote {{ bump.snap_name }} {{ bump.new_version }} to stable for {{ ready | join(', ') }}?{% endif %}">
     <input type="hidden" name="version" value="{{ bump.new_version }}">
     <input type="hidden" name="return_to" value="/version-bumps/{{ bump.id }}">
     {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}
@@ -214,18 +218,24 @@
   <h3 class="section-label">Actions</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
     {% if not bump.merged_at and bump.status not in ('closed', 'agent_approved', 'needs_review') %}
-    <form method="post" action="/version-bumps/{{ bump.id }}/request-review">
+    <form method="post" action="/version-bumps/{{ bump.id }}/request-review"
+          hx-post="/version-bumps/{{ bump.id }}/request-review" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button">Flag for Manual Review</button>
     </form>
     {% endif %}
     {% if bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed') and not bump.merged_at %}
-    <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
+    <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf"
+          hx-post="/version-bumps/{{ bump.id }}/re-run-yarf" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button">↺ Re-run Tests</button>
     </form>
     {% endif %}
     {% if not bump.merged_at and bump.status != 'closed' %}
     <form method="post" action="/version-bumps/{{ bump.id }}/reject"
-          onsubmit="return confirm('Close PR #{{ bump.bot_pr_number }}?')">
+          hx-post="/version-bumps/{{ bump.id }}/reject" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button"
+          hx-confirm="Close PR #{{ bump.bot_pr_number }}?" hx-push-url="true">
       <button type="submit" class="p-button--negative is-small" style="font-size:13px;padding:6px 14px;">Close PR</button>
     </form>
     {% endif %}

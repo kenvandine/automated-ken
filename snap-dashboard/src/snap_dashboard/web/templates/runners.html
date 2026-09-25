@@ -48,7 +48,10 @@
         <td class="text-muted small">{{ r.arch }} {{ r.os_name }} {{ r.desktop_env }}</td>
         <td>
           {% if r.status != 'revoked' %}
-          <form method="post" action="/runners/{{ r.id }}/revoke" onsubmit="return confirm('Revoke this runner? It will need to re-enroll.');">
+          <form method="post" action="/runners/{{ r.id }}/revoke"
+                hx-post="/runners/{{ r.id }}/revoke" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button"
+                hx-confirm="Revoke this runner? It will need to re-enroll.">
             <button type="submit" class="p-button is-small">Revoke</button>
           </form>
           {% endif %}
@@ -81,18 +84,24 @@
         <td>{{ j.runner_id or 'any' }}</td>
         <td>
           {{ j.priority }}
-          <form method="post" action="/runners/jobs/{{ j.id }}/priority" style="display:inline;">
+          <form method="post" action="/runners/jobs/{{ j.id }}/priority" style="display:inline;"
+                hx-post="/runners/jobs/{{ j.id }}/priority" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button">
             <input type="hidden" name="delta" value="1">
             <button type="submit" class="p-button is-small" title="Bump up">▲</button>
           </form>
-          <form method="post" action="/runners/jobs/{{ j.id }}/priority" style="display:inline;">
+          <form method="post" action="/runners/jobs/{{ j.id }}/priority" style="display:inline;"
+                hx-post="/runners/jobs/{{ j.id }}/priority" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button">
             <input type="hidden" name="delta" value="-1">
             <button type="submit" class="p-button is-small" title="Bump down">▼</button>
           </form>
         </td>
         <td>{{ j.started_at }}</td>
         <td>
-          <form method="post" action="/runners/jobs/{{ j.id }}/cancel" onsubmit="return confirm('Cancel/kick this job?');">
+          <form method="post" action="/runners/jobs/{{ j.id }}/cancel"
+                hx-post="/runners/jobs/{{ j.id }}/cancel" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button" hx-confirm="Cancel/kick this job?">
             <button type="submit" class="p-button is-small">Cancel</button>
           </form>
         </td>
@@ -133,22 +142,30 @@
 
 {% block scripts %}
 <script>
-// Live-refresh runner/queue status without a full page reload. Paused
+// Live-refresh runner/queue status without a full page reload — swaps
+// #page-content in place via htmx instead of navigating, so it doesn't
+// interrupt anything the user's doing elsewhere on the page. Paused
 // while the enrollment flow is open, since `prompt()` blocks this
-// script for as long as the user takes to respond, and a reload firing
+// script for as long as the user takes to respond, and a refresh firing
 // right after would wipe the newly-issued (one-time-use) token before
 // it's ever seen.
-let refreshTimer = setInterval(() => { location.reload(); }, 15000);
+function refreshRunnersPage() {
+  htmx.ajax('GET', location.pathname + location.search, {
+    target: '#page-content', select: '#page-content', swap: 'innerHTML',
+  });
+}
+
+let refreshTimer = setInterval(refreshRunnersPage, 15000);
 
 function dismissEnrollResult() {
   document.getElementById('enroll-result').style.display = 'none';
-  refreshTimer = setInterval(() => { location.reload(); }, 15000);
+  refreshTimer = setInterval(refreshRunnersPage, 15000);
 }
 
 async function newRunner() {
   clearInterval(refreshTimer);
   const name = prompt('Name for this runner (e.g. its hostname):', '');
-  if (name === null) { refreshTimer = setInterval(() => { location.reload(); }, 15000); return; }
+  if (name === null) { refreshTimer = setInterval(refreshRunnersPage, 15000); return; }
   try {
     const form = new FormData();
     form.append('name', name);
@@ -157,7 +174,7 @@ async function newRunner() {
       let detail = '';
       try { detail = (await r.json()).error || ''; } catch (e) { /* non-JSON error body */ }
       alert(`Failed to create enrollment token (HTTP ${r.status}). ${detail}`);
-      refreshTimer = setInterval(() => { location.reload(); }, 15000);
+      refreshTimer = setInterval(refreshRunnersPage, 15000);
       return;
     }
     const d = await r.json();
@@ -168,7 +185,7 @@ async function newRunner() {
     // so the one-time token can't be wiped by a background reload.
   } catch (err) {
     alert(`Network error creating enrollment token: ${err}`);
-    refreshTimer = setInterval(() => { location.reload(); }, 15000);
+    refreshTimer = setInterval(refreshRunnersPage, 15000);
   }
 }
 </script>

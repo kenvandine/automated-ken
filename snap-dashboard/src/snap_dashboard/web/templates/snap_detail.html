@@ -45,11 +45,15 @@
     </a>
     {% endif %}
     {% if snap.packaging_repo %}
-    <form method="post" action="/snap/{{ snap.name }}/check-updates" style="display:inline">
+    <form method="post" action="/snap/{{ snap.name }}/check-updates" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/check-updates" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button is-small" title="Scan the packaging repo for a newer upstream version and open a version-bump PR if found">Check for updates</button>
     </form>
     {% endif %}
-    <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
+    <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/refresh" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button is-small">Refresh</button>
     </form>
   </div>
@@ -90,7 +94,9 @@
             {% endif %}
             <div class="channel-rev">r{{ info.revision }}</div>
             {% if ch != 'stable' %}
-            <form method="post" action="/snap/{{ snap.name }}/trigger-test" style="margin-top:4px;">
+            <form method="post" action="/snap/{{ snap.name }}/trigger-test" style="margin-top:4px;"
+                  hx-post="/snap/{{ snap.name }}/trigger-test" hx-target="#page-content" hx-select="#page-content"
+                  hx-swap="innerHTML" hx-disabled-elt="find button">
               <input type="hidden" name="from_channel" value="{{ ch }}">
               <input type="hidden" name="architecture" value="{{ arch }}">
               <input type="hidden" name="version" value="{{ ver or '' }}">
@@ -111,7 +117,9 @@
   {% else %}
   <div class="empty-state small-empty">
     <p>No channel data collected yet.
-      <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
+      <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
+            hx-post="/snap/{{ snap.name }}/refresh" hx-target="#page-content" hx-select="#page-content"
+            hx-swap="innerHTML" hx-disabled-elt="find button">
         <button type="submit" class="p-button--link">Run collection</button>
       </form>
     </p>

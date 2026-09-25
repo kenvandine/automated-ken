@@ -12,7 +12,9 @@
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <a href="/runners" class="p-button is-small">Runners</a>
     {% if config.testing_repo %}
-    <form method="post" action="/testing/sync" title="Pull results of runs dispatched on GitHub Actions in {{ config.testing_repo }}">
+    <form method="post" action="/testing/sync" title="Pull results of runs dispatched on GitHub Actions in {{ config.testing_repo }}"
+          hx-post="/testing/sync" hx-target="#page-content" hx-select="#page-content" hx-swap="innerHTML"
+          hx-disabled-elt="find button">
       <button type="submit" class="p-button is-small">Sync from GitHub</button>
     </form>
     {% endif %}
@@ -73,13 +75,13 @@
       {% if ready %}
       {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
       <form method="post" action="/testing/promote-set/{{ rs.snap_name }}" style="margin-top: 8px;"
-            onsubmit="return confirm(
-              {% if blocked %}
-              'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-              {% else %}
-              'Promote {{ rs.snap_name }} {{ rs.version }} to stable for {{ ready | join(', ') }}?'
-              {% endif %}
-            )">
+            hx-post="/testing/promote-set/{{ rs.snap_name }}" hx-target="#page-content" hx-select="#page-content"
+            hx-swap="innerHTML" hx-disabled-elt="find button"
+            hx-confirm="{% if blocked %}This will promote ONLY {{ ready | join(', ') }} to stable.
+
+The following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.
+
+This is an intentional override of the normal all-architectures gate. Continue?{% else %}Promote {{ rs.snap_name }} {{ rs.version }} to stable for {{ ready | join(', ') }}?{% endif %}">
         <input type="hidden" name="version" value="{{ rs.version }}">
         {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}
         <button type="submit" class="{% if blocked %}p-button{% else %}p-button--positive{% endif %} is-small">
@@ -192,13 +194,13 @@
           {% set ready_names = item.promote_ready | join(', ') %}
           {% set blocked_names = item.promote_blocked | join(', ') %}
           <form method="post" action="/testing/promote-set/{{ item.snap.name }}" style="margin-top:6px;"
-                onsubmit="return confirm(
-                  {% if item.promote_blocked %}
-                  'This will promote ONLY {{ ready_names }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-                  {% else %}
-                  'Promote {{ item.snap.name }} {{ item.version }} to stable for {{ ready_names }}?'
-                  {% endif %}
-                )">
+                hx-post="/testing/promote-set/{{ item.snap.name }}" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button"
+                hx-confirm="{% if item.promote_blocked %}This will promote ONLY {{ ready_names }} to stable.
+
+The following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.
+
+This is an intentional override of the normal all-architectures gate. Continue?{% else %}Promote {{ item.snap.name }} {{ item.version }} to stable for {{ ready_names }}?{% endif %}">
             <input type="hidden" name="version" value="{{ item.version }}">
             {% if item.promote_blocked %}<input type="hidden" name="override" value="1">{% endif %}
             <button type="submit" class="{% if item.promote_blocked %}p-button{% else %}p-button--positive{% endif %} is-small"
@@ -317,9 +319,11 @@
           <td class="muted small">
             {{ run.triggered_by or '—' }}
             {% if run.status in ('pending', 'triggered', 'running') %}
-            <form method="post" action="/testing/runs/{{ run.id }}/fail" style="display:inline; margin-left:6px;">
+            <form method="post" action="/testing/runs/{{ run.id }}/fail" style="display:inline; margin-left:6px;"
+                  hx-post="/testing/runs/{{ run.id }}/fail" hx-target="#page-content" hx-select="#page-content"
+                  hx-swap="innerHTML" hx-disabled-elt="find button" hx-confirm="Mark run #{{ run.id }} as failed?">
               <button type="submit" class="p-button is-small" style="font-size:11px; padding:1px 6px; opacity:0.5;"
-                title="Mark as failed" onclick="return confirm('Mark run #{{ run.id }} as failed?')">✕</button>
+                title="Mark as failed">✕</button>
             </form>
             {% endif %}
           </td>
@@ -402,8 +406,14 @@
           }
           if (TERMINAL.has(run.status)) {
             el.classList.remove('js-run-status');
-            // Reload once a run finishes so pending-promotion & tables update
-            setTimeout(() => location.reload(), 2000);
+            // Refresh once a run finishes so pending-promotion & tables
+            // update — swapped in place via htmx instead of a full
+            // browser reload/navigation.
+            setTimeout(() => {
+              htmx.ajax('GET', location.pathname + location.search, {
+                target: '#page-content', select: '#page-content', swap: 'innerHTML',
+              });
+            }, 2000);
           } else {
             anyInFlight = true;
           }

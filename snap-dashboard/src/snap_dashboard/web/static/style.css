@@ -2084,3 +2084,12 @@ footer a:hover {
     grid-template-columns: 1fr;
   }
 }
+
+/* Isolated (htmx-swapped) form actions — dim the swap target briefly while
+   its request is in flight instead of a full page reload/flash. See
+   base.html's #page-content and per-template hx-post attributes. */
+#page-content.htmx-request,
+#page-content .htmx-request {
+  opacity: 0.6;
+  transition: opacity 0.15s ease-in-out;
+}

@@ -72,13 +72,13 @@
   {% if ready %}
   {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
   <form method="post" action="/testing/promote-set/{{ run.snap_name }}"
-        onsubmit="return confirm(
-          {% if blocked %}
-          'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-          {% else %}
-          'Promote {{ run.snap_name }} {{ run.version }} to stable for {{ ready | join(', ') }}?'
-          {% endif %}
-        )">
+        hx-post="/testing/promote-set/{{ run.snap_name }}" hx-target="#page-content" hx-select="#page-content"
+        hx-swap="innerHTML" hx-disabled-elt="find button"
+        hx-confirm="{% if blocked %}This will promote ONLY {{ ready | join(', ') }} to stable.
+
+The following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.
+
+This is an intentional override of the normal all-architectures gate. Continue?{% else %}Promote {{ run.snap_name }} {{ run.version }} to stable for {{ ready | join(', ') }}?{% endif %}">
     <input type="hidden" name="version" value="{{ run.version }}">
     <input type="hidden" name="return_to" value="/testing/runs/{{ run.id }}">
     {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}

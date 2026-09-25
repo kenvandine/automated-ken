@@ -80,17 +80,23 @@
 
         {% if not b.merged_at and b.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
         <form method="post" action="/version-bumps/{{ b.id }}/merge" style="display:inline;"
-              onsubmit="return confirm('Merge PR for {{ b.snap_name }} {{ b.new_version }}?')">
+              hx-post="/version-bumps/{{ b.id }}/merge" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button"
+              hx-confirm="Merge PR for {{ b.snap_name }} {{ b.new_version }}?">
           <button type="submit" class="p-button--positive is-small">Merge</button>
         </form>
         <form method="post" action="/version-bumps/{{ b.id }}/reject" style="display:inline;"
-              onsubmit="return confirm('Close PR for {{ b.snap_name }}?')">
+              hx-post="/version-bumps/{{ b.id }}/reject" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button"
+              hx-confirm="Close PR for {{ b.snap_name }}?">
           <button type="submit" class="p-button--negative is-small">Reject</button>
         </form>
         {% endif %}
 
         {% if b.status in ('agent_rejected', 'yarf_failed') or (b.merged_at and b.status == 'needs_review') %}
-        <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" style="display:inline;">
+        <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" style="display:inline;"
+              hx-post="/version-bumps/{{ b.id }}/re-run-yarf" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button" hx-push-url="true">
           <button type="submit" class="p-button is-small">Re-run {% if b.merged_at %}candidate tests{% else %}YARF{% endif %}</button>
         </form>
         {% endif %}
@@ -115,8 +121,12 @@
 (function () {
   const es = new EventSource('/api/events');
   es.addEventListener('version_bump_update', (e) => {
-    // Reload the page when a bump status changes so grouping stays accurate
-    window.location.reload();
+    // Refresh the page's content in place (grouping can change status) —
+    // swapped via htmx instead of a full browser reload, so an SSE push
+    // doesn't blow away scroll position/in-progress reads.
+    htmx.ajax('GET', location.pathname + location.search, {
+      target: '#page-content', select: '#page-content', swap: 'innerHTML',
+    });
   });
 })();
 </script>

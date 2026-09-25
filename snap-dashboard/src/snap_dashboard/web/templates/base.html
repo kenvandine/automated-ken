@@ -59,7 +59,12 @@
   </header>
 
   <div class="p-strip">
-    <div class="row">
+    <!-- Stable swap target for isolated (htmx) form actions across the app —
+         forms that shouldn't force a full browser page reload target/select
+         this same id, so the POST's normal redirect-to-GET response can be
+         re-rendered in place instead of navigating. See individual template
+         hx-post attributes. -->
+    <div class="row" id="page-content">
       {% block content %}{% endblock %}
     </div>
   </div>
