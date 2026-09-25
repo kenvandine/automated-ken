@@ -229,7 +229,7 @@ systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
       <p>The <a href="/testing">Testing</a> page's <strong>Needs testing</strong> list shows every snap whose candidate or edge version differs from stable — one row per version with all its architectures. <strong>Run Tests (amd64, arm64)</strong> queues one job per architecture; each row shows every architecture's latest run.</p>
       <p>Statuses: <span class="p-status-label p-status-label--caution">pending</span> (queued) → <span class="p-status-label p-status-label--caution">triggered</span> (claimed by a runner) → <span class="p-status-label p-status-label--caution">running</span> → <span class="p-status-label p-status-label--positive">passed</span> / <span class="p-status-label p-status-label--negative">failed</span>. Candidate runs then go through <span class="p-status-label p-status-label--caution">reviewing</span>. A failed run's page has a <strong>log</strong> link with everything the runner captured.</p>
       <h3 class="docs-h3">Automatic testing</h3>
-      <p>With <strong>Enable automatic testing</strong> (Settings → Testing), every collection queues tests for any candidate or edge version and architecture that hasn't been tested yet. Version-bump PRs are always tested, regardless of this setting.</p>
+      <p>With <strong>Enable automatic testing</strong> (Settings → Testing), every collection queues tests for any candidate or edge version and architecture that hasn't been tested yet. Version-bump PRs are always tested, regardless of this setting. This includes new revisions from a manual <strong>Rebuild All Snaps Now</strong> or the Stale Build Scanner — publishing itself doesn't queue a test, but the next scheduled collection (or a manual "Refresh Now") will notice the new candidate/edge revision and queue one if this setting is on.</p>
     </section>
 
     <!-- ================================================================ TEST RESULTS -->
@@ -276,6 +276,7 @@ systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
             <tr><td><strong>Candidate reviewer</strong></td><td>Reviews candidate runs; auto-promotes complete release sets if enabled</td><td>When a candidate run passes</td></tr>
             <tr><td><strong>Runner Watchdog</strong></td><td>Fails runner jobs past the job timeout</td><td>Every 2 minutes</td></tr>
             <tr><td><strong>Stale Build Scanner</strong></td><td>Rebuilds snaps with no recent publication</td><td>Daily, if enabled</td></tr>
+            <tr><td><strong>Rebuild All Snaps</strong></td><td>Manual only (Settings → "Rebuild All Snaps Now") — dispatches a rebuild for every snap whose packaging repo already has the build workflow, regardless of staleness</td><td>On demand</td></tr>
             <tr><td><strong>Upstream Maintainer</strong></td><td>Dependency updates, reviews and issue triage for upstream repos you own</td><td>Daily, if enabled</td></tr>
           </tbody>
         </table>

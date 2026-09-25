@@ -360,6 +360,18 @@
       <span class="form-hint">
         Snaps with no new publication older than this threshold will have a rebuild triggered.
       </span>
+      <form method="post" action="/settings/rebuild-all-snaps" style="margin-top: 8px;">
+        <button type="submit" class="p-button is-small">Rebuild All Snaps Now</button>
+      </form>
+      <span class="form-hint">
+        Immediately dispatches a rebuild for every snap that already has the
+        <code>automated-snap-build.yml</code> workflow in its packaging repo — regardless of
+        staleness, and without creating the workflow anywhere it's missing. Progress and results
+        show up on the <a href="/agents" class="link-inline">Agents</a> page. If
+        <a href="/docs#running-tests" class="link-inline">automatic testing</a> is enabled, the
+        newly published candidate revisions get tested automatically once the next scheduled
+        collection notices them in the Store — this button doesn't queue tests itself.
+      </span>
     </div>
 
     <h4 class="section-label">Delegated Coding Tasks</h4>

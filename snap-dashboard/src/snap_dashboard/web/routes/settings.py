@@ -288,6 +288,33 @@ async def settings_run_fleet_normalization(request: Request) -> RedirectResponse
     return RedirectResponse(url="/agents", status_code=303)
 
 
+@router.post("/settings/rebuild-all-snaps")
+async def settings_rebuild_all_snaps(request: Request) -> RedirectResponse:
+    """Manually trigger an immediate rebuild for every snap with a GitHub
+    packaging repo that already has the automated build/publish workflow.
+
+    Unlike the periodic Stale Build Scanner, this ignores publish staleness
+    and doesn't create the workflow anywhere it's missing — it just fires a
+    ``workflow_dispatch`` now for whatever's already there. Runs as a
+    background agent (``RebuildAllSnapsAgent``); progress/result is visible
+    on the Agents page.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+    if not uc or not (getattr(uc, "github_token", "") or ""):
+        return RedirectResponse(url="/settings?error=rebuild_needs_github_token", status_code=303)
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.stale_build_scanner import RebuildAllSnapsAgent
+
+    get_runner().submit(RebuildAllSnapsAgent(user_id=user_id))
+    return RedirectResponse(url="/agents", status_code=303)
+
+
 @router.post("/settings/sync-snapcraft-credentials")
 async def settings_sync_snapcraft_credentials(request: Request) -> RedirectResponse:
     """Push the stored Snapcraft Store credential out to every packaging repo.
