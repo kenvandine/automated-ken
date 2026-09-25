@@ -26,7 +26,7 @@ from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import Runner, Snap, TestRun, TestRunScreenshot
 from snap_dashboard.db.session import get_session
 from snap_dashboard.runners import generate_token, hash_token
-from snap_dashboard.testing.orchestrator import submit_test_run_reviewer
+from snap_dashboard.testing.orchestrator import submit_test_run_failure_analysis, submit_test_run_reviewer
 from snap_dashboard.testing.suite_zip import list_suite_files
 
 logger = logging.getLogger(__name__)
@@ -348,6 +348,8 @@ async def update_job(
 
     if status == "passed":
         submit_test_run_reviewer(job_id)
+    elif status in ("failed", "error"):
+        submit_test_run_failure_analysis(job_id)
 
     return JSONResponse({"ok": True})
 

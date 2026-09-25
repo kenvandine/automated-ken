@@ -161,6 +161,9 @@ def _migrate() -> None:
         # rather than always automated-snap-build.yml, so it's worth recording
         # for visibility. See db/models.StaleBuildTrigger.
         "ALTER TABLE stale_build_triggers ADD COLUMN workflow_file VARCHAR(255)",
+        # LLM-inferred root cause for a failed/errored test run — see
+        # agents/test_failure_analyzer.py.
+        "ALTER TABLE test_runs ADD COLUMN failure_analysis TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

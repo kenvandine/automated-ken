@@ -1,0 +1,15 @@
+{# Shared "AI Failure Analysis" block — a plain-English inferred root
+   cause for a failed/errored test run (see
+   agents/test_failure_analyzer.py). Included from run_detail.html and
+   pr_detail.html. Expects: run (dict) with error_msg/failure_analysis. #}
+
+{% if run.failure_analysis %}
+<div class="card" style="border-left: 3px solid #f87171; margin-bottom: 20px;">
+  <h3 class="section-label">AI Failure Analysis</h3>
+  <p style="font-size: 13px; color: var(--text-muted); margin: 0;">{{ run.failure_analysis }}</p>
+</div>
+{% elif run.error_msg and run.status in ('failed', 'error') %}
+<div class="card" style="border-left: 3px solid #f87171; margin-bottom: 20px;">
+  <p style="font-size: 13px; color: var(--text-muted); margin: 0;">{{ run.error_msg }}</p>
+</div>
+{% endif %}

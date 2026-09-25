@@ -300,6 +300,12 @@ class TestRun(Base):
     review_decision = Column(String(32), nullable=True)
     review_confidence = Column(Float, nullable=True)
     review_reasoning = Column(Text, nullable=True)
+    # LLM-inferred plain-English root cause for a failed/errored run,
+    # derived from log_output/error_msg — see agents/test_failure_analyzer.py.
+    # Purely informational today; a future agent could use this to attempt
+    # an automated fix PR. Only populated for dispatch_target=remote_runner
+    # (the only path with a real captured log to analyze).
+    failure_analysis = Column(Text, nullable=True)
     # Links sibling per-architecture runs of the same version bump together
     # (one TestRun per arch — see agents/pr_monitor.py:_trigger_yarf) so the
     # PR monitor / screenshot reviewer / stable promoter can wait for every

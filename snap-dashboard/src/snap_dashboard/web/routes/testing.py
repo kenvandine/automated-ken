@@ -145,6 +145,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                 "promoted": r.promoted,
                 "promoted_at": r.promoted_at,
                 "error_msg": r.error_msg,
+                "failure_analysis": r.failure_analysis,
                 "repo": r.repo or uc.testing_repo,
                 "has_log": bool(r.log_output),
                 "review_decision": r.review_decision,
@@ -566,6 +567,7 @@ def view_run(run_id: int, request: Request) -> HTMLResponse:
             "status": run_orm.status,
             "promoted": run_orm.promoted,
             "error_msg": run_orm.error_msg,
+            "failure_analysis": run_orm.failure_analysis,
             "started_at": run_orm.started_at,
             "finished_at": run_orm.finished_at,
             "repo": run_orm.repo,
@@ -654,6 +656,8 @@ def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
                 "review_decision": run_orm.review_decision,
                 "review_confidence": run_orm.review_confidence,
                 "review_reasoning": run_orm.review_reasoning,
+                "error_msg": run_orm.error_msg,
+                "failure_analysis": run_orm.failure_analysis,
             }
             if run_orm
             else None
@@ -688,6 +692,8 @@ def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
             "review_decision": None,
             "review_confidence": None,
             "review_reasoning": None,
+            "error_msg": None,
+            "failure_analysis": None,
         }
 
     review_context: dict = {}

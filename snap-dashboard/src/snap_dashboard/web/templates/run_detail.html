@@ -37,7 +37,9 @@
   </div>
 </div>
 
-{% if run.error_msg and run.status != 'failed' %}
+{% include "_failure_analysis.html" %}
+
+{% if run.error_msg and run.status not in ('failed', 'error') %}
 <div class="card" style="border-left: 3px solid var(--accent); margin-bottom: 20px;">
   <p style="font-size: 13px; color: var(--text-muted); margin: 0;">{{ run.error_msg }}</p>
 </div>

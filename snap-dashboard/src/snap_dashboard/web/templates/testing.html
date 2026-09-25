@@ -295,11 +295,11 @@ This is an intentional override of the normal all-architectures gate. Continue?{
             {% if run.status == 'passed' %}
             <span class="p-status-label p-status-label--positive">passed</span>
             {% elif run.status == 'failed' %}
-            <span class="p-status-label p-status-label--negative">failed</span>
+            <span class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg or '' }}">failed</span>
             {% elif run.status == 'promoted' %}
             <span class="p-status-label p-status-label--positive">promoted</span>
             {% elif run.status == 'error' %}
-            <span class="p-status-label p-status-label--negative" title="{{ run.error_msg }}">error</span>
+            <span class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg }}">error</span>
             {% elif run.status in ('pending', 'triggered', 'running') %}
             <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
 

@@ -703,3 +703,26 @@ def submit_test_run_reviewer(test_run_id: int) -> None:
     from snap_dashboard.agents.test_run_auto_promoter import TestRunAutoPromoterAgent
 
     get_runner().submit(TestRunAutoPromoterAgent(test_run_id=test_run_id, user_id=user_id))
+
+
+def submit_test_run_failure_analysis(test_run_id: int) -> None:
+    """Queue an LLM root-cause analysis for a failed/errored test run.
+
+    Like the screenshot reviewer above, this always runs for any eligible
+    run and its result is always recorded/displayed — see
+    agents/test_failure_analyzer.py.
+    """
+    with get_session() as session:
+        run = session.query(TestRun).get(test_run_id)
+        if not run or run.status not in ("failed", "error"):
+            return
+        if not run.log_output and not run.error_msg:
+            return
+        user_id = run.user_id
+        if user_id is None:
+            return
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.test_failure_analyzer import TestFailureAnalyzerAgent
+
+    get_runner().submit(TestFailureAnalyzerAgent(test_run_id=test_run_id, user_id=user_id))

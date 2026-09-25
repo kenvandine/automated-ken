@@ -264,6 +264,7 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
                 "started_at": r.started_at,
                 "finished_at": r.finished_at,
                 "error_msg": r.error_msg,
+                "failure_analysis": r.failure_analysis,
                 "has_log": bool(r.log_output),
             }
             for r in test_runs

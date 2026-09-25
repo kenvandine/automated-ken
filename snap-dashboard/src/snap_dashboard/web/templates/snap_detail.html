@@ -270,9 +270,9 @@
             {% elif run.status == 'promoted' %}
             <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">promoted</a>
             {% elif run.status == 'failed' %}
-            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative">failed</a>
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg or '' }}">failed</a>
             {% elif run.status == 'error' %}
-            <span class="p-status-label p-status-label--negative" title="{{ run.error_msg }}">error</span>
+            <span class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg }}">error</span>
             {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
             <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
             {% else %}
