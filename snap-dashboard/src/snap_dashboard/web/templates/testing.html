@@ -72,9 +72,10 @@
         </div>
         {% endfor %}
       </div>
+      <div style="margin-top: 8px; display:flex; flex-wrap:wrap; gap:6px;">
       {% if ready %}
       {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
-      <form method="post" action="/testing/promote-set/{{ rs.snap_name }}" style="margin-top: 8px; display:inline-block;"
+      <form method="post" action="/testing/promote-set/{{ rs.snap_name }}"
             hx-post="/testing/promote-set/{{ rs.snap_name }}" hx-target="#page-content" hx-select="#page-content"
             hx-swap="innerHTML" hx-disabled-elt="find button"
             hx-confirm="{% if blocked %}This will promote ONLY {{ ready | join(', ') }} to stable.
@@ -89,7 +90,7 @@ This is an intentional override of the normal all-architectures gate. Continue?{
         </button>
       </form>
       {% endif %}
-      <form method="post" action="/testing/dismiss-promotion" style="margin-top: 8px; display:inline-block; margin-left: 6px;"
+      <form method="post" action="/testing/dismiss-promotion"
             hx-post="/testing/dismiss-promotion" hx-target="#page-content" hx-select="#page-content"
             hx-swap="innerHTML" hx-disabled-elt="find button"
             hx-confirm="Dismiss the {{ rs.version }} promotion card for {{ rs.snap_name }}? It'll come back if a newer candidate build shows up.">
@@ -97,6 +98,7 @@ This is an intentional override of the normal all-architectures gate. Continue?{
         <input type="hidden" name="version" value="{{ rs.version }}">
         <button type="submit" class="p-button is-small" title="Not ready to promote this build">✕ Dismiss</button>
       </form>
+      </div>
     </div>
     {% endfor %}
   </div>
