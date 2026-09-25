@@ -12,7 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap
+from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.repo_discovery import (
     build_packaging_repo_map,
@@ -174,6 +174,16 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             .all()
         )
 
+        # Test run history — TestRun is keyed by snap_name (string), not
+        # snap_id, so it's matched the same way the /testing page does.
+        test_runs = (
+            session.query(TestRun)
+            .filter_by(snap_name=snap.name, user_id=user_id)
+            .order_by(TestRun.started_at.desc())
+            .limit(50)
+            .all()
+        )
+
         # Build channel map table: arch -> {channel: {version, revision, released_at}}
         arch_map: dict[str, dict] = {}
         for cm in cm_rows:
@@ -230,6 +240,24 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             for cm in cm_rows
         ]
 
+        test_runs_data = [
+            {
+                "id": r.id,
+                "architecture": r.architecture,
+                "from_channel": r.from_channel,
+                "version": r.version,
+                "revision": r.revision,
+                "status": r.status,
+                "pr_number": r.pr_number,
+                "triggered_by": r.triggered_by,
+                "started_at": r.started_at,
+                "finished_at": r.finished_at,
+                "error_msg": r.error_msg,
+                "has_log": bool(r.log_output),
+            }
+            for r in test_runs
+        ]
+
     # The Snap Store lookup and GitHub repo-map cache check below make
     # network calls (get_snap_info hits the Store API with a 30s timeout).
     # These must run with no session/lock held, since get_session() now
@@ -276,6 +304,7 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             "arch_map": arch_map,
             "cm_rows": cm_data,
             "issues": issues_data,
+            "test_runs": test_runs_data,
             "last_run": _get_last_run(user_id),
             "channels": ["stable", "candidate", "beta", "edge"],
             "current_user": user,
@@ -307,6 +336,70 @@ async def snap_refresh(
 
     background_tasks.add_task(_bg)
     return RedirectResponse(url=f"/snap/{name}", status_code=303)
+
+
+@router.post("/snap/{name}/check-updates")
+async def snap_check_updates(name: str, request: Request) -> RedirectResponse:
+    """Manually scan this one snap's packaging repo for a newer upstream
+    version and spawn a version-bump PR if one is found — the same thing
+    ReleaseScannerAgent does for the whole portfolio on its schedule, just
+    scoped to a single snap so users don't have to wait for the next pass.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            return RedirectResponse(url="/", status_code=303)
+        if not snap.packaging_repo:
+            return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(ReleaseScannerAgent(user_id=user_id, snap_id=snap_id))
+    return RedirectResponse(url=f"/snap/{name}?notice=scan_started", status_code=303)
+
+
+@router.post("/snap/{name}/trigger-test")
+async def snap_trigger_test(
+    name: str,
+    request: Request,
+    from_channel: str = Form(default="candidate"),
+    architecture: str = Form(default="amd64"),
+    version: str = Form(default=""),
+    revision: str = Form(default="0"),
+) -> RedirectResponse:
+    """Queue a YARF test run for this snap directly from its detail page.
+
+    Thin wrapper around the same remote-runner dispatch used by the
+    Testing page (see testing.trigger_test) — kept here so the redirect
+    lands back on /snap/{name} instead of /testing.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    from snap_dashboard.testing.orchestrator import trigger_remote_run
+
+    user_id = user["id"]
+    rev: int | None = int(revision) if revision.isdigit() and int(revision) > 0 else None
+
+    ok, err, _db_run_id = trigger_remote_run(
+        name, from_channel, version, rev,
+        architecture=architecture,
+        triggered_by="manual",
+        user_id=user_id,
+    )
+    if not ok:
+        logger.error("Failed to trigger test for %s: %s", name, err)
+        return RedirectResponse(url=f"/snap/{name}?error=trigger_failed", status_code=303)
+
+    return RedirectResponse(url=f"/snap/{name}?notice=test_queued", status_code=303)
 
 
 @router.post("/snap/{name}/edit")

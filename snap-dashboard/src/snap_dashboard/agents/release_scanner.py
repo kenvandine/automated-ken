@@ -31,8 +31,12 @@ class ReleaseScannerAgent(BaseAgent):
 
     agent_type = "release_scanner"
 
-    def __init__(self, user_id: int | None = None) -> None:
+    def __init__(self, user_id: int | None = None, snap_id: int | None = None) -> None:
         super().__init__(user_id=user_id)
+        # When set, scan only this one snap (e.g. a manual "Check for
+        # updates" click from the snap detail page) instead of the whole
+        # portfolio.
+        self.snap_id = snap_id
 
     def _run(self) -> str:
         uc = get_user_config(self.user_id) if self.user_id else None
@@ -42,6 +46,8 @@ class ReleaseScannerAgent(BaseAgent):
             q = session.query(Snap)
             if self.user_id:
                 q = q.filter_by(user_id=self.user_id)
+            if self.snap_id:
+                q = q.filter_by(id=self.snap_id)
             snaps = [
                 {
                     "id": s.id,

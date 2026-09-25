@@ -4,6 +4,23 @@
 
 {% block content %}
 
+{% set notice = request.query_params.get('notice') %}
+{% set page_error = request.query_params.get('error') %}
+{% if notice %}
+<div class="p-notification--positive detail-section" style="padding:8px 12px; border-radius:4px;">
+  {% if notice == 'test_queued' %}Test run queued — see it in the Test Run History below.
+  {% elif notice == 'scan_started' %}Checking for a newer upstream version — a version-bump PR will open automatically if one is found.
+  {% else %}{{ notice }}{% endif %}
+</div>
+{% endif %}
+{% if page_error %}
+<div class="p-notification--negative detail-section" style="padding:8px 12px; border-radius:4px;">
+  {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for upstream updates.
+  {% elif page_error == 'trigger_failed' %}Failed to queue the test run — check that a runner is enrolled and online.
+  {% else %}{{ page_error }}{% endif %}
+</div>
+{% endif %}
+
 <div class="page-title-row">
   <div>
     <a href="/" class="back-link">← Dashboard</a>
@@ -26,6 +43,11 @@
     <a href="{{ snap.upstream_repo }}" target="_blank" rel="noopener" class="repo-link">
       Upstream repo
     </a>
+    {% endif %}
+    {% if snap.packaging_repo %}
+    <form method="post" action="/snap/{{ snap.name }}/check-updates" style="display:inline">
+      <button type="submit" class="p-button is-small" title="Scan the packaging repo for a newer upstream version and open a version-bump PR if found">Check for updates</button>
+    </form>
     {% endif %}
     <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
       <button type="submit" class="p-button is-small">Refresh</button>
@@ -67,6 +89,15 @@
             <span class="p-status-label">{{ ver or '?' }}</span>
             {% endif %}
             <div class="channel-rev">r{{ info.revision }}</div>
+            {% if ch != 'stable' %}
+            <form method="post" action="/snap/{{ snap.name }}/trigger-test" style="margin-top:4px;">
+              <input type="hidden" name="from_channel" value="{{ ch }}">
+              <input type="hidden" name="architecture" value="{{ arch }}">
+              <input type="hidden" name="version" value="{{ ver or '' }}">
+              <input type="hidden" name="revision" value="{{ info.revision or '' }}">
+              <button type="submit" class="p-button--link" style="font-size:11px;" title="Queue a YARF smoke test for {{ arch }}/{{ ch }} on a remote runner">Run test</button>
+            </form>
+            {% endif %}
             {% else %}
             <span class="p-status-label">—</span>
             {% endif %}
@@ -154,6 +185,76 @@
       Add repository URLs below to enable issue tracking.
       {% endif %}
     </p>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Test Run History -->
+<div class="card detail-section">
+  <h3 class="section-label">Test Run History</h3>
+
+  {% if test_runs %}
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>Arch</th>
+          <th>Channel</th>
+          <th>Version</th>
+          <th>Status</th>
+          <th>PR</th>
+          <th>Triggered by</th>
+          <th>Started</th>
+          <th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in test_runs %}
+        <tr>
+          <td class="muted small">{{ run.architecture or 'amd64' }}</td>
+          <td><span class="p-status-label">{{ run.from_channel }}</span></td>
+          <td class="muted small">{{ run.version or '—' }}</td>
+          <td>
+            {% if run.status == 'passed' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
+            {% elif run.status == 'promoted' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">promoted</a>
+            {% elif run.status == 'failed' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative">failed</a>
+            {% elif run.status == 'error' %}
+            <span class="p-status-label p-status-label--negative" title="{{ run.error_msg }}">error</span>
+            {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
+            <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
+            {% else %}
+            <span class="muted small">{{ run.status }}</span>
+            {% endif %}
+            {% if run.has_log %}
+            <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="View runner debug log">log</a>
+            {% endif %}
+          </td>
+          <td>
+            {% if run.pr_number %}
+            <a href="/testing/pr/{{ snap.name }}/{{ run.pr_number }}" class="link-inline small">#{{ run.pr_number }}</a>
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="muted small">{{ run.triggered_by or '—' }}</td>
+          <td class="muted small">
+            {% if run.started_at %}{{ run.started_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+          </td>
+          <td class="muted small">
+            {% if run.finished_at %}{{ run.finished_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small" style="margin-top:8px;">Showing the {{ test_runs|length }} most recent runs. See the <a href="/testing" class="link-inline">Testing</a> page for the full queue.</p>
+  {% else %}
+  <div class="empty-state small-empty">
+    <p>No test runs recorded yet for this snap.</p>
   </div>
   {% endif %}
 </div>
