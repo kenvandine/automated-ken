@@ -117,8 +117,10 @@ def agent_status(request: Request) -> JSONResponse:
             "prs_open": _bump_count("open", "ci_pending", "ci_passed", "ci_failed"),
             "yarf_running": _bump_count("yarf_running") + standalone_yarf_running,
             "under_review": _bump_count("yarf_passed", "yarf_failed", "needs_review") + standalone_under_review,
-            "approved": _bump_count("agent_approved", "promoting") + standalone_approved,
-            "merged": _bump_count("merged", "stable_promoted") + standalone_merged,
+            "approved": _bump_count("agent_approved") + standalone_approved,
+            "merged": _bump_count(
+                "merged", "awaiting_release", "candidate_testing", "stable_promoted", "stable_promoted_partial"
+            ) + standalone_merged,
         }
 
         # Recent agent run history (last 20)

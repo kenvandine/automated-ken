@@ -78,9 +78,9 @@ src/snap_dashboard/
 │   ├── collector_agent.py    Periodic collection (+ automatic test queuing)
 │   ├── release_scanner.py    Upstream release detection
 │   ├── version_bumper.py     Version-bump PRs from the bot account
-│   ├── pr_monitor.py         Bump PR state machine: CI → runner tests → review → merge
-│   ├── screenshot_reviewer.py  Vision review of a bump's per-arch runs; one verdict per set
-│   ├── stable_promoter.py    Promotes a bump's architectures to stable together
+│   ├── pr_monitor.py         Bump PR state machine: CI → edge tests → review → merge
+│   │                         → candidate release → candidate tests → stable
+│   ├── screenshot_reviewer.py  Vision review of a bump's per-arch edge runs; one verdict per set
 │   ├── test_run_auto_promoter.py  Reviews candidate runs; auto-promotes complete sets
 │   ├── runner_watchdog.py    Fails runner jobs that exceed the job timeout
 │   ├── stale_build_scanner.py  Rebuilds snaps with no recent publication

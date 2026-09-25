@@ -161,11 +161,12 @@ class VersionBumperAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _open_pr_exists(self) -> bool:
-        """Return True if any in-flight PR already exists for this snap+part.
+        """Return True if an unmerged, unclosed PR already exists for this snap+part.
 
         Checks via the UpstreamRelease join so we catch PRs for different
         versions of the same part (e.g. a v1.1 PR still open when v1.2
-        arrives).
+        arrives). A merged bump still working its way to stable doesn't
+        block the next one.
         """
         with get_session() as session:
             existing = (
@@ -174,6 +175,7 @@ class VersionBumperAgent(BaseAgent):
                 .filter(
                     VersionBumpPR.snap_id == self.snap_id,
                     VersionBumpPR.status.notin_(["merged", "closed"]),
+                    VersionBumpPR.merged_at.is_(None),
                     UpstreamRelease.part_name == self.part_name,
                 )
                 .first()

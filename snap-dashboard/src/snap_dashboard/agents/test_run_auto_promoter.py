@@ -3,19 +3,18 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
 
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.agents.screenshot_reviewer import _aggregate_decisions
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import TestRun, VersionBumpPR
+from snap_dashboard.db.models import TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.baselines import (
     get_or_build_stable_baseline_assets,
     load_test_run_screenshots,
     pair_screenshots,
 )
-from snap_dashboard.testing.promoter import close_test_pr, merge_packaging_pr
+from snap_dashboard.testing.promoter import close_test_pr
 
 logger = logging.getLogger(__name__)
 
@@ -145,11 +144,6 @@ class TestRunAutoPromoterAgent(BaseAgent):
                 run.review_decision = decision["decision"]
                 run.review_confidence = decision["confidence"]
                 run.review_reasoning = decision["reasoning"]
-            bump = session.query(VersionBumpPR).filter_by(test_run_id=self.test_run_id).first()
-            if bump:
-                bump.agent_decision = decision["decision"]
-                bump.agent_confidence = decision["confidence"]
-                bump.agent_reasoning = decision["reasoning"]
 
         if decision["decision"] != "approve" or decision["confidence"] < threshold:
             _set_run_note(self.test_run_id, f"Review complete: {decision['reasoning']}")
@@ -203,16 +197,6 @@ class TestRunAutoPromoterAgent(BaseAgent):
 
         if pr_number:
             close_test_pr(effective_repo, pr_number, snap_name, version, uc.github_token)
-
-        if uc.auto_merge:
-            with get_session() as session:
-                bump = session.query(VersionBumpPR).filter_by(test_run_id=self.test_run_id).first()
-                if bump and merge_packaging_pr(bump.packaging_repo or "", bump.bot_pr_number or 0, uc.github_token or ""):
-                    bump.status = "merged"
-                    bump.merged_at = datetime.now(timezone.utc)
-                    bump.agent_reasoning = (
-                        f"{bump.agent_reasoning or ''} Packaging PR auto-merged."
-                    ).strip()
 
         return f"{snap_name}: promoted {version} to stable ({', '.join(promoted)})"
 

@@ -29,8 +29,8 @@
     <h3 class="section-label">
       {% if group.status == 'stable_promoted' %}🚀{% endif %}
       {% if group.status == 'stable_promoted_partial' %}⚠🚀{% endif %}
-      {% if group.status == 'promoting' %}⏳{% endif %}
-      {% if group.status == 'promotion_failed' %}🛑{% endif %}
+      {% if group.status == 'candidate_testing' %}🧪{% endif %}
+      {% if group.status == 'awaiting_release' %}⏳{% endif %}
       {% if group.status == 'agent_approved' %}✅{% endif %}
       {% if group.status == 'needs_review' %}⚠️{% endif %}
       {% if group.status == 'agent_rejected' %}❌{% endif %}
@@ -78,7 +78,7 @@
       <div class="bump-actions">
         <a href="/version-bumps/{{ b.id }}" class="p-button is-small">Review</a>
 
-        {% if b.status in ('agent_approved', 'needs_review', 'yarf_passed', 'stable_promoted') %}
+        {% if not b.merged_at and b.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
         <form method="post" action="/version-bumps/{{ b.id }}/merge" style="display:inline;"
               onsubmit="return confirm('Merge PR for {{ b.snap_name }} {{ b.new_version }}?')">
           <button type="submit" class="p-button--positive is-small">Merge</button>
@@ -89,15 +89,15 @@
         </form>
         {% endif %}
 
-        {% if b.status in ('agent_rejected', 'yarf_failed', 'promotion_failed') %}
+        {% if b.status in ('agent_rejected', 'yarf_failed') or (b.merged_at and b.status == 'needs_review') %}
         <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" style="display:inline;">
-          <button type="submit" class="p-button is-small">Re-run YARF</button>
+          <button type="submit" class="p-button is-small">Re-run {% if b.merged_at %}candidate tests{% else %}YARF{% endif %}</button>
         </form>
         {% endif %}
       </div>
     </div>
 
-    {% if b.agent_reasoning and b.status in ('agent_approved', 'agent_rejected', 'needs_review', 'stable_promoted', 'stable_promoted_partial', 'promoting', 'promotion_failed') %}
+    {% if b.agent_reasoning and b.status in ('agent_approved', 'agent_rejected', 'needs_review', 'stable_promoted', 'stable_promoted_partial', 'awaiting_release', 'candidate_testing') %}
     <div class="bump-reasoning">
       <span class="text-muted small">{{ b.agent_reasoning[:200] }}{% if b.agent_reasoning | length > 200 %}…{% endif %}</span>
     </div>

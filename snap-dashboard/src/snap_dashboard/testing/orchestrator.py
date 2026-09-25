@@ -368,9 +368,9 @@ def queue_yarf_tests_for_bump(
     """Queue one YARF ``TestRun`` per testable architecture for a version bump.
 
     Every run is tagged with ``version_bump_pr_id`` so its siblings can be
-    found later (waiting for all of them, reviewing/promoting them as a
-    set — see agents/pr_monitor.py, agents/screenshot_reviewer.py,
-    agents/stable_promoter.py). Shared by the automated PR-monitor pipeline
+    found later (waiting for all of them and reviewing them as a set —
+    see agents/pr_monitor.py and agents/screenshot_reviewer.py). Shared by
+    the automated PR-monitor pipeline
     and the manual "Re-run YARF" action so both fan out the same way.
 
     Returns ``(run_ids, errors)`` — ``run_ids`` for whichever architectures

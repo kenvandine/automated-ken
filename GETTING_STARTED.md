@@ -261,13 +261,25 @@ opens a PR on the packaging repo from the bot account. The PR Monitor then:
 3. has the Screenshot Reviewer check each architecture and gives the PR one verdict — a regression on any architecture rejects the whole set,
 4. merges it if **Auto-merge** is on and the verdict is *approve*.
 
-On **Version Bumps**, open a PR to see each architecture's result and
-screenshots, then **Merge**, **Reject**, **Re-run YARF** (re-tests every
-architecture; only the newest run per architecture counts), or **Promote**.
-Promote works like a release set: all architectures, or a confirmed
-override that is recorded as *partially promoted*.
+Those `edge` tests only gate the merge — they don't test the revisions that
+would ship. With **Auto-promote** on, a merged bump carries on to stable:
 
-Bumps merged or closed directly on GitHub are picked up automatically.
+5. **Waiting for candidate release** — once your CI has published the new version for every architecture, it's in `candidate`. If CI only published it to `edge`, those revisions are released to `candidate` (all architectures together, using your Store credential).
+6. **Testing candidate** — one test per architecture of the exact `candidate` revisions, reviewed like any candidate run.
+7. **Stable** — when every architecture is approved, the whole set is promoted. If any fails or isn't approved, the bump stops at *needs review* and says why.
+
+With auto-promote off, a merged bump stops at *merged*; its page still shows
+the candidate release set so you can promote it by hand.
+
+On **Version Bumps**, open a PR to see each architecture's pre-merge result
+and screenshots, then **Merge**, **Reject** or **Re-run YARF** (re-tests
+every architecture; only the newest run per architecture counts). After
+merge the page shows the candidate release set with **Promote** — all
+architectures, or a confirmed override recorded as *partially promoted* —
+and **Re-run candidate tests**.
+
+Bumps merged or closed directly on GitHub are picked up automatically, and
+a merged bump never blocks the next bump for the same part.
 
 ---
 

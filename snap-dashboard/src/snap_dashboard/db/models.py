@@ -513,9 +513,9 @@ class VersionBumpPR(Base):
     old_version = Column(String(128), nullable=True)
     new_version = Column(String(128), nullable=True)
     # open | ci_pending | ci_passed | ci_failed | yarf_running | yarf_passed |
-    # yarf_failed | agent_approved | agent_rejected | needs_review | promoting |
-    # promotion_failed | stable_promoted | stable_promoted_partial (manual
-    # override promotion — see agents/stable_promoter.py) | merged | closed
+    # yarf_failed | agent_approved | agent_rejected | needs_review | merged |
+    # closed | awaiting_release | candidate_testing | stable_promoted |
+    # stable_promoted_partial (manual override) — see agents/pr_monitor.py
     status = Column(String(64), nullable=False, default="open")
     test_run_id = Column(
         Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True

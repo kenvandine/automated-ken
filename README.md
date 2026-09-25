@@ -30,11 +30,18 @@ upstream release ──► Release Scanner ──► Version Bumper ──► bu
                         Screenshot Reviewer compares each arch against its stable baseline
                                                                │
                                         verdict for the whole set ──► you merge (or auto-merge)
+                                                               │
+                       with auto-promote: new version reaches candidate (released from
+                       edge if CI only published it there) ──► candidate release set below
 
 new candidate version ──► (auto-)test amd64 + arm64 on runners ──► vision review per arch
                                                                │
                        all architectures approved ──► promote the whole set to stable
 ```
+
+A bump's pre-merge tests run against `edge` and only decide whether to
+merge. What goes to `stable` is always the new version's `candidate`
+revisions, tested on every architecture after merge.
 
 - **Runners are matched by architecture.** Each test job targets one
   architecture and is only picked up by a runner of that architecture
@@ -63,7 +70,7 @@ Background agents run on a schedule and report live on the **Agents** page.
 | **Collector** | Refreshes Store channel maps and issue/PR data; with *automatic testing* on, queues tests for new candidate/edge versions | Every *collection interval* (default 6 h) |
 | **Release Scanner** | Checks each packaging repo's `snapcraft.yaml` parts for newer upstream releases | Every *release scan interval* (default 4 h), or **Scan Now** |
 | **Version Bumper** | Opens a version-bump PR from the bot account (GitHub Contents API, no clone) | When the scanner finds a release |
-| **PR Monitor** | Advances bump PRs: waits for CI, queues one runner test per architecture, hands results to the reviewer, auto-merges if enabled, and notices PRs merged/closed on GitHub | Every 5 min |
+| **PR Monitor** | Advances bump PRs: waits for CI, queues one runner test per architecture, hands results to the reviewer, auto-merges if enabled, and notices PRs merged/closed on GitHub. With auto-promote on, takes merged bumps on to stable: waits for the version in candidate (releasing it from edge if needed), tests the candidate set, and promotes it | Every 5 min |
 | **Screenshot Reviewer** | Compares each architecture's screenshots with its stable baseline using the local vision model; gives the bump one verdict for the whole set | After a bump's tests finish |
 | **Candidate Reviewer / Auto-promoter** | Reviews candidate test runs the same way; with auto-promote on, promotes the release set when every architecture is approved | After a candidate run passes |
 | **Runner Watchdog** | Fails runner jobs that exceed the job timeout and frees the runner | Every 2 min |
@@ -143,7 +150,7 @@ Everything else is per user, on the **Settings** page:
 | `/testing/runs/<id>` | One run — screenshots, AI review, and its release set |
 | `/runners` | Enroll/revoke runners; job queue with priorities and cancel |
 | `/version-bumps` | Version-bump PRs grouped by status |
-| `/version-bumps/<id>` | One bump — per-architecture results and screenshots, promote/merge/reject |
+| `/version-bumps/<id>` | One bump — pre-merge results and screenshots per architecture, merge/reject, and after merge its candidate release set with promote |
 | `/agents` | Live agent status and activity feed |
 | `/copilot-tasks` | Delegated coding tasks and their PRs |
 | `/stats` | Model usage stats |

@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Form, Request
+from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -14,6 +14,7 @@ from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import ScreenshotComparison, VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.testing.release_set import candidate_release_set, member_state
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +27,8 @@ _GH_API = "https://api.github.com"
 _STATUS_GROUPS = [
     ("stable_promoted", "Stable Promoted"),
     ("stable_promoted_partial", "Partially Promoted (Override)"),
-    ("promoting", "Promoting to Stable"),
-    ("promotion_failed", "Promotion Failed"),
+    ("candidate_testing", "Merged — Testing Candidate for Stable"),
+    ("awaiting_release", "Merged — Waiting for Candidate Release"),
     ("agent_approved", "Agent Approved"),
     ("needs_review", "Needs Your Review"),
     ("agent_rejected", "Agent Rejected"),
@@ -66,12 +67,17 @@ async def version_bumps_page(request: Request) -> HTMLResponse:
         items = [b for b in bump_list if b["status"] == status_key]
         if items:
             groups.append({"status": status_key, "label": label, "bumps": items})
+    # Statuses no longer produced (e.g. from older versions) still show up.
+    known = {key for key, _ in _STATUS_GROUPS}
+    for status_key in sorted({b["status"] for b in bump_list} - known):
+        items = [b for b in bump_list if b["status"] == status_key]
+        groups.append({"status": status_key, "label": status_key.replace("_", " ").title(), "bumps": items})
 
     # Count summary for nav badge
     actionable = sum(
         1
         for b in bump_list
-        if b["status"] in ("agent_approved", "needs_review", "promotion_failed")
+        if b["status"] in ("agent_approved", "needs_review")
     )
 
     return templates.TemplateResponse(
@@ -121,6 +127,23 @@ async def version_bump_detail(bump_id: int, request: Request) -> HTMLResponse:
             if a["test_run_id"] in latest_by_run
         ]
 
+        # After merge, the thing that gets promoted is the new version's
+        # candidate release set (see agents/pr_monitor.py) — not the
+        # pre-merge edge runs above.
+        candidate_set = []
+        if bump.merged_at and bump_data["snap_name"] and bump_data["new_version"]:
+            for member in candidate_release_set(
+                session, user["id"], bump_data["snap_name"], bump_data["new_version"]
+            ):
+                candidate_set.append(
+                    {
+                        "architecture": member["architecture"],
+                        "run_id": member["run"].id if member["run"] else None,
+                        "revision": member["revision"],
+                        "state": member_state(member),
+                    }
+                )
+
     return templates.TemplateResponse(
         request,
         "version_bump_detail.html",
@@ -128,6 +151,7 @@ async def version_bump_detail(bump_id: int, request: Request) -> HTMLResponse:
             "current_user": user,
             "bump": bump_data,
             "comparisons": comparisons,
+            "candidate_set": candidate_set,
             "last_run": None,
         },
     )
@@ -162,12 +186,9 @@ def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
         with httpx.Client(timeout=15) as client:
             resp = client.put(url, json={"merge_method": "squash"}, headers=headers)
         if resp.status_code in (200, 201):
-            with get_session() as session:
-                bump = session.query(VersionBumpPR).get(bump_id)
-                if bump:
-                    from datetime import datetime, timezone
-                    bump.status = "merged"
-                    bump.merged_at = datetime.now(timezone.utc)
+            from snap_dashboard.agents.pr_monitor import mark_bump_merged
+
+            mark_bump_merged(bump_id)
     except Exception as exc:
         logger.warning("merge PR %s failed: %s", bump_id, exc)
 
@@ -239,8 +260,18 @@ async def re_run_yarf(bump_id: int, request: Request) -> RedirectResponse:
         snap_id = bump.snap_id
         snap_name = bump.snap.name if bump.snap else ""
         new_version = bump.new_version or ""
+        merged = bump.merged_at is not None
 
-    if snap_name:
+    if snap_name and merged:
+        # After merge, re-test what would actually ship: the candidate set.
+        from snap_dashboard.testing.release_set import queue_candidate_tests
+
+        if queue_candidate_tests(user["id"], snap_name, new_version, force=True):
+            with get_session() as session:
+                bump = session.query(VersionBumpPR).get(bump_id)
+                if bump:
+                    bump.status = "candidate_testing"
+    elif snap_name:
         # Tests run on registered remote runners, not GitHub Actions — see
         # snap_dashboard.db.models.Runner. Fans out one run per testable
         # architecture, same as the automated pipeline (agents/pr_monitor.py)
@@ -262,96 +293,6 @@ async def re_run_yarf(bump_id: int, request: Request) -> RedirectResponse:
                 if bump:
                     bump.status = "yarf_running"
                     bump.test_run_id = run_ids[0]
-
-    return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
-
-
-@router.post("/version-bumps/{bump_id}/promote")
-async def promote_bump(
-    bump_id: int,
-    request: Request,
-    override: str = Form(default=""),
-) -> RedirectResponse:
-    """Promote every architecture that's passed to stable, together.
-
-    Architectures without a passed, un-promoted run (still running, failed,
-    or never tested) are left alone rather than promoted — unless
-    ``override`` is set, in which case the release goes out *without* them
-    and that's recorded on the bump as a deliberate, visibly different
-    outcome (``stable_promoted_partial``, plus a note naming exactly what
-    was skipped) rather than looking like an ordinary clean promotion.
-    ``override`` is only ever set by the confirmed "Promote (Override)"
-    button in version_bump_detail.html — see the confirm() dialog there
-    that names the skipped architecture(s) before submitting — so a plain
-    "Promote to Stable" click can never silently skip anything.
-    """
-    user = get_current_user(request)
-    if user is None:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    is_override = bool(override)
-
-    from snap_dashboard.testing.orchestrator import latest_bump_runs, resolve_channel_map_revision
-
-    with get_session() as session:
-        bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
-        if not bump:
-            return RedirectResponse(url="/version-bumps", status_code=302)
-
-        sibling_runs = latest_bump_runs(session, bump_id, bump.test_run_id)
-
-        ready_ids: list[int] = []
-        skipped: list[str] = []
-        for run in sibling_runs:
-            arch = run.architecture or "amd64"
-            if run.promoted:
-                continue  # this arch already went out — nothing to do
-            if run.status != "passed":
-                skipped.append(f"{arch} ({run.status})")
-                continue
-            # The version-bump pipeline tests "edge" ahead of a real
-            # release, so the revision to promote may not be recorded on
-            # the TestRun yet even after it passes — fall back to whatever
-            # the Store's channel map (collector.py) has picked up since.
-            revision = run.revision
-            if revision is None:
-                revision = resolve_channel_map_revision(session, bump.snap_id, arch, run.version or "")
-                if revision is not None:
-                    run.revision = revision
-            if revision is None:
-                skipped.append(f"{arch} (no revision available yet)")
-                continue
-            ready_ids.append(run.id)
-
-    if not ready_ids:
-        logger.info("promote_bump: nothing ready to promote for bump %s (skipped: %s)", bump_id, "; ".join(skipped))
-        return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
-
-    if skipped and not is_override:
-        # Blocked: this would be a partial promotion, and the confirmed
-        # override wasn't set. Refuse rather than guess what was intended.
-        logger.warning(
-            "promote_bump: refusing partial promotion for bump %s without override (skipped: %s)",
-            bump_id, "; ".join(skipped),
-        )
-        return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
-
-    with get_session() as session:
-        bump = session.query(VersionBumpPR).get(bump_id)
-        if bump:
-            bump.status = "promoting"
-
-    from snap_dashboard.agents.runner import get_runner
-    from snap_dashboard.agents.stable_promoter import StablePromoterAgent
-
-    get_runner().submit(
-        StablePromoterAgent(
-            version_bump_pr_id=bump_id,
-            test_run_ids=ready_ids,
-            user_id=user["id"],
-            skipped_architectures=skipped if is_override else [],
-        )
-    )
 
     return RedirectResponse(url=f"/version-bumps/{bump_id}", status_code=303)
 

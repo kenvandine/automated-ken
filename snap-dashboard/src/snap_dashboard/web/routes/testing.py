@@ -737,7 +737,7 @@ def promote_set(
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
     user_id = user["id"]
-    if not return_to.startswith("/testing"):
+    if not return_to.startswith(("/testing", "/version-bumps")):
         return_to = "/testing"
 
     with get_session() as session:

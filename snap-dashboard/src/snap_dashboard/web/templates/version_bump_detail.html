@@ -16,27 +16,7 @@
     </p>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    {% set promotable = bump.architectures | rejectattr('promoted') | list %}
-    {% set promote_ready = promotable | selectattr('status', 'equalto', 'passed') | list %}
-    {% set promote_blocked = promotable | rejectattr('status', 'equalto', 'passed') | list %}
-    {% if promote_ready and bump.status not in ('merged', 'closed') %}
-    {% set ready_archs = promote_ready | map(attribute='architecture') | join(', ') %}
-    {% set blocked_archs = promote_blocked | map(attribute='architecture') | join(', ') %}
-    <form method="post" action="/version-bumps/{{ bump.id }}/promote"
-          onsubmit="return confirm(
-            {% if promote_blocked %}
-            'This will promote ONLY {{ ready_archs }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_archs }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-            {% else %}
-            'Promote {{ bump.snap_name }} {{ bump.new_version }} to stable for {{ ready_archs }}?'
-            {% endif %}
-          )">
-      {% if promote_blocked %}<input type="hidden" name="override" value="1">{% endif %}
-      <button type="submit" class="{% if promote_blocked %}p-button{% else %}p-button--positive{% endif %}">
-        {% if promote_blocked %}⚠ Promote (Override — skip {{ blocked_archs }}){% else %}🚀 Promote to Stable{% endif %}
-      </button>
-    </form>
-    {% endif %}
-    {% if bump.status in ('agent_approved', 'needs_review', 'yarf_passed', 'stable_promoted') %}
+    {% if not bump.merged_at and bump.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/merge"
           onsubmit="return confirm('Merge this PR?')">
       <button type="submit" class="p-button--positive">✓ Merge PR</button>
@@ -46,9 +26,9 @@
       <button type="submit" class="p-button--negative is-small" style="font-size:13px;padding:6px 14px;">✗ Reject</button>
     </form>
     {% endif %}
-    {% if bump.status in ('agent_rejected', 'yarf_failed', 'promotion_failed') %}
+    {% if bump.status in ('agent_rejected', 'yarf_failed') or (bump.merged_at and bump.status == 'needs_review') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
-      <button type="submit" class="p-button">↺ Re-run YARF</button>
+      <button type="submit" class="p-button">↺ Re-run {% if bump.merged_at %}candidate tests{% else %}YARF{% endif %}</button>
     </form>
     {% endif %}
     {% if bump.bot_pr_url %}
@@ -65,15 +45,15 @@
     <div>
       <span class="text-muted small">Status</span><br>
       <span class="p-status-label
-        {% if bump.status in ('agent_approved', 'stable_promoted') %}p-status-label--positive
-        {% elif bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed', 'promotion_failed') %}badge-fail
-        {% elif bump.status in ('needs_review', 'stable_promoted_partial') %}p-status-label--caution
+        {% if bump.status in ('agent_approved', 'stable_promoted', 'merged') %}p-status-label--positive
+        {% elif bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed') %}badge-fail
+        {% elif bump.status in ('needs_review', 'stable_promoted_partial', 'awaiting_release', 'candidate_testing') %}p-status-label--caution
         {% else %}badge-muted{% endif %}
       ">{{ bump.status | replace('_', ' ') }}{% if bump.status == 'stable_promoted_partial' %} ⚠{% endif %}</span>
     </div>
     {% if bump.agent_decision %}
     <div>
-      <span class="text-muted small">Agent decision</span><br>
+      <span class="text-muted small">Pre-merge verdict</span><br>
       <strong>{{ bump.agent_decision }}</strong>
       {% if bump.agent_confidence is not none %}
       <span class="text-muted small">({{ (bump.agent_confidence * 100) | int }}% confident)</span>
@@ -93,21 +73,72 @@
   </div>
 </div>
 
-<!-- Architectures — the whole release set, tested/promoted together -->
+<!-- After merge: the new version's candidate release set, which is what
+     gets promoted to stable (see agents/pr_monitor.py) -->
+{% if bump.merged_at %}
+<div class="card">
+  <h3 class="section-label">Candidate release set — {{ bump.new_version }}</h3>
+  {% if candidate_set %}
+  {% set ready = candidate_set | selectattr('state', 'equalto', 'ready') | map(attribute='architecture') | list %}
+  {% set blocked = candidate_set | rejectattr('state', 'in', ['ready', 'promoted']) | list %}
+  <p class="text-muted small" style="margin-bottom: 12px;">
+    These are the revisions that go to stable, tested on candidate — all architectures together.
+  </p>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+    {% for m in candidate_set %}
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;">
+      <span class="arch-badge
+        {% if m.state in ('ready', 'promoted') %}arch-badge--ok
+        {% elif m.state in ('failed', 'error', 'cancelled') %}arch-badge--fail
+        {% else %}arch-badge--pending{% endif %}
+      ">{{ m.architecture }}</span>
+      <span class="text-muted small">{{ m.state }}</span>
+      {% if m.revision %}<span class="text-muted small">rev {{ m.revision }}</span>{% endif %}
+      {% if m.run_id %}<a href="/testing/runs/{{ m.run_id }}" class="link-inline small">view run ↗</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if ready %}
+  {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
+  <form method="post" action="/testing/promote-set/{{ bump.snap_name }}"
+        onsubmit="return confirm(
+          {% if blocked %}
+          'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
+          {% else %}
+          'Promote {{ bump.snap_name }} {{ bump.new_version }} to stable for {{ ready | join(', ') }}?'
+          {% endif %}
+        )">
+    <input type="hidden" name="version" value="{{ bump.new_version }}">
+    <input type="hidden" name="return_to" value="/version-bumps/{{ bump.id }}">
+    {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}
+    <button type="submit" class="{% if blocked %}p-button{% else %}p-button--positive{% endif %}">
+      {% if blocked %}⚠ Promote (Override — skip {{ blocked_names }}){% else %}🚀 Promote set to Stable{% endif %}
+    </button>
+  </form>
+  {% endif %}
+  {% else %}
+  <p class="text-muted small">
+    {{ bump.new_version }} isn't in the candidate channel yet.
+    {% if bump.status == 'awaiting_release' %}Once CI publishes it (to edge or candidate) it will be released to candidate and tested automatically.{% endif %}
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Pre-merge tests: edge, one run per architecture — they gate the merge -->
 {% if bump.architectures %}
 <div class="card">
-  <h3 class="section-label">Architectures</h3>
+  <h3 class="section-label">Pre-merge tests (edge)</h3>
   <div style="display:flex;gap:12px;flex-wrap:wrap;">
     {% for a in bump.architectures %}
     <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;">
       <span class="arch-badge
         {% if a.status in ('passed', 'promoted') %}arch-badge--ok
-        {% elif a.status in ('failed', 'error') %}arch-badge--fail
+        {% elif a.status in ('failed', 'error', 'cancelled') %}arch-badge--fail
         {% else %}arch-badge--pending{% endif %}
       ">{{ a.architecture }}</span>
       <span class="text-muted small">{{ a.status | replace('_', ' ') }}</span>
       {% if a.revision %}<span class="text-muted small">rev {{ a.revision }}</span>{% endif %}
-      {% if a.promoted %}<span class="text-muted small">✓ promoted</span>{% endif %}
       <a href="/testing/runs/{{ a.test_run_id }}" class="link-inline small">view run ↗</a>
     </div>
     {% endfor %}
@@ -170,8 +201,6 @@
     <p>No screenshot comparison available yet.
       {% if bump.status in ('yarf_running', 'ci_passed', 'ci_pending', 'open') %}
       Waiting for YARF tests to complete.
-      {% elif bump.status == 'promoting' %}
-      Stable promotion is in progress.
       {% elif bump.status in ('yarf_passed', 'yarf_failed') %}
       Screenshot reviewer is pending.
       {% endif %}
@@ -184,17 +213,17 @@
 <div class="card">
   <h3 class="section-label">Actions</h3>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    {% if bump.status not in ('merged', 'closed', 'agent_approved', 'needs_review', 'stable_promoted', 'stable_promoted_partial') %}
+    {% if not bump.merged_at and bump.status not in ('closed', 'agent_approved', 'needs_review') %}
     <form method="post" action="/version-bumps/{{ bump.id }}/request-review">
       <button type="submit" class="p-button">Flag for Manual Review</button>
     </form>
     {% endif %}
-    {% if bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed', 'promotion_failed') %}
+    {% if bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed') and not bump.merged_at %}
     <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
       <button type="submit" class="p-button">↺ Re-run YARF</button>
     </form>
     {% endif %}
-    {% if bump.status not in ('merged', 'closed') %}
+    {% if not bump.merged_at and bump.status != 'closed' %}
     <form method="post" action="/version-bumps/{{ bump.id }}/reject"
           onsubmit="return confirm('Close PR #{{ bump.bot_pr_number }}?')">
       <button type="submit" class="p-button--negative is-small" style="font-size:13px;padding:6px 14px;">Close PR</button>

@@ -161,6 +161,34 @@ def collect_one(
         return {"snap": snap_name, "status": "error", "error": str(exc)}
 
 
+def refresh_channel_map(snap_id: int, snap_name: str) -> bool:
+    """Re-fetch just one snap's Store channel map (no GitHub calls).
+
+    Used by the version-bump pipeline to notice a newly published or
+    released revision within minutes rather than waiting for the next full
+    collection. Returns False if the Store lookup failed.
+    """
+    info = get_snap_info(snap_name)
+    if not info:
+        return False
+    entries = extract_channel_map(info)
+    with get_session() as session:
+        snap = session.query(Snap).get(snap_id)
+        if snap is None:
+            return False
+        _apply_snap_update(
+            session,
+            snap_id,
+            {
+                "packaging_repo": snap.packaging_repo,
+                "upstream_repo": snap.upstream_repo,
+                "channel_entries": entries,
+                "issues_by_repo": {},
+            },
+        )
+    return True
+
+
 def _fetch_snap_update(snap_data: dict, gh_client: GitHubClient) -> dict:
     """Fetch all external (Store/GitHub/GitLab) data needed to update one
     snap. Purely network I/O — no DB session is opened here.

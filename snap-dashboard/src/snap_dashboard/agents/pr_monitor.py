@@ -1,4 +1,4 @@
-"""PR monitor agent — polls version-bump PRs for CI, YARF, and auto-merge."""
+"""PR monitor agent — drives version-bump PRs from CI to a stable release."""
 
 from __future__ import annotations
 
@@ -19,14 +19,15 @@ logger = logging.getLogger(__name__)
 _GH_API = "https://api.github.com"
 
 # Final states — nothing left to poll. Every other status is checked each
-# pass, at minimum for "was the PR merged/closed directly on GitHub?", since
-# VersionBumperAgent refuses to open a new bump for a part while an older one
-# is still unresolved (see version_bumper._open_pr_exists).
-_TERMINAL = {"merged", "closed"}
-# A promotion is in flight in a background agent — leave it alone.
-_NO_SYNC = {"promoting"}
+# pass; before merge, at minimum for "was the PR merged/closed directly on
+# GitHub?", since VersionBumperAgent refuses to open a new bump for a part
+# while an older unmerged one is still open (see version_bumper._open_pr_exists).
+_TERMINAL = {"merged", "closed", "stable_promoted", "stable_promoted_partial"}
 # TestRun statuses that mean the run is finished, one way or another.
 _RUN_DONE = {"passed", "failed", "error", "cancelled"}
+# A candidate run in any of these is still in progress (queued, running,
+# being reviewed, or being promoted).
+_RUN_BUSY = {"pending", "triggered", "running", "reviewing", "promoting"}
 
 
 def _gh_headers(token: str) -> dict[str, str]:
@@ -45,13 +46,27 @@ class PRMonitorAgent(BaseAgent):
     - ci_pending      → ci_passed/failed when all checks conclude
     - ci_passed       → yarf_running     triggers YARF test automatically
     - yarf_running    → yarf_passed/failed via existing TestRun sync
-    - yarf_*/needs_rv → agent_approved/rejected/needs_review/promoting
-                         spawns ScreenshotReviewerAgent
+    - yarf_*          → agent_approved/rejected/needs_review
+                         via ScreenshotReviewerAgent (one verdict for all archs)
     - agent_approved  → merged           when UserConfig.auto_merge is True
     - ci_failed       → ci_passed        if a later push makes CI green
 
+    The edge tests above only gate the merge — they don't test the revisions
+    that would ship. With UserConfig.auto_promote on, a merged bump goes on
+    to promotion through the same candidate release-set flow as everything
+    else (see testing/release_set.py):
+
+    - awaiting_release   → candidate_testing  once the new version is in
+                           candidate for every testable arch (releasing it
+                           from edge to candidate if CI only published it
+                           to edge), queuing a candidate test per arch
+    - candidate_testing  → stable_promoted    when every arch is approved
+                           (TestRunAutoPromoterAgent, or this agent as a
+                           backstop), or → needs_review if any arch fails
+                           or isn't approved
+
     Also syncs PRs that were closed or merged directly on GitHub, in any
-    non-final state, so the DB never gets stuck in a stale state.
+    unmerged state, so the DB never gets stuck in a stale state.
     """
 
     agent_type = "pr_monitor"
@@ -77,6 +92,8 @@ class PRMonitorAgent(BaseAgent):
                     "test_run_id": p.test_run_id,
                     "new_version": p.new_version or "",
                     "old_version": p.old_version or "",
+                    "merged": p.merged_at is not None,
+                    "snap_name": p.snap.name if p.snap else "",
                 }
                 for p in q.all()
             ]
@@ -109,8 +126,14 @@ class PRMonitorAgent(BaseAgent):
             return False
         owner, repo = owner_repo
 
-        if status in _NO_SYNC:
-            return False
+        if pr["merged"]:
+            # Past the PR: only the release half of the pipeline is left.
+            if status == "awaiting_release":
+                return self._check_awaiting_release(pr, uc)
+            if status == "candidate_testing":
+                return self._check_candidate_set(pr, uc)
+            return False  # e.g. needs_review — waiting on the user
+
         # Always check whether the PR was closed/merged on GitHub first.
         if self._check_pr_closed(pr, owner, repo, token):
             return True
@@ -148,7 +171,7 @@ class PRMonitorAgent(BaseAgent):
                 return False
             data = resp.json()
             if data.get("merged"):
-                _update_pr_status_merged(pr["id"])
+                mark_bump_merged(pr["id"])
                 snap_name = _snap_name_from_id(pr["snap_id"]) or "?"
                 logger.info(
                     "pr_monitor: PR #%s for %s was merged on GitHub — syncing",
@@ -331,6 +354,134 @@ class PRMonitorAgent(BaseAgent):
         self._spawn_reviewer(pr, run_ids)
         return True
 
+    # ------------------------------------------------------------------
+    # After merge: new version → candidate → tested set → stable
+    # ------------------------------------------------------------------
+
+    def _check_awaiting_release(self, pr: dict, uc) -> bool:
+        """awaiting_release → candidate_testing once the new version is in candidate.
+
+        Waits until CI has published the new version for every testable
+        architecture. If it's only in edge, releases those revisions to
+        candidate (all architectures together) — the tested-then-promoted
+        artifacts must be exactly the ones that end up in stable.
+        """
+        from snap_dashboard.collector import refresh_channel_map
+        from snap_dashboard.db.models import ChannelMap
+        from snap_dashboard.testing.orchestrator import get_snap_architectures
+        from snap_dashboard.testing.promoter import promote_snap
+        from snap_dashboard.testing.release_set import queue_candidate_tests
+
+        snap_name, version = pr["snap_name"], pr["new_version"]
+        if not snap_name or not version:
+            return False
+        refresh_channel_map(pr["snap_id"], snap_name)
+
+        with get_session() as session:
+            archs = get_snap_architectures(session, pr["snap_id"])
+            published = {
+                (cm.channel, cm.architecture): cm.revision
+                for cm in session.query(ChannelMap).filter_by(snap_id=pr["snap_id"], version=version)
+            }
+        if not archs:
+            _set_status(pr["id"], "needs_review", f"{snap_name} ships none of the testable architectures.")
+            return True
+
+        missing = [a for a in archs if ("candidate", a) not in published]
+        releasable = [(a, published[("edge", a)]) for a in missing if published.get(("edge", a))]
+        if len(releasable) < len(missing):
+            return False  # CI hasn't published every architecture yet
+
+        if releasable:
+            credentials = (getattr(uc, "snapcraft_macaroon", "") or "") if uc else ""
+            failures = []
+            for arch, revision in releasable:
+                ok, output = promote_snap(snap_name, revision, "candidate", store_credentials=credentials)
+                if not ok:
+                    failures.append(f"{arch} rev {revision}: {output[:200]}")
+            if failures:
+                _set_status(
+                    pr["id"], "needs_review",
+                    f"Couldn't release {version} from edge to candidate: {'; '.join(failures)}",
+                )
+                return True
+            self._report(
+                f"Released {snap_name} {version} from edge to candidate "
+                f"({', '.join(a for a, _ in releasable)})",
+                snap_name, pr["user_id"],
+            )
+            refresh_channel_map(pr["snap_id"], snap_name)
+
+        queue_candidate_tests(pr["user_id"], snap_name, version)
+        _set_status(
+            pr["id"], "candidate_testing",
+            f"{version} is in candidate; testing {', '.join(archs)} before promoting to stable.",
+        )
+        self._report(f"Testing {snap_name} {version} from candidate ({', '.join(archs)})", snap_name, pr["user_id"])
+        return True
+
+    def _check_candidate_set(self, pr: dict, uc) -> bool:
+        """candidate_testing → stable_promoted, or → needs_review if the set can't go out.
+
+        The candidate reviewer normally promotes the set itself the moment
+        the last architecture is approved; this is the backstop, and the
+        place that notices a failed or rejected architecture.
+        """
+        from snap_dashboard.collector import refresh_channel_map
+        from snap_dashboard.testing.orchestrator import get_snap_architectures
+        from snap_dashboard.testing.release_set import (
+            PROMOTED,
+            READY,
+            candidate_release_set,
+            describe,
+            member_state,
+            promote_release_set,
+            queue_candidate_tests,
+        )
+
+        snap_name, version, user_id = pr["snap_name"], pr["new_version"], pr["user_id"]
+        threshold = float(getattr(uc, "auto_promote_confidence", 0.85) or 0.85) if uc else 0.85
+        with get_session() as session:
+            archs = get_snap_architectures(session, pr["snap_id"])
+            members = candidate_release_set(session, user_id, snap_name, version)
+            states = [(m, member_state(m, auto_threshold=threshold)) for m in members]
+            covered = {m["architecture"] for m in members}
+            untested = any(m["run"] is None and not m["promoted"] for m in members)
+            busy = any(m["run"] is not None and m["run"].status in _RUN_BUSY for m in members)
+            ready_ids = [m["run"].id for m, st in states if st == READY]
+            blocked = [describe(m, st) for m, st in states if st not in (READY, PROMOTED)]
+
+        if set(archs) - covered or untested:
+            # An architecture isn't visible in candidate yet or has no run —
+            # never treat a set with a hole in it as complete.
+            refresh_channel_map(pr["snap_id"], snap_name)
+            queue_candidate_tests(user_id, snap_name, version)
+            return False
+        if states and all(st == PROMOTED for _, st in states):
+            _set_status(pr["id"], "stable_promoted", f"{version} is in stable ({', '.join(archs)}).")
+            return True
+        if busy:
+            return False
+        if blocked:
+            _set_status(
+                pr["id"], "needs_review",
+                f"Candidate release set needs attention: {', '.join(blocked)}. "
+                "Re-run the tests, or promote with an override, from this page.",
+            )
+            return True
+        if not getattr(uc, "auto_promote", False):
+            _set_status(
+                pr["id"], "needs_review",
+                "Every architecture passed on candidate, but auto-promote is now off — promote from this page.",
+            )
+            return True
+
+        self._report(f"Promoting {snap_name} {version} to stable…", snap_name, user_id)
+        promoted, failures = promote_release_set(user_id, snap_name, version, ready_ids, uc)
+        if failures:
+            _set_status(pr["id"], "needs_review", f"Promotion to stable failed: {'; '.join(failures)}")
+        return True
+
     def _check_auto_merge(self, pr: dict, uc, owner: str, repo: str, token: str) -> bool:
         """agent_approved → merged when UserConfig.auto_merge is enabled.
 
@@ -354,7 +505,7 @@ class PRMonitorAgent(BaseAgent):
         from snap_dashboard.testing.promoter import merge_packaging_pr
 
         if merge_packaging_pr(pr["packaging_repo"], pr["bot_pr_number"], token):
-            _update_pr_status_merged(pr["id"])
+            mark_bump_merged(pr["id"])
             logger.info(
                 "pr_monitor: auto-merged PR #%s for %s %s→%s",
                 pr["bot_pr_number"], snap_name,
@@ -388,12 +539,34 @@ def _update_pr_status(pr_id: int, status: str) -> None:
             bump.status = status
 
 
-def _update_pr_status_merged(pr_id: int) -> None:
+def _set_status(pr_id: int, status: str, note: str | None = None) -> None:
     with get_session() as session:
         bump = session.query(VersionBumpPR).get(pr_id)
         if bump:
+            bump.status = status
+            if note:
+                bump.agent_reasoning = f"{bump.agent_reasoning or ''} {note}".strip()
+
+
+def mark_bump_merged(pr_id: int) -> None:
+    """Record a bump PR as merged (by auto-merge, the dashboard, or on GitHub).
+
+    With auto-promote on, the bump continues to ``awaiting_release`` so the
+    PR monitor can take the new version through candidate testing to
+    stable; otherwise ``merged`` is where it ends.
+    """
+    with get_session() as session:
+        bump = session.query(VersionBumpPR).get(pr_id)
+        if not bump:
+            return
+        uc = get_user_config(bump.user_id) if bump.user_id else None
+        bump.merged_at = datetime.now(timezone.utc)
+        if getattr(uc, "auto_promote", False):
+            bump.status = "awaiting_release"
+            note = "Merged. Waiting for the new version to reach candidate before testing it for stable."
+            bump.agent_reasoning = f"{bump.agent_reasoning or ''} {note}".strip()
+        else:
             bump.status = "merged"
-            bump.merged_at = datetime.now(timezone.utc)
 
 
 def _get_pr_check_runs(owner: str, repo: str, pr_number: int, token: str) -> list[dict]:

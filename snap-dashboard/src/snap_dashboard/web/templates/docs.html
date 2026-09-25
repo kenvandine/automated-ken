@@ -273,7 +273,7 @@ Application Launches
         <li>Each promoted run records which architectures were skipped; a version-bump PR promoted this way is marked <strong>partially promoted</strong>.</li>
       </ol>
       <h3 class="docs-h3">Auto-promote</h3>
-      <p>With <strong>Auto-promote</strong> on (Settings → Agents &amp; AI), a release set is promoted automatically once every architecture has passed <em>and</em> been approved at or above the confidence threshold. If any architecture is missing or not approved, nothing is auto-promoted — use the override if you mean to release without it.</p>
+      <p>With <strong>Auto-promote</strong> on (Settings → Agents &amp; AI), a release set — including one produced by a merged version bump — is promoted automatically once every architecture has passed <em>and</em> been approved at or above the confidence threshold. If any architecture is missing or not approved, nothing is auto-promoted — use the override if you mean to release without it.</p>
     </section>
 
     <!-- ================================================================ AGENTS -->
@@ -287,7 +287,7 @@ Application Launches
             <tr><td><strong>Collector</strong></td><td>Refreshes channel maps and issues/PRs; queues automatic tests if enabled</td><td>Collection interval</td></tr>
             <tr><td><strong>Release Scanner</strong></td><td>Checks packaging repos' <code>snapcraft.yaml</code> parts for newer upstream releases</td><td>Release scan interval</td></tr>
             <tr><td><strong>Version Bumper</strong></td><td>Opens a bump PR from the bot account</td><td>When a release is found</td></tr>
-            <tr><td><strong>PR Monitor</strong></td><td>Moves bump PRs through CI → tests → review → merge; syncs PRs merged or closed on GitHub</td><td>Every 5 minutes</td></tr>
+            <tr><td><strong>PR Monitor</strong></td><td>Moves bump PRs through CI → edge tests → review → merge, then (with auto-promote) candidate release → candidate tests → stable; syncs PRs merged or closed on GitHub</td><td>Every 5 minutes</td></tr>
             <tr><td><strong>Screenshot Reviewer</strong></td><td>Reviews each architecture of a bump's tests; one verdict for the set</td><td>When a bump's tests finish</td></tr>
             <tr><td><strong>Candidate reviewer</strong></td><td>Reviews candidate runs; auto-promotes complete release sets if enabled</td><td>When a candidate run passes</td></tr>
             <tr><td><strong>Runner Watchdog</strong></td><td>Fails runner jobs past the job timeout</td><td>Every 2 minutes</td></tr>
@@ -308,7 +308,14 @@ Application Launches
         <li>has each architecture's screenshots reviewed, and gives the PR one verdict — a regression on any architecture rejects the set;</li>
         <li>merges it if <strong>Auto-merge</strong> is on and the verdict is approve.</li>
       </ol>
-      <p>On <a href="/version-bumps">Version Bumps</a>, open a PR to see each architecture's status, revision and screenshots side by side, then <strong>Merge</strong>, <strong>Reject</strong>, <strong>Re-run YARF</strong> (re-tests every architecture; only the newest run per architecture counts) or <strong>Promote</strong> (all architectures, or a confirmed override). PRs merged or closed on GitHub are picked up automatically.</p>
+      <p>Those <code>edge</code> tests only gate the merge — they don't test the revisions that would ship. With <strong>Auto-promote</strong> on, a merged bump carries on to stable:</p>
+      <ol class="docs-steps">
+        <li><strong>Waiting for candidate release</strong> — when CI has published the new version for every architecture it's in <code>candidate</code>; if CI only published it to <code>edge</code>, those revisions are released to <code>candidate</code> together.</li>
+        <li><strong>Testing candidate</strong> — one test per architecture of the exact candidate revisions, reviewed like any candidate run.</li>
+        <li><strong>Stable</strong> — once every architecture is approved, the set is promoted. If any fails or isn't approved, the bump stops at <em>needs review</em> with the reason.</li>
+      </ol>
+      <p>With auto-promote off, a merged bump stops at <em>merged</em>, and its page shows the candidate release set to promote by hand.</p>
+      <p>On <a href="/version-bumps">Version Bumps</a>, open a PR to see each architecture's pre-merge status and screenshots side by side, then <strong>Merge</strong>, <strong>Reject</strong> or <strong>Re-run YARF</strong> (re-tests every architecture; only the newest run per architecture counts). After merge it shows the candidate release set with <strong>Promote</strong> (all architectures, or a confirmed override) and <strong>Re-run candidate tests</strong>. PRs merged or closed on GitHub are picked up automatically, and a merged bump never blocks the next bump for the same part.</p>
     </section>
 
     <!-- ================================================================ CODING TASKS -->

@@ -303,9 +303,11 @@
       <span class="form-hint">
         When enabled, a candidate version is promoted to <code>stable</code> once the runner
         test passes and the vision model approves it on <em>every</em> tested architecture
-        (amd64 and arm64) — the whole set is released together. If one architecture is
-        missing or not approved, nothing is promoted; use the manual override on the Testing
-        page if you really want to release without it.
+        (amd64 and arm64) — the whole set is released together. Merged version-bump PRs
+        follow through too: once CI publishes the new version it's released from edge to
+        candidate if needed, tested there, and promoted. If one architecture is missing or not
+        approved, nothing is promoted; use the manual override if you really want to release
+        without it.
       </span>
     </div>
 

@@ -91,6 +91,35 @@ def member_state(member: dict, auto_threshold: float | None = None) -> str:
     return READY
 
 
+def queue_candidate_tests(user_id: int, snap_name: str, version: str, force: bool = False) -> list[str]:
+    """Queue a candidate test for each member of the set that has no run yet.
+
+    Returns the architectures queued. Members already tested (in any
+    state) are left alone unless ``force`` (an explicit re-run), in which
+    case every un-promoted member gets a fresh run that supersedes its old
+    one.
+    """
+    from snap_dashboard.testing.orchestrator import trigger_remote_run
+
+    with get_session() as session:
+        wanted = [
+            (m["architecture"], m["revision"])
+            for m in candidate_release_set(session, user_id, snap_name, version)
+            if (force or m["run"] is None) and not m["promoted"]
+        ]
+    queued = []
+    for arch, revision in wanted:
+        ok, err, _run_id = trigger_remote_run(
+            snap_name, "candidate", version, revision,
+            architecture=arch, triggered_by="auto", user_id=user_id,
+        )
+        if ok:
+            queued.append(arch)
+        else:
+            logger.warning("candidate test for %s %s (%s) not queued: %s", snap_name, version, arch, err)
+    return queued
+
+
 def describe(member: dict, state: str) -> str:
     return f"{member['architecture']} ({state})"
 
@@ -176,11 +205,8 @@ def promote_release_set(
         if item["arch"] in promoted_archs:
             persist_stable_baseline_for_run(item["id"], item["repo"] or getattr(uc, "testing_repo", ""), token)
 
-    promoted_ids = [i["id"] for i in claimed if i["arch"] in promoted_archs]
-    if promoted_ids:
-        with get_session() as session:
-            for bump in session.query(VersionBumpPR).filter(VersionBumpPR.test_run_id.in_(promoted_ids)):
-                bump.status = "stable_promoted_partial" if skipped else "stable_promoted"
+    if promoted_archs:
+        _mark_bumps_promoted(user_id, snap_name, version, promoted_archs, skipped)
 
     logger.info(
         "release set %s %s: promoted %s%s%s",
@@ -189,3 +215,28 @@ def promote_release_set(
         f"; failed {'; '.join(failures)}" if failures else "",
     )
     return promoted_archs, failures
+
+
+def _mark_bumps_promoted(
+    user_id: int, snap_name: str, version: str, promoted: list[str], skipped: list[str] | None
+) -> None:
+    """Record a set promotion on the version-bump PR that produced *version*, if any."""
+    arch_list = ", ".join(promoted)
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
+        if snap is None:
+            return
+        bumps = (
+            session.query(VersionBumpPR)
+            .filter_by(snap_id=snap.id, new_version=version)
+            .filter(VersionBumpPR.status != "closed")
+            .all()
+        )
+        for bump in bumps:
+            if skipped:
+                bump.status = "stable_promoted_partial"
+                note = f"Promoted to stable ({arch_list}) by manual override without: {', '.join(skipped)}."
+            else:
+                bump.status = "stable_promoted"
+                note = f"Promoted to stable ({arch_list})."
+            bump.agent_reasoning = f"{bump.agent_reasoning or ''} {note}".strip()
