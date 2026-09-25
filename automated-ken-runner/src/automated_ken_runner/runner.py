@@ -61,9 +61,51 @@ def _desktop_env() -> str:
     return os.environ.get("XDG_CURRENT_DESKTOP", "") or os.environ.get("DESKTOP_SESSION", "")
 
 
+# Variables this snap's own classic-confinement wrapper (see
+# snap/local/command-chain/python-env.sh) sets on *this* process so its
+# bundled interpreter can find its own stdlib/site-packages — classic
+# confinement means `snap run` does not sandbox/reset these the way it
+# would for a strictly-confined app, so they sit in our own
+# ``os.environ`` for the lifetime of the service. If forwarded unchanged
+# into a *different*, strictly-confined snap's ``snap run`` (e.g. the
+# app under test), PYTHONHOME/PYTHONPATH silently redirect that other
+# snap's bundled Python interpreter to search *our* prefix
+# (``$SNAP/usr`` for automated-ken-runner) instead of its own — this was
+# confirmed as the root cause of a target snap (infinity-arcade) crashing
+# with ``ModuleNotFoundError: No module named '_contextvars'`` (its own
+# interpreter fell back to loading stdlib .py files off a content-snap
+# path while PYTHONHOME pointed it at the runner's prefix, which has no
+# matching compiled extension there).
+_RUNNER_ENV_LEAK_KEYS = {"PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE", "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE"}
+# Any SNAP*/LD_* variable in our own env describes *this* snap
+# (automated-ken-runner) — none of these are meaningful, and some are
+# actively misleading (e.g. a stale ``SNAP=/snap/automated-ken-runner/x``
+# or an ``LD_LIBRARY_PATH`` pointing at our own bundled libs) for a
+# wholly unrelated target snap being launched for testing.
+_RUNNER_ENV_LEAK_PREFIXES = ("SNAP", "LD_LIBRARY_PATH", "LD_PRELOAD")
+
+
+def _strip_own_snap_env(env: dict[str, str]) -> dict[str, str]:
+    """Drop this classic snap's own interpreter/confinement env vars.
+
+    Call this on any environment about to be handed to a *different*
+    snap's ``snap run`` (or similar) so our own classic-confinement
+    plumbing doesn't leak into and corrupt it. See ``_RUNNER_ENV_LEAK_KEYS``
+    / ``_RUNNER_ENV_LEAK_PREFIXES`` for what's stripped and why.
+    """
+    return {
+        key: value
+        for key, value in env.items()
+        if key not in _RUNNER_ENV_LEAK_KEYS
+        and not any(key.startswith(prefix) for prefix in _RUNNER_ENV_LEAK_PREFIXES)
+    }
+
+
 def _live_session_env() -> dict[str, str]:
     """This process's own env, patched with the *current* systemd --user
-    manager environment for graphical-session variables.
+    manager environment for graphical-session variables, with this
+    snap's own classic-confinement env vars stripped (see
+    ``_strip_own_snap_env``) so they don't leak into the snap under test.
 
     This service can be started (at boot, or by ``systemctl --user
     restart``) before the desktop session finishes importing DISPLAY/
@@ -75,7 +117,7 @@ def _live_session_env() -> dict[str, str]:
     "Vnc" platform (no VNC server running) on a real graphical runner,
     and would equally break ``snap run`` for the no-suite smoke test.
     """
-    env = dict(os.environ)
+    env = _strip_own_snap_env(dict(os.environ))
     try:
         result = subprocess.run(
             ["systemctl", "--user", "show-environment"],
