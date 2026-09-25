@@ -41,7 +41,7 @@ class BaseAgent(ABC):
             self._error_run(str(exc))
         finally:
             from snap_dashboard.agents.runner import get_tracker
-            get_tracker().clear_active(self.agent_type)
+            get_tracker().clear_active(id(self))
 
     # ------------------------------------------------------------------
     # Subclass interface
@@ -94,13 +94,22 @@ class BaseAgent(ABC):
     # Progress reporting (shown live in the dashboard)
     # ------------------------------------------------------------------
 
-    def _report(self, message: str, snap_name: str | None = None) -> None:
-        """Broadcast what this agent is doing right now to the activity tracker."""
+    def _report(
+        self, message: str, snap_name: str | None = None, user_id: int | None = None
+    ) -> None:
+        """Broadcast what this agent is doing right now to the activity tracker.
+
+        ``user_id`` attributes the message to a user other than the agent's
+        own — for agents that sweep across all users (e.g. the PR monitor)
+        so a message about one user's snap isn't shown to everyone.
+        """
         from snap_dashboard.agents.runner import get_tracker
         get_tracker().set_active(
+            id(self),
             self.agent_type,
             message,
             snap_name=snap_name if snap_name is not None else (self.snap_name or ""),
+            user_id=user_id if user_id is not None else self.user_id,
         )
 
     # ------------------------------------------------------------------

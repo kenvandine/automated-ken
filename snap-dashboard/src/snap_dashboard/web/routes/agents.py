@@ -42,7 +42,7 @@ async def agents_page(request: Request) -> HTMLResponse:
 # ---------------------------------------------------------------------------
 
 @router.get("/api/agent-status")
-async def agent_status(request: Request) -> JSONResponse:
+def agent_status(request: Request) -> JSONResponse:
     """Return live agent state, pipeline counts, lemonade status, and schedules."""
     user = get_current_user(request)
     if user is None:
@@ -55,11 +55,11 @@ async def agent_status(request: Request) -> JSONResponse:
     tracker = get_tracker()
     runner = get_runner()
 
-    # Active agents from in-memory tracker
-    active = tracker.get_active()
+    # Active agents from in-memory tracker (this user's, plus global ones)
+    active = tracker.get_active(user_id)
 
     # Recent activity log (last 40 entries)
-    log = tracker.get_log_since(max(0, tracker.latest_seq() - 40))
+    log = tracker.get_log_since(max(0, tracker.latest_seq() - 40), user_id)
 
     # Pipeline stage counts from DB
     with get_session() as session:
@@ -161,7 +161,7 @@ async def agent_status(request: Request) -> JSONResponse:
         pass
 
     # Schedule countdown
-    schedules = runner.get_schedules()
+    schedules = [s for s in runner.get_schedules() if s["user_id"] in (None, user_id)]
 
     return JSONResponse({
         "active_agents": active,
@@ -263,10 +263,14 @@ async def sse_events(request: Request):
                     break
 
                 # Agent activity log entries (in-memory, no DB)
-                new_entries = tracker.get_log_since(last_seq)
-                for entry in new_entries:
-                    last_seq = entry["seq"]
+                # Advance the cursor past other users' entries too, even
+                # though they're filtered out of what this stream sends.
+                seq_now = tracker.latest_seq()
+                for entry in tracker.get_log_since(last_seq, user_id):
+                    if entry["seq"] > seq_now:
+                        break
                     yield f"event: agent_activity\ndata: {json.dumps(entry)}\n\n"
+                last_seq = seq_now
 
                 # Version bump status changes since last poll.
                 # Using updated_at means both new PRs *and* status transitions

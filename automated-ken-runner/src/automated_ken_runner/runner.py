@@ -17,6 +17,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import traceback
 import zipfile
@@ -41,6 +42,7 @@ _IDLE_THRESHOLD_SECONDS = 120
 # it in the generic (no-suite) desktop smoke test.
 _APP_SETTLE_SECONDS = 15
 _APP_LAUNCH_TIMEOUT_SECONDS = 30
+_YARF_TIMEOUT_SECONDS = 1800
 
 
 def _desktop_env() -> str:
@@ -82,6 +84,10 @@ def _live_session_env() -> dict[str, str]:
     return env
 
 
+class JobCancelled(Exception):
+    """The dashboard asked for the in-flight job to stop (see /runners → Cancel)."""
+
+
 class RunnerLoop:
     """Owns the long-lived connection to a snap-dashboard server."""
 
@@ -92,7 +98,16 @@ class RunnerLoop:
             headers={"Authorization": f"Bearer {cfg.secret}"},
             timeout=_POLL_TIMEOUT_SECONDS + 10,
         )
-        self._last_heartbeat = 0.0
+        # Heartbeats run on their own thread (and client) so they keep
+        # flowing while a job is executing — otherwise the dashboard marks
+        # the runner offline mid-job and never hears about a cancel request.
+        self._heartbeat_client = httpx.Client(
+            base_url=cfg.api_base,
+            headers={"Authorization": f"Bearer {cfg.secret}"},
+            timeout=15,
+        )
+        self._current_job_id: int | None = None
+        self._cancel = threading.Event()
 
     # ------------------------------------------------------------------
     # Main loop
@@ -105,9 +120,9 @@ class RunnerLoop:
         # fixing it just means restarting the service, not re-running
         # `prepare-machine` by hand on every machine.
         ensure_dependencies(auto_install=True)
+        threading.Thread(target=self._heartbeat_loop, daemon=True, name="heartbeat").start()
         while True:
             try:
-                self._maybe_heartbeat()
                 job = self._poll_next_job()
                 if job is not None:
                     self._execute_job(job)
@@ -124,31 +139,37 @@ class RunnerLoop:
     # Heartbeat
     # ------------------------------------------------------------------
 
-    def _maybe_heartbeat(self) -> None:
-        now = time.monotonic()
-        if now - self._last_heartbeat < _HEARTBEAT_INTERVAL_SECONDS:
-            return
-        safe = is_safe_to_claim_job(_IDLE_THRESHOLD_SECONDS)
+    def _heartbeat_loop(self) -> None:
+        while True:
+            try:
+                self._heartbeat()
+            except Exception:  # noqa: BLE001 — never let the heartbeat thread die
+                logger.debug("Heartbeat failed (non-fatal)", exc_info=True)
+            time.sleep(_HEARTBEAT_INTERVAL_SECONDS)
+
+    def _heartbeat(self) -> None:
+        busy = self._current_job_id is not None
         from automated_ken_runner.idle import get_idle_state
 
         state = get_idle_state()
-        try:
-            self.client.patch(
-                f"/{self.cfg.runner_id}/heartbeat",
-                json={
-                    "status": "idle" if safe else "busy",
-                    "idle_seconds": state.idle_seconds,
-                    "locked": state.locked,
-                    # Self-heal already-enrolled runners that predate arch
-                    # reporting (see enroll() in cli.py) without requiring a
-                    # manual re-enrollment — the server only overwrites its
-                    # stored arch when this differs (see runner_api.py).
-                    "arch": detect_arch(),
-                },
-            )
-        except httpx.HTTPError as exc:
-            logger.debug("Heartbeat failed (non-fatal): %s", exc)
-        self._last_heartbeat = now
+        safe = not state.locked and state.idle_seconds is not None and state.idle_seconds >= _IDLE_THRESHOLD_SECONDS
+        resp = self._heartbeat_client.patch(
+            f"/{self.cfg.runner_id}/heartbeat",
+            json={
+                "status": "busy" if busy or not safe else "idle",
+                "idle_seconds": state.idle_seconds,
+                "locked": state.locked,
+                # Self-heal already-enrolled runners that predate arch
+                # reporting (see enroll() in cli.py) without requiring a
+                # manual re-enrollment — the server only overwrites its
+                # stored arch when this differs (see runner_api.py).
+                "arch": detect_arch(),
+            },
+        )
+        if busy and resp.status_code == 200 and resp.json().get("cancel_requested"):
+            if not self._cancel.is_set():
+                logger.info("Cancel requested for job %s", self._current_job_id)
+            self._cancel.set()
 
     # ------------------------------------------------------------------
     # Job claiming
@@ -175,9 +196,18 @@ class RunnerLoop:
 
     def _execute_job(self, job: dict) -> None:
         job_id = job["test_run_id"]
+        self._cancel.clear()
+        self._current_job_id = job_id
+        try:
+            self._run_job(job)
+        finally:
+            self._current_job_id = None
+
+    def _run_job(self, job: dict) -> None:
+        job_id = job["test_run_id"]
         snap_name = job["snap_name"]
         channel = job.get("channel", "stable")
-        logger.info("Claimed job %s: %s (%s)", job_id, snap_name, channel)
+        logger.info("Claimed job %s: %s (%s, %s)", job_id, snap_name, channel, job.get("architecture", ""))
         self._report_status(job_id, "running")
 
         log_lines: list[str] = []
@@ -191,6 +221,7 @@ class RunnerLoop:
             try:
                 suite_dir = self._fetch_suite(job_id, tmp_path)
                 self._install_snap(snap_name, channel, _log)
+                self._check_cancelled()
                 if suite_dir is not None:
                     # The packaging repo opted in to a custom Robot/YARF
                     # suite (real interaction beyond a plain smoke test) —
@@ -226,6 +257,9 @@ class RunnerLoop:
                     self._report_status(
                         job_id, "passed" if passed else "failed", log="\n".join(log_lines),
                     )
+            except JobCancelled:
+                logger.info("Job %s cancelled", job_id)
+                self._report_status(job_id, "cancelled", log="\n".join(log_lines))
             except Exception as exc:  # noqa: BLE001 — never crash the loop over one bad job
                 logger.exception("Job %s failed with an unexpected error", job_id)
                 _log("traceback", traceback.format_exc())
@@ -283,14 +317,16 @@ class RunnerLoop:
         yarf_env = {
             k: v for k, v in live_env.items() if k not in ("PYTHONHOME", "PYTHONPATH")
         }
-        proc = subprocess.run(
-            ["yarf", "--platform", platform_name, "--outdir", str(outdir), str(suite_dir)],
-            capture_output=True, timeout=1800, check=False, env=yarf_env,
-        )
-        log(
-            f"yarf --platform {platform_name}",
-            (proc.stdout or b"").decode(errors="replace") + (proc.stderr or b"").decode(errors="replace"),
-        )
+        with tempfile.TemporaryFile() as out:
+            proc = subprocess.Popen(
+                ["yarf", "--platform", platform_name, "--outdir", str(outdir), str(suite_dir)],
+                stdout=out, stderr=subprocess.STDOUT, env=yarf_env,
+            )
+            try:
+                self._wait_or_cancel(proc, timeout=_YARF_TIMEOUT_SECONDS)
+            finally:
+                out.seek(0)
+                log(f"yarf --platform {platform_name}", out.read().decode(errors="replace"))
         log_html_path = outdir / "log.html"
         log_html = log_html_path.read_text(errors="replace") if log_html_path.exists() else ""
         return proc.returncode, log_html
@@ -316,7 +352,8 @@ class RunnerLoop:
         )
         try:
             self._wait_for_app_alive(snap_name, timeout=_APP_LAUNCH_TIMEOUT_SECONDS)
-            time.sleep(_APP_SETTLE_SECONDS)
+            if self._cancel.wait(_APP_SETTLE_SECONDS):
+                raise JobCancelled()
             shot_path = tmp_path / "screenshot.png"
             try:
                 raw_png = capture_screenshot(shot_path)
@@ -347,6 +384,29 @@ class RunnerLoop:
                 return
             time.sleep(1)
         raise RuntimeError(f"Timed out waiting for {snap_name} process to appear")
+
+    def _check_cancelled(self) -> None:
+        if self._cancel.is_set():
+            raise JobCancelled()
+
+    def _wait_or_cancel(self, proc: subprocess.Popen, timeout: float) -> int:
+        """Wait for *proc*, terminating it if the job is cancelled or times out."""
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                return proc.wait(timeout=1)
+            except subprocess.TimeoutExpired:
+                pass
+            if self._cancel.is_set() or time.monotonic() >= deadline:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+                if self._cancel.is_set():
+                    raise JobCancelled()
+                return proc.returncode
 
     def _upload_screenshots(self, job_id: int, shots: list) -> None:
         for shot in shots:

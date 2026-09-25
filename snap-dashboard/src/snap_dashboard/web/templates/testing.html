@@ -7,90 +7,86 @@
 <div class="page-title-row">
   <div>
     <h2 class="page-heading">YARF Testing</h2>
-    <p class="text-muted">Trigger, track, and promote snap test runs</p>
+    <p class="text-muted">Queue runner tests, track results, and promote release sets</p>
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
-    <form method="post" action="/testing/sync">
+    <a href="/runners" class="p-button is-small">Runners</a>
+    {% if config.testing_repo %}
+    <form method="post" action="/testing/sync" title="Pull results of runs dispatched on GitHub Actions in {{ config.testing_repo }}">
       <button type="submit" class="p-button is-small">Sync from GitHub</button>
     </form>
+    {% endif %}
   </div>
 </div>
 
-{% if not config.testing_repo and not any_suite_configured and not all_runs %}
-<!-- Genuinely nothing configured yet: no legacy central testing repo, no
-     snap has colocated tests/suite/, and no runs have ever been recorded.
-     (Colocated per-repo test suites are the primary path now — see
-     testing/orchestrator.py:resolve_test_repo — so this is only shown
-     when there's truly nothing to work with yet.) -->
+{% if not snaps_needing and not all_runs %}
+<!-- Nothing to test yet and nothing ever tested. -->
 <div class="card" style="border-left: 3px solid var(--accent);">
-  <h3 class="section-label">No Test Suites Found</h3>
+  <h3 class="section-label">Nothing to Test Yet</h3>
   <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-    YARF testing looks for a <code>tests/suite/</code> directory (with a GitHub
-    Actions workflow) colocated in each snap's own packaging repo. Add one to a
-    snap's repo to get started, or configure a shared fallback testing
-    repository in Settings.
+    Tests appear here when a snap has a newer version in <code>candidate</code> or
+    <code>edge</code> than in <code>stable</code>, and when a version-bump PR's CI passes.
+    They run on your enrolled remote runners (one per architecture: amd64 and arm64).
+    A YARF suite at <code>tests/suite/__init__.robot</code> in the snap's packaging repo
+    is used if present; otherwise the runner does a launch-and-screenshot smoke test.
   </p>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
-    <a href="/settings" class="p-button--positive is-small">Configure in Settings</a>
-    <a href="/testing/workflow-template" class="p-button is-small" download="snap-test.yml">
-      Download Workflow Template
-    </a>
+    <a href="/runners" class="p-button--positive is-small">Enroll a runner</a>
+    <a href="/docs#testing-overview" class="p-button is-small">How testing works</a>
   </div>
 </div>
 {% else %}
 
 <!-- ================================================================
-     PENDING PROMOTION
+     PENDING PROMOTION — one card per candidate release set
      ================================================================ -->
 {% if pending_promotion %}
 <section class="detail-section">
   <h3 class="section-label" style="color: #4ade80;">Pending Promotion</h3>
   <div class="attention-scroll">
-    {% for run in pending_promotion %}
-    <div class="attention-card" style="border-left-color: #4ade80; min-width: 240px;">
+    {% for rs in pending_promotion %}
+    {% set ready = rs.members | selectattr('state', 'equalto', 'ready') | map(attribute='architecture') | list %}
+    {% set blocked = rs.members | rejectattr('state', 'in', ['ready', 'promoted']) | list %}
+    <div class="attention-card" style="border-left-color: #4ade80; min-width: 260px;">
       <div class="attention-card-header">
-        <span class="attention-tag" style="background: rgba(74,222,128,0.15); color:#4ade80; border: 1px solid rgba(74,222,128,0.3);">Passed — ready to promote</span>
-        <a href="/testing/runs/{{ run.id }}" class="attention-name">{{ run.snap_name }}</a>
-        <span class="muted small" style="margin-left:6px;">{{ run.architecture or 'amd64' }}</span>
+        <span class="attention-tag" style="background: rgba(74,222,128,0.15); color:#4ade80; border: 1px solid rgba(74,222,128,0.3);">
+          {% if blocked %}Partly ready{% else %}Ready to promote{% endif %}
+        </span>
+        <a href="/snap/{{ rs.snap_name }}" class="attention-name">{{ rs.snap_name }}</a>
+        <span class="muted small" style="margin-left:6px;">{{ rs.version }}</span>
       </div>
-      <div class="attention-versions">
-        <div class="version-compare">
-          <span class="ver-label">{{ run.from_channel }}</span>
-          <span class="ver-value ver-new">{{ run.version or '—' }}</span>
+      <div style="margin-top: 6px; display:flex; flex-direction:column; gap:4px;">
+        {% for m in rs.members %}
+        <div style="white-space:nowrap;">
+          <span class="arch-badge
+            {% if m.state in ('ready', 'promoted') %}arch-badge--ok
+            {% elif m.state in ('failed', 'error', 'cancelled') %}arch-badge--fail
+            {% else %}arch-badge--pending{% endif %}
+          ">{{ m.architecture }}</span>
+          {% if m.run_id %}<a href="/testing/runs/{{ m.run_id }}" class="muted small">{{ m.state }}</a>{% else %}<span class="muted small">{{ m.state }}</span>{% endif %}
+          {% if m.review_decision %}
+          <span class="muted small">· AI {{ m.review_decision | replace('_', ' ') }}{% if m.review_confidence is not none %} {{ "%.0f"|format(m.review_confidence * 100) }}%{% endif %}</span>
+          {% endif %}
         </div>
-        <div class="ver-arrow">→</div>
-        <div class="version-compare">
-          <span class="ver-label">stable</span>
-          <span class="ver-value ver-old">target</span>
-        </div>
+        {% endfor %}
       </div>
-      {% if run.review_decision %}
-      <div style="margin-top: 6px;">
-        {% if run.review_decision == 'approve' %}
-        <span class="p-status-label p-status-label--positive">AI: approved</span>
-        {% elif run.review_decision == 'reject' %}
-        <span class="p-status-label p-status-label--negative">AI: rejected</span>
-        {% else %}
-        <span class="p-status-label p-status-label--caution">AI: needs review</span>
-        {% endif %}
-        {% if run.review_confidence is not none %}
-        <span class="muted small">{{ "%.0f"|format(run.review_confidence * 100) }}% confidence</span>
-        {% endif %}
-      </div>
-      {% endif %}
-      <form method="post" action="/testing/promote/{{ run.snap_name }}" style="margin-top: 8px;">
-        <input type="hidden" name="run_id" value="{{ run.id }}">
-        <input type="hidden" name="pr_number" value="{{ run.pr_number or 0 }}">
-        <input type="hidden" name="revision" value="{{ run.revision or 0 }}">
-        <input type="hidden" name="to_channel" value="stable">
-        <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <a href="/testing/runs/{{ run.id }}" class="p-button is-small">View Screenshots</a>
-          <button type="submit" class="p-button--positive is-small"
-            onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')">
-            Promote to Stable
-          </button>
-        </div>
+      {% if ready %}
+      {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
+      <form method="post" action="/testing/promote-set/{{ rs.snap_name }}" style="margin-top: 8px;"
+            onsubmit="return confirm(
+              {% if blocked %}
+              'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
+              {% else %}
+              'Promote {{ rs.snap_name }} {{ rs.version }} to stable for {{ ready | join(', ') }}?'
+              {% endif %}
+            )">
+        <input type="hidden" name="version" value="{{ rs.version }}">
+        {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}
+        <button type="submit" class="{% if blocked %}p-button{% else %}p-button--positive{% endif %} is-small">
+          {% if blocked %}⚠ Promote (override — skip {{ blocked_names }}){% else %}🚀 Promote set to Stable{% endif %}
+        </button>
       </form>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
@@ -148,7 +144,9 @@
           <div style="white-space:nowrap;">
             <span class="muted small">{{ arch }}:</span>
             {% if run %}
-            {% if run.status == 'passed' %}
+            {% if run.status == 'promoted' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">promoted</a>
+            {% elif run.status == 'passed' %}
             <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
             {% if run.review_decision == 'reject' %}
             <span class="muted small" title="AI review flagged this" style="margin-left:4px;">⚠</span>
@@ -190,6 +188,25 @@
             {% endfor %}
             <button type="submit" class="p-button is-small">Run Tests ({{ item.architectures | join(', ') }})</button>
           </form>
+          {% if item.promote_ready %}
+          {% set ready_names = item.promote_ready | join(', ') %}
+          {% set blocked_names = item.promote_blocked | join(', ') %}
+          <form method="post" action="/testing/promote-set/{{ item.snap.name }}" style="margin-top:6px;"
+                onsubmit="return confirm(
+                  {% if item.promote_blocked %}
+                  'This will promote ONLY {{ ready_names }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
+                  {% else %}
+                  'Promote {{ item.snap.name }} {{ item.version }} to stable for {{ ready_names }}?'
+                  {% endif %}
+                )">
+            <input type="hidden" name="version" value="{{ item.version }}">
+            {% if item.promote_blocked %}<input type="hidden" name="override" value="1">{% endif %}
+            <button type="submit" class="{% if item.promote_blocked %}p-button{% else %}p-button--positive{% endif %} is-small"
+                    title="{% if item.promote_blocked %}Not ready: {{ blocked_names }}{% endif %}">
+              {% if item.promote_blocked %}⚠ Promote (override){% else %}🚀 Promote set{% endif %}
+            </button>
+          </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
@@ -328,7 +345,7 @@
   {% endif %}
 </div>
 
-{% endif %}{# end if not config.testing_repo and not any_suite_configured and not all_runs #}
+{% endif %}{# end if not snaps_needing and not all_runs #}
 
 {% endblock %}
 

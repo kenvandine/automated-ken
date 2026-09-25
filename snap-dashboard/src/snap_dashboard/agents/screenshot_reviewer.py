@@ -135,12 +135,10 @@ class ScreenshotReviewerAgent(BaseAgent):
             # promotion once every one of them has recorded a decision, so
             # e.g. an arm64 regression can still block a passing amd64 run
             # from being promoted alone.
-            sibling_runs = (
-                session.query(TestRun).filter_by(version_bump_pr_id=self.version_bump_pr_id).all()
-            )
-            sibling_ids = [r.id for r in sibling_runs] if sibling_runs else (
-                [test_run_id] if test_run_id is not None else []
-            )
+            from snap_dashboard.testing.orchestrator import latest_bump_runs
+
+            sibling_runs = latest_bump_runs(session, self.version_bump_pr_id, test_run_id)
+            sibling_ids = [r.id for r in sibling_runs]
             runs_by_id = {r.id: r for r in sibling_runs}
 
             latest_by_run: dict[int, ScreenshotComparison] = {}

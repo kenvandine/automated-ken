@@ -37,9 +37,17 @@ class CollectorAgent(BaseAgent):
         config = uc.to_config()
         summary = run_collection(config, user_id=self.user_id)
 
-        return (
+        result = (
             f"status={summary['status']} "
             f"snaps_updated={summary['snaps_updated']} "
             f"issues_updated={summary['issues_updated']}"
             + (f" error={summary['error']}" if summary.get("error") else "")
         )
+
+        if uc.auto_test:
+            from snap_dashboard.testing.orchestrator import queue_auto_tests
+
+            self._report("Queuing tests for new candidate/edge versions…")
+            result += f" auto_tests_queued={queue_auto_tests(self.user_id)}"
+
+        return result

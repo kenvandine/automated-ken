@@ -20,6 +20,14 @@ from snap_dashboard.testing.orchestrator import (
     sync_test_runs,
     trigger_remote_run,
 )
+from snap_dashboard.testing.release_set import (
+    PROMOTED,
+    READY,
+    candidate_release_set,
+    describe,
+    member_state,
+    promote_release_set,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +72,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                         snap_name=snap_name,
                         architecture=arch,
                         version=item["version"],
-                        promoted=False,
+                        from_channel=item["from_channel"],
                         user_id=user_id,
                     )
                     .order_by(TestRun.started_at.desc())
@@ -82,9 +90,22 @@ async def testing_index(request: Request) -> HTMLResponse:
                         "review_decision": existing.review_decision,
                         "review_confidence": existing.review_confidence,
                     }
+            # Candidate rows can be promoted to stable — as a set; see
+            # testing/release_set.py and promote_set() below.
+            promote_ready: list[str] = []
+            promote_blocked: list[str] = []
+            if item["can_promote"]:
+                for member in candidate_release_set(session, user_id, snap_name, item["version"]):
+                    state = member_state(member)
+                    if state == READY:
+                        promote_ready.append(member["architecture"])
+                    elif state != PROMOTED:
+                        promote_blocked.append(describe(member, state))
             prepared.append(
                 {
                     "snap": {"name": snap_name},
+                    "promote_ready": promote_ready,
+                    "promote_blocked": promote_blocked,
                     "architectures": item["architectures"],
                     "from_channel": item["from_channel"],
                     "version": item["version"],
@@ -134,10 +155,33 @@ async def testing_index(request: Request) -> HTMLResponse:
             for r in all_runs
         ]
 
-    pending_promotion = [
-        r for r in runs_data
-        if r["status"] == "passed" and not r["promoted"] and r["from_channel"] == "candidate"
-    ]
+        # One card per candidate release set (snap + version) with at least
+        # one passed, un-promoted architecture — promoted as a set.
+        pending_promotion = []
+        seen: set[tuple[str, str]] = set()
+        for r in runs_data:
+            key = (r["snap_name"], r["version"] or "")
+            if (
+                r["status"] != "passed" or r["promoted"] or r["from_channel"] != "candidate"
+                or not r["version"] or key in seen
+            ):
+                continue
+            seen.add(key)
+            members = []
+            for member in candidate_release_set(session, user_id, r["snap_name"], r["version"]):
+                run = member["run"]
+                members.append(
+                    {
+                        "architecture": member["architecture"],
+                        "state": member_state(member),
+                        "run_id": run.id if run else None,
+                        "review_decision": run.review_decision if run else None,
+                        "review_confidence": run.review_confidence if run else None,
+                    }
+                )
+            pending_promotion.append(
+                {"snap_name": r["snap_name"], "version": r["version"], "members": members}
+            )
 
     return templates.TemplateResponse(
         request,
@@ -149,13 +193,6 @@ async def testing_index(request: Request) -> HTMLResponse:
             "pending_promotion": pending_promotion,
             "last_run": None,
             "current_user": user,
-            # Suites are now discovered async (see above) so we can't know
-            # this synchronously; assume True whenever there's a testing_repo
-            # configured or the user has snaps at all, so the page always
-            # renders its normal content and lets the async check settle
-            # the per-row detail. The truly-empty-state card is only meant
-            # for brand-new setups with nothing configured or recorded yet.
-            "any_suite_configured": bool(uc.testing_repo) or bool(prepared) or bool(all_runs),
         },
     )
 
@@ -483,7 +520,7 @@ def _build_review_context(
 
 
 @router.get("/testing/runs/{run_id}", response_class=HTMLResponse)
-async def view_run(run_id: int, request: Request) -> HTMLResponse:
+def view_run(run_id: int, request: Request) -> HTMLResponse:
     """Render a self-contained detail page for a single test run.
 
     Unlike ``/testing/pr/{snap_name}/{pr_number}`` (which needs a GitHub PR
@@ -525,6 +562,20 @@ async def view_run(run_id: int, request: Request) -> HTMLResponse:
         review_confidence = run_orm.review_confidence
         review_reasoning = run_orm.review_reasoning
 
+        # A candidate run is one architecture of a release set; show the
+        # whole set and promote it together (see testing/release_set.py).
+        release_set = []
+        if run_orm.from_channel == "candidate" and run_orm.version:
+            for member in candidate_release_set(session, user_id, run_orm.snap_name, run_orm.version):
+                release_set.append(
+                    {
+                        "architecture": member["architecture"],
+                        "run_id": member["run"].id if member["run"] else None,
+                        "revision": member["revision"],
+                        "state": member_state(member),
+                    }
+                )
+
     uc = get_user_config(user_id)
     effective_repo = run_data["repo"] or uc.testing_repo
     context = _build_review_context(
@@ -537,6 +588,7 @@ async def view_run(run_id: int, request: Request) -> HTMLResponse:
         "run_detail.html",
         {
             "run": run_data,
+            "release_set": release_set,
             "current_user": user,
             "last_run": None,
             **context,
@@ -550,7 +602,7 @@ async def view_run(run_id: int, request: Request) -> HTMLResponse:
 
 
 @router.get("/testing/pr/{snap_name}/{pr_number}", response_class=HTMLResponse)
-async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
+def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
     """Render the PR detail page for a test run."""
     user = get_current_user(request)
     if user is None:
@@ -664,8 +716,57 @@ async def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLRespo
 # ---------------------------------------------------------------------------
 
 
+@router.post("/testing/promote-set/{snap_name}")
+def promote_set(
+    snap_name: str,
+    request: Request,
+    version: str = Form(...),
+    override: str = Form(default=""),
+    return_to: str = Form(default="/testing"),
+) -> RedirectResponse:
+    """Promote every ready architecture of a candidate version to stable, together.
+
+    An architecture is ready when its latest candidate run for this
+    version passed and has a revision. If any architecture isn't ready
+    (untested, still running, failed…) the request is refused unless
+    ``override`` is set — only the confirmed "Promote (override)" buttons
+    send it, after naming the architectures that will be left out — and
+    the override is recorded on every promoted run.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    user_id = user["id"]
+    if not return_to.startswith("/testing"):
+        return_to = "/testing"
+
+    with get_session() as session:
+        states = [
+            (m, member_state(m))
+            for m in candidate_release_set(session, user_id, snap_name, version)
+        ]
+        ready_ids = [m["run"].id for m, st in states if st == READY]
+        blocked = [describe(m, st) for m, st in states if st not in (READY, PROMOTED)]
+
+    if not ready_ids:
+        logger.info("promote_set: nothing ready for %s %s (%s)", snap_name, version, "; ".join(blocked))
+        return RedirectResponse(url=return_to, status_code=303)
+    if blocked and not override:
+        logger.warning(
+            "promote_set: refusing partial promotion of %s %s without override (blocked: %s)",
+            snap_name, version, "; ".join(blocked),
+        )
+        return RedirectResponse(url=return_to, status_code=303)
+
+    promote_release_set(
+        user_id, snap_name, version, ready_ids, get_user_config(user_id),
+        skipped=blocked if override else None,
+    )
+    return RedirectResponse(url=return_to, status_code=303)
+
+
 @router.post("/testing/promote/{snap_name}", response_model=None)
-async def promote_snap_route(
+def promote_snap_route(
     snap_name: str,
     request: Request,
     pr_number: int = Form(default=0),

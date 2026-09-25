@@ -1,10 +1,9 @@
-"""YARF test orchestration — find snaps needing tests, trigger workflows, sync status."""
+"""YARF test orchestration — find snaps needing tests, queue runner jobs, sync status."""
 
 from __future__ import annotations
 
 import base64
 import logging
-import time
 from datetime import datetime, timezone
 
 import httpx
@@ -27,17 +26,6 @@ def _gh_headers(token: str) -> dict[str, str]:
     if token:
         h["Authorization"] = f"Bearer {token}"
     return h
-
-
-def _default_branch(owner: str, repo: str, token: str) -> str:
-    """Return the default branch name for *owner/repo*, falling back to ``main``."""
-    try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.get(f"{_GH_API}/repos/{owner}/{repo}", headers=_gh_headers(token))
-        resp.raise_for_status()
-        return resp.json().get("default_branch", "main")
-    except httpx.HTTPError:
-        return "main"
 
 
 def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
@@ -169,6 +157,80 @@ def get_snap_architectures(session, snap_id: int) -> list[str]:
     return [a for a in TESTABLE_ARCHITECTURES if a in archs]
 
 
+def queue_auto_tests(user_id: int) -> int:
+    """Queue a test for every untested candidate/edge version × testable arch.
+
+    Backs the "Enable automatic testing" setting (``UserConfig.auto_test``);
+    run after each channel-map refresh (see agents/collector_agent.py). An
+    architecture that already has *any* run for that exact
+    snap/channel/version — passed, failed, or still queued — is skipped, so
+    a version is tested once rather than on every refresh. Returns how many
+    runs were queued.
+    """
+    with get_session() as session:
+        wanted: list[tuple[str, str, str, str, int | None]] = []
+        for item in find_snaps_needing_tests(session, user_id=user_id):
+            snap_name = item["snap"].name
+            for arch in item["architectures"]:
+                already = (
+                    session.query(TestRun.id)
+                    .filter_by(
+                        user_id=user_id,
+                        snap_name=snap_name,
+                        architecture=arch,
+                        from_channel=item["from_channel"],
+                        version=item["version"],
+                    )
+                    .first()
+                )
+                if not already:
+                    wanted.append(
+                        (snap_name, item["from_channel"], item["version"], arch, item["revisions"].get(arch))
+                    )
+
+    queued = 0
+    for snap_name, channel, version, arch, revision in wanted:
+        ok, err, _run_id = trigger_remote_run(
+            snap_name, channel, version, revision,
+            architecture=arch, triggered_by="auto", user_id=user_id,
+        )
+        if ok:
+            queued += 1
+        else:
+            logger.warning("auto-test: failed to queue %s %s (%s): %s", snap_name, version, arch, err)
+    return queued
+
+
+def latest_bump_runs(session, version_bump_pr_id: int, fallback_run_id: int | None = None) -> list:
+    """Return the current ``TestRun`` per architecture for a version bump.
+
+    A bump can accumulate several runs per architecture ("Re-run YARF"
+    queues a fresh set tagged with the same ``version_bump_pr_id``), so only
+    the newest run for each architecture counts — otherwise a superseded
+    failure would keep the whole set failed forever. Falls back to the
+    bump's single ``fallback_run_id`` for pre-multi-arch bumps with no
+    tagged runs. Ordered by :data:`TESTABLE_ARCHITECTURES`, then name.
+    """
+    runs = (
+        session.query(TestRun)
+        .filter_by(version_bump_pr_id=version_bump_pr_id)
+        .order_by(TestRun.id.asc())
+        .all()
+    )
+    if not runs and fallback_run_id:
+        run = session.query(TestRun).get(fallback_run_id)
+        runs = [run] if run else []
+    latest: dict[str, TestRun] = {}
+    for run in runs:
+        latest[run.architecture or "amd64"] = run
+
+    def _order(arch: str) -> tuple[int, str]:
+        idx = TESTABLE_ARCHITECTURES.index(arch) if arch in TESTABLE_ARCHITECTURES else len(TESTABLE_ARCHITECTURES)
+        return idx, arch
+
+    return [latest[a] for a in sorted(latest, key=_order)]
+
+
 def resolve_channel_map_revision(
     session, snap_id: int, architecture: str, version: str
 ) -> int | None:
@@ -248,109 +310,6 @@ def suite_exists_in_repo(
     return _path_exists_in_repo(repo, f"{path}/__init__.robot", token)
 
 
-def trigger_workflow(
-    snap_name: str,
-    from_channel: str,
-    version: str,
-    revision: int | None,
-    architecture: str = "amd64",
-    triggered_by: str = "manual",
-    testing_repo: str = "",
-    github_token: str = "",
-    user_id: int | None = None,
-    packaging_repo: str | None = None,
-) -> tuple[bool, str, int | None]:
-    """Dispatch a ``workflow_dispatch`` event to run YARF tests for the given snap.
-
-    Prefers *packaging_repo* if it has been bootstrapped with a colocated
-    YARF suite (``tests/suite/``); falls back to *testing_repo* (or the
-    legacy shared testing repo) otherwise. Creates a :class:`TestRun` record
-    in the database before dispatching, recording which repo was used.
-
-    Returns:
-        A ``(success, error_message, db_run_id)`` tuple.  ``error_message`` is
-        an empty string on success; ``db_run_id`` is the new TestRun PK or None
-        on failure.
-    """
-    if not github_token:
-        from snap_dashboard.config import get_config
-        cfg = get_config()
-        github_token = cfg.github_token
-
-    if not github_token:
-        return False, "No GitHub token configured", None
-
-    resolved_repo, _suite_path = resolve_test_repo(
-        packaging_repo, snap_name, github_token, testing_repo
-    )
-    if not resolved_repo:
-        return False, "No testing repo configured or discoverable", None
-
-    owner, _, repo = resolved_repo.partition("/")
-    if not repo:
-        return False, f"Invalid repo format: {resolved_repo!r} (expected owner/repo)", None
-
-    ref = _default_branch(owner, repo, github_token)
-
-    # Persist a TestRun record first so we have a run_id to pass as an input.
-
-    with get_session() as session:
-        run = TestRun(
-            snap_name=snap_name,
-            architecture=architecture,
-            from_channel=from_channel,
-            version=version,
-            revision=revision,
-            status="pending",
-            triggered_by=triggered_by,
-            user_id=user_id,
-            repo=resolved_repo,
-        )
-        session.add(run)
-        session.flush()
-        run_id = run.id
-
-    url = f"{_GH_API}/repos/{owner}/{repo}/actions/workflows/snap-test.yml/dispatches"
-    payload = {
-        "ref": ref,
-        "inputs": {
-            "snap_name": snap_name,
-            "from_channel": from_channel,
-            "architecture": architecture,
-            "version": str(version),
-            "revision": str(revision or 0),
-            "dashboard_run_id": str(run_id),
-        },
-    }
-    try:
-        with httpx.Client(timeout=30) as client:
-            resp = client.post(url, json=payload, headers=_gh_headers(github_token))
-
-        if resp.status_code == 204:
-            with get_session() as session:
-                run = session.query(TestRun).get(run_id)
-                if run:
-                    run.status = "triggered"
-            return True, "", run_id
-        else:
-            err = f"GitHub API returned {resp.status_code}: {resp.text[:300]}"
-            with get_session() as session:
-                run = session.query(TestRun).get(run_id)
-                if run:
-                    run.status = "error"
-                    run.error_msg = err
-            return False, err, None
-
-    except httpx.RequestError as exc:
-        err = str(exc)
-        with get_session() as session:
-            run = session.query(TestRun).get(run_id)
-            if run:
-                run.status = "error"
-                run.error_msg = err
-        return False, err, None
-
-
 def trigger_remote_run(
     snap_name: str,
     from_channel: str,
@@ -370,8 +329,7 @@ def trigger_remote_run(
     ``web/routes/runner_api.py``). If ``runner_id`` is None, any idle
     runner belonging to the same user may claim it.
 
-    Returns a ``(success, error_message, db_run_id)`` tuple, mirroring
-    :func:`trigger_workflow`.
+    Returns a ``(success, error_message, db_run_id)`` tuple.
     """
     with get_session() as session:
         if runner_id is not None:
@@ -454,94 +412,6 @@ def queue_yarf_tests_for_bump(
                     run.version_bump_pr_id = version_bump_pr_id
 
     return run_ids, errors
-
-
-def poll_for_gh_run_id(
-    db_run_id: int,
-    triggered_at: datetime,
-    testing_repo: str = "",
-    github_token: str = "",
-) -> None:
-    """Background task: find the GH Actions run for our dispatch then monitor it to completion.
-
-    Phase 1 — find the run ID by polling the Actions API (up to ~3 min).
-    Phase 2 — poll the run's status every 30s until it reaches a terminal
-               state (passed/failed) or 90 minutes elapse.
-
-    Status updates are written directly to the DB so the JS polling picks
-    them up without a manual sync.
-    """
-    if not testing_repo or not github_token:
-        # Fall back to global config
-        from snap_dashboard.config import get_config
-        cfg = get_config()
-        testing_repo = testing_repo or cfg.testing_repo
-        github_token = github_token or cfg.github_token
-
-    if not testing_repo or not github_token:
-        return
-    owner, _, repo = testing_repo.partition("/")
-    if not repo:
-        return
-
-    headers = _gh_headers(github_token)
-
-    # ---- Phase 1: find the run ID ----------------------------------------
-    list_url = f"{_GH_API}/repos/{owner}/{repo}/actions/runs"
-    params = {"event": "workflow_dispatch", "per_page": 20}
-    gh_run_id: str | None = None
-
-    for _attempt in range(9):  # up to ~3 min (9 × 20s)
-        time.sleep(20)
-        try:
-            with httpx.Client(timeout=15) as client:
-                resp = client.get(list_url, params=params, headers=headers)
-            if resp.status_code != 200:
-                continue
-            for run in resp.json().get("workflow_runs", []):
-                if "snap-test" not in run.get("path", ""):
-                    continue
-                created_str = run.get("created_at", "")
-                if not created_str:
-                    continue
-                created = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
-                if created < triggered_at:
-                    continue
-                gh_run_id = str(run["id"])
-                break
-        except Exception as exc:
-            logger.warning("poll_for_gh_run_id phase 1 attempt failed: %s", exc)
-
-        if gh_run_id:
-            with get_session() as session:
-                db_run = session.query(TestRun).get(db_run_id)
-                if db_run:
-                    db_run.gh_run_id = gh_run_id
-                    db_run.status = "running"
-            logger.info("poll_for_gh_run_id: found run %s for TestRun %s", gh_run_id, db_run_id)
-            break
-    else:
-        logger.warning("poll_for_gh_run_id: gave up finding GH run for TestRun %s", db_run_id)
-        return
-
-    # ---- Phase 2: monitor until complete ------------------------------------
-    for _attempt in range(180):  # up to 90 min (180 × 30s)
-        time.sleep(30)
-        new_status = _check_gh_run_status(gh_run_id, owner, repo, github_token)
-        if new_status is None:
-            continue
-        with get_session() as session:
-            db_run = session.query(TestRun).get(db_run_id)
-            if db_run and db_run.status != new_status:
-                db_run.status = new_status
-                if new_status in ("passed", "failed"):
-                    db_run.finished_at = datetime.now(timezone.utc)
-        if new_status in ("passed", "failed"):
-            ingest_run_screenshots(db_run_id, gh_run_id, owner, repo, github_token)
-            if new_status == "passed":
-                submit_test_run_reviewer(db_run_id)
-            logger.info("poll_for_gh_run_id: run %s finished as %s", gh_run_id, new_status)
-            return
 
 
 def ingest_run_screenshots(

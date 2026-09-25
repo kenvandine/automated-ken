@@ -14,15 +14,20 @@ from snap_dashboard.testing.baselines import (
     get_or_build_stable_baseline_assets,
     load_test_run_screenshots,
     pair_screenshots,
-    persist_stable_baseline_for_run,
 )
-from snap_dashboard.testing.promoter import close_test_pr, merge_packaging_pr, promote_snap
+from snap_dashboard.testing.promoter import close_test_pr, merge_packaging_pr
 
 logger = logging.getLogger(__name__)
 
 
 class TestRunAutoPromoterAgent(BaseAgent):
-    """Compare a candidate test run against the stored baseline and promote on approval."""
+    """Review a candidate test run's screenshots; promote its release set once all are approved.
+
+    The review result is always recorded on the run. With auto-promote on,
+    an approved run only triggers promotion when every testable
+    architecture of the same candidate version is approved as well, and
+    then the whole set is released together (see testing/release_set.py).
+    """
 
     agent_type = "test_run_auto_promoter"
 
@@ -158,45 +163,46 @@ class TestRunAutoPromoterAgent(BaseAgent):
             )
             return f"{snap_name}: reviewed and approved, awaiting manual promotion"
 
-        self._report(f"Promoting {snap_name} rev {revision} to stable…", snap_name)
-        ok, output = promote_snap(
-            snap_name, revision, "stable",
-            store_credentials=getattr(uc, "snapcraft_macaroon", "") or "" if uc else "",
-        )
-        if not ok:
-            _set_run_note(self.test_run_id, f"Auto-promote failed: {output[:500]}")
-            return f"{snap_name}: promotion failed"
-
-        baseline_count = persist_stable_baseline_for_run(
+        # Approved. Only promote once every architecture of this candidate
+        # version is approved too, then release them all together — see
+        # testing/release_set.py for why.
+        _set_run_note(
             self.test_run_id,
-            effective_repo,
-            uc.github_token,
+            f"Reviewed and approved (confidence {decision['confidence']:.2f}): {decision['reasoning']}",
         )
-        with get_session() as session:
-            run = session.query(TestRun).get(self.test_run_id)
-            if run:
-                run.status = "promoted"
-                run.promoted = True
-                run.promoted_at = datetime.now(timezone.utc)
-                run.error_msg = None
+        from snap_dashboard.testing.release_set import (
+            READY,
+            candidate_release_set,
+            describe,
+            member_state,
+            promote_release_set,
+        )
 
-            bump = session.query(VersionBumpPR).filter_by(test_run_id=self.test_run_id).first()
-            if bump:
-                bump.status = "stable_promoted"
-                bump.agent_decision = "approve"
-                bump.agent_confidence = decision["confidence"]
-                bump.agent_reasoning = (
-                    f"{decision['reasoning']} Promoted to stable automatically."
-                )
+        with get_session() as session:
+            members = candidate_release_set(session, self.user_id, snap_name, version)
+            states = [(m, member_state(m, auto_threshold=threshold)) for m in members]
+            ready_ids = [m["run"].id for m, st in states if st == READY]
+            waiting = [describe(m, st) for m, st in states if st not in (READY, "promoted")]
+
+        if waiting:
+            _set_run_note(
+                self.test_run_id,
+                f"Reviewed and approved (confidence {decision['confidence']:.2f}): "
+                f"{decision['reasoning']} Waiting on the rest of the release set before "
+                f"promoting: {', '.join(waiting)}.",
+            )
+            return f"{snap_name}: approved, waiting on {', '.join(waiting)}"
+        if not ready_ids:
+            return f"{snap_name}: nothing left to promote"
+
+        arch_list = ", ".join(m["architecture"] for m, st in states if st == READY)
+        self._report(f"Promoting {snap_name} {version} ({arch_list}) to stable…", snap_name)
+        promoted, failures = promote_release_set(self.user_id, snap_name, version, ready_ids, uc)
+        if failures:
+            return f"{snap_name}: promoted {', '.join(promoted) or 'nothing'}; failed: {'; '.join(failures)}"
 
         if pr_number:
-            close_test_pr(
-                effective_repo,
-                pr_number,
-                snap_name,
-                version,
-                uc.github_token,
-            )
+            close_test_pr(effective_repo, pr_number, snap_name, version, uc.github_token)
 
         if uc.auto_merge:
             with get_session() as session:
@@ -208,7 +214,7 @@ class TestRunAutoPromoterAgent(BaseAgent):
                         f"{bump.agent_reasoning or ''} Packaging PR auto-merged."
                     ).strip()
 
-        return f"{snap_name}: promoted to stable ({baseline_count} baseline screenshots stored)"
+        return f"{snap_name}: promoted {version} to stable ({', '.join(promoted)})"
 
 
 def _set_run_note(test_run_id: int, message: str) -> None:

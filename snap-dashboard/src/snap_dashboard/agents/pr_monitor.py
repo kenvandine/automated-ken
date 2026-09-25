@@ -18,8 +18,15 @@ logger = logging.getLogger(__name__)
 
 _GH_API = "https://api.github.com"
 
-# Statuses that mean "still waiting for something"
-_IN_FLIGHT = {"open", "ci_pending", "ci_passed", "yarf_running", "agent_approved"}
+# Final states — nothing left to poll. Every other status is checked each
+# pass, at minimum for "was the PR merged/closed directly on GitHub?", since
+# VersionBumperAgent refuses to open a new bump for a part while an older one
+# is still unresolved (see version_bumper._open_pr_exists).
+_TERMINAL = {"merged", "closed"}
+# A promotion is in flight in a background agent — leave it alone.
+_NO_SYNC = {"promoting"}
+# TestRun statuses that mean the run is finished, one way or another.
+_RUN_DONE = {"passed", "failed", "error", "cancelled"}
 
 
 def _gh_headers(token: str) -> dict[str, str]:
@@ -41,9 +48,10 @@ class PRMonitorAgent(BaseAgent):
     - yarf_*/needs_rv → agent_approved/rejected/needs_review/promoting
                          spawns ScreenshotReviewerAgent
     - agent_approved  → merged           when UserConfig.auto_merge is True
+    - ci_failed       → ci_passed        if a later push makes CI green
 
-    Also syncs PRs that were closed or merged directly on GitHub so the DB
-    never gets stuck in a stale state.
+    Also syncs PRs that were closed or merged directly on GitHub, in any
+    non-final state, so the DB never gets stuck in a stale state.
     """
 
     agent_type = "pr_monitor"
@@ -53,7 +61,7 @@ class PRMonitorAgent(BaseAgent):
 
     def _run(self) -> str:
         with get_session() as session:
-            q = session.query(VersionBumpPR).filter(VersionBumpPR.status.in_(_IN_FLIGHT))
+            q = session.query(VersionBumpPR).filter(VersionBumpPR.status.notin_(_TERMINAL))
             if self.user_id:
                 q = q.filter_by(user_id=self.user_id)
             prs = [
@@ -101,15 +109,18 @@ class PRMonitorAgent(BaseAgent):
             return False
         owner, repo = owner_repo
 
+        if status in _NO_SYNC:
+            return False
+        # Always check whether the PR was closed/merged on GitHub first.
+        if self._check_pr_closed(pr, owner, repo, token):
+            return True
+
         if status == "open":
-            # Always check whether the PR was closed/merged on GitHub first.
-            if self._check_pr_closed(pr, owner, repo, token):
-                return True
             return self._check_ci_start(pr, owner, repo, token)
         if status == "ci_pending":
-            if self._check_pr_closed(pr, owner, repo, token):
-                return True
             return self._check_ci_complete(pr, owner, repo, token, uc)
+        if status == "ci_failed":
+            return self._check_ci_recovered(pr, owner, repo, token)
         if status == "ci_passed":
             return self._trigger_yarf(pr, uc)
         if status == "yarf_running":
@@ -173,6 +184,20 @@ class PRMonitorAgent(BaseAgent):
             _update_pr_status(pr["id"], "ci_failed")
             self._maybe_dispatch_ci_fix(pr, owner, repo, uc, runs)
         return True
+
+    def _check_ci_recovered(self, pr: dict, owner: str, repo: str, token: str) -> bool:
+        """ci_failed → ci_passed once a later push (e.g. a CI-fix commit) goes green.
+
+        Deliberately never re-dispatches a CI-fix task here — that happens
+        once, on the original ci_pending → ci_failed transition.
+        """
+        runs = _get_pr_check_runs(owner, repo, pr["bot_pr_number"], token)
+        if not runs or any(r.get("status") != "completed" for r in runs):
+            return False
+        if all(r.get("conclusion") == "success" for r in runs):
+            _update_pr_status(pr["id"], "ci_passed")
+            return True
+        return False
 
     def _maybe_dispatch_ci_fix(self, pr: dict, owner: str, repo: str, uc, runs: list[dict]) -> None:
         """ci_failed → dispatch the configured coding backend to open a fix PR.
@@ -279,29 +304,31 @@ class PRMonitorAgent(BaseAgent):
             if bump:
                 bump.status = "yarf_running"
                 bump.test_run_id = run_ids[0]  # representative run for legacy single-run displays
-        self._report(f"Queued YARF test for {snap_name} {pr['new_version']} ({archs})", snap_name)
+        self._report(
+            f"Queued YARF test for {snap_name} {pr['new_version']} ({archs})", snap_name, pr["user_id"]
+        )
         return True
 
     def _check_yarf(self, pr: dict) -> bool:
-        """yarf_running → yarf_passed/yarf_failed once every architecture's run finishes."""
+        """yarf_running → yarf_passed/yarf_failed once every architecture's run finishes.
+
+        An errored or cancelled run counts as finished-and-failed, so one
+        broken architecture can't leave the whole bump waiting forever.
+        """
+        from snap_dashboard.testing.orchestrator import latest_bump_runs
+
         with get_session() as session:
-            runs = session.query(TestRun).filter_by(version_bump_pr_id=pr["id"]).all()
-            if not runs:
-                # Pre-migration PR with no sibling rows recorded — fall back
-                # to the single representative run.
-                if not pr["test_run_id"]:
-                    return False
-                run = session.query(TestRun).get(pr["test_run_id"])
-                runs = [run] if run else []
+            runs = latest_bump_runs(session, pr["id"], pr["test_run_id"])
             if not runs:
                 return False
-            if not all(r.status in ("passed", "failed") for r in runs):
+            if not all(r.status in _RUN_DONE for r in runs):
                 return False  # still waiting on at least one architecture
             new_status = "yarf_passed" if all(r.status == "passed" for r in runs) else "yarf_failed"
+            run_ids = [r.id for r in runs]
             _update_pr_status(pr["id"], new_status)
 
         # Spawn one screenshot reviewer per architecture's run.
-        self._spawn_reviewer(pr, [r.id for r in runs])
+        self._spawn_reviewer(pr, run_ids)
         return True
 
     def _check_auto_merge(self, pr: dict, uc, owner: str, repo: str, token: str) -> bool:
@@ -321,6 +348,7 @@ class PRMonitorAgent(BaseAgent):
         self._report(
             f"Auto-merging {snap_name} {pr['new_version']} (agent approved)…",
             snap_name,
+            pr["user_id"],
         )
 
         from snap_dashboard.testing.promoter import merge_packaging_pr

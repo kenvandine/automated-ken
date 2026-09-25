@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Request
+from sqlalchemy import func
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
@@ -63,7 +64,7 @@ async def login(request: Request) -> HTMLResponse:
 
 
 @router.get("/auth/callback")
-async def oauth_callback(request: Request) -> HTMLResponse:
+def oauth_callback(request: Request) -> HTMLResponse:
     """Handle GitHub OAuth callback."""
     code = request.query_params.get("code")
     state = request.query_params.get("state")
@@ -146,7 +147,13 @@ async def oauth_callback(request: Request) -> HTMLResponse:
 
         # Check allowlist (skip for first user)
         if not is_first_user:
-            allowed = session.query(AllowlistedUser).filter_by(github_login=github_login).first()
+            # GitHub logins are case-insensitive; the admin page stores
+            # entries lowercased, but GitHub returns the account's own casing.
+            allowed = (
+                session.query(AllowlistedUser)
+                .filter(func.lower(AllowlistedUser.github_login) == github_login.lower())
+                .first()
+            )
             if not allowed:
                 return templates.TemplateResponse(
                     request,

@@ -56,6 +56,7 @@ def get_user_config(user_id: int) -> "UserConfigView":
                 testing_repo=uc.testing_repo or "",
                 snapcraft_macaroon=uc.snapcraft_macaroon or "",
                 auto_test=uc.auto_test,
+                runner_job_timeout_minutes=uc.runner_job_timeout_minutes or 10,
                 collect_interval_hours=uc.collect_interval_hours,
                 lemonade_server_url=uc.lemonade_server_url or "",
                 lemonade_model=uc.lemonade_model or "",
@@ -90,6 +91,7 @@ class UserConfigView:
         testing_repo: str = "",
         snapcraft_macaroon: str = "",
         auto_test: bool = False,
+        runner_job_timeout_minutes: int = 10,
         collect_interval_hours: int = 6,
         lemonade_server_url: str = "",
         lemonade_model: str = "",
@@ -116,6 +118,7 @@ class UserConfigView:
         self.testing_repo = testing_repo
         self.snapcraft_macaroon = snapcraft_macaroon
         self.auto_test = auto_test
+        self.runner_job_timeout_minutes = runner_job_timeout_minutes
         self.collect_interval_hours = collect_interval_hours
         self.lemonade_server_url = lemonade_server_url
         self.lemonade_model = lemonade_model

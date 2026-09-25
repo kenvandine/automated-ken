@@ -44,28 +44,49 @@
 {% endif %}
 
 <!-- ================================================================
-     PROMOTE TO STABLE
+     RELEASE SET — every architecture of this candidate version,
+     promoted to stable together (see testing/release_set.py)
      ================================================================ -->
-{% if run.status == 'passed' and not run.promoted and run.revision %}
-<div class="card" style="border-left: 3px solid #4ade80;">
-  <h3 class="section-label" style="color: #4ade80;">Promote to Stable</h3>
-  <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 14px;">
-    All tests passed for <strong>{{ run.snap_name }}</strong> {{ run.version }}.
-    Click below to run <code>snapcraft release {{ run.snap_name }} {{ run.revision }} stable</code>.
+{% if release_set %}
+{% set ready = release_set | selectattr('state', 'equalto', 'ready') | map(attribute='architecture') | list %}
+{% set blocked = release_set | rejectattr('state', 'in', ['ready', 'promoted']) | list %}
+<div class="card">
+  <h3 class="section-label">Release set — {{ run.snap_name }} {{ run.version }}</h3>
+  <p class="text-muted small" style="margin-bottom: 12px;">
+    Each architecture is tested on its own runner; the set is promoted to stable together.
   </p>
-  <form method="post" action="/testing/promote/{{ run.snap_name }}">
-    <input type="hidden" name="run_id" value="{{ run.id }}">
-    <input type="hidden" name="pr_number" value="{{ run.pr_number or 0 }}">
-    <input type="hidden" name="revision" value="{{ run.revision }}">
-    <input type="hidden" name="to_channel" value="stable">
-    <button
-      type="submit"
-      class="p-button--positive"
-      onclick="return confirm('Promote {{ run.snap_name }} rev {{ run.revision }} to stable?')"
-    >
-      Promote {{ run.snap_name }} to Stable
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
+    {% for m in release_set %}
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 14px;border:1px solid var(--border);border-radius:8px;">
+      <span class="arch-badge
+        {% if m.state in ('ready', 'promoted') %}arch-badge--ok
+        {% elif m.state in ('failed', 'error', 'cancelled') %}arch-badge--fail
+        {% else %}arch-badge--pending{% endif %}
+      ">{{ m.architecture }}</span>
+      <span class="text-muted small">{{ m.state }}</span>
+      {% if m.revision %}<span class="text-muted small">rev {{ m.revision }}</span>{% endif %}
+      {% if m.run_id and m.run_id != run.id %}<a href="/testing/runs/{{ m.run_id }}" class="link-inline small">view ↗</a>{% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% if ready %}
+  {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
+  <form method="post" action="/testing/promote-set/{{ run.snap_name }}"
+        onsubmit="return confirm(
+          {% if blocked %}
+          'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
+          {% else %}
+          'Promote {{ run.snap_name }} {{ run.version }} to stable for {{ ready | join(', ') }}?'
+          {% endif %}
+        )">
+    <input type="hidden" name="version" value="{{ run.version }}">
+    <input type="hidden" name="return_to" value="/testing/runs/{{ run.id }}">
+    {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}
+    <button type="submit" class="{% if blocked %}p-button{% else %}p-button--positive{% endif %}">
+      {% if blocked %}⚠ Promote (Override — skip {{ blocked_names }}){% else %}🚀 Promote set to Stable{% endif %}
     </button>
   </form>
+  {% endif %}
 </div>
 {% endif %}
 

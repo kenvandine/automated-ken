@@ -46,10 +46,10 @@ def isolated_session(monkeypatch):
 
 
 class _FakeTracker:
-    def get_active(self):
+    def get_active(self, _user_id=None):
         return {}
 
-    def get_log_since(self, _seq):
+    def get_log_since(self, _seq, _user_id=None):
         return []
 
     def latest_seq(self):
@@ -102,7 +102,7 @@ async def test_pipeline_counts_standalone_test_runs(monkeypatch, isolated_sessio
     monkeypatch.setattr("snap_dashboard.agents.runner.get_runner", lambda: _FakeRunner())
     monkeypatch.setattr("snap_dashboard.agents.runner.get_tracker", lambda: _FakeTracker())
 
-    response = await agents_module.agent_status(_FakeRequest(user_id))
+    response = agents_module.agent_status(_FakeRequest(user_id))
     body = response.body.decode()
     data = json.loads(body)
     pipeline = data["pipeline"]

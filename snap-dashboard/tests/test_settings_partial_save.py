@@ -84,6 +84,7 @@ async def _post(user_id: int, **fields):
         snapcraft_macaroon="",
         interval=6,
         auto_test="",
+        runner_job_timeout_minutes=10,
         lemonade_server_url="",
         lemonade_model="",
         lemonade_backend="embedded",

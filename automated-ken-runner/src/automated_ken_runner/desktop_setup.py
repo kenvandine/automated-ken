@@ -126,7 +126,7 @@ def enable_autologin(echo: Callable[[str], None] | None = None) -> bool:
         return False
     text = read.stdout.decode(errors="replace")
 
-    if f"AutomaticLoginEnable=True" in text and f"AutomaticLogin={username}" in text:
+    if "AutomaticLoginEnable=True" in text and f"AutomaticLogin={username}" in text:
         _say(echo, f"  autologin already enabled for {username}")
         return False
 
@@ -142,7 +142,7 @@ def enable_autologin(echo: Callable[[str], None] | None = None) -> bool:
         out_lines.append(line)
         if stripped == "[daemon]":
             daemon_idx = len(out_lines) - 1
-    insertion = [f"AutomaticLoginEnable=True", f"AutomaticLogin={username}"]
+    insertion = ["AutomaticLoginEnable=True", f"AutomaticLogin={username}"]
     if daemon_idx is None:
         out_lines = ["[daemon]", *insertion, *out_lines]
     else:

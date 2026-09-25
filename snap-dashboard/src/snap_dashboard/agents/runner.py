@@ -24,20 +24,36 @@ class ActivityTracker:
     Agents call ``set_active`` / ``clear_active`` to broadcast what they are
     doing right now.  The SSE endpoint reads ``get_log_since`` to push updates
     to connected browsers without touching the database.
+
+    Entries are keyed per agent *instance* (several agents of one type can
+    run at once — e.g. one screenshot reviewer per architecture, or one
+    release scan per user — and one finishing mustn't clear the others) and
+    tagged with the user they belong to, so each user only sees their own
+    agents' activity. Entries with no user (global agents like the PR
+    monitor's "polling N PRs") are visible to everyone.
     """
 
     def __init__(self, maxlen: int = 200) -> None:
         self._lock = threading.Lock()
-        # agent_type → {task, snap_name, started_at (monotonic)}
-        self._active: dict[str, dict] = {}
+        # key → {agent_type, task, snap_name, user_id, started_at (monotonic)}
+        self._active: dict[object, dict] = {}
         self._log: deque = deque(maxlen=maxlen)
         self._seq = 0  # monotonically increasing, used as SSE cursor
 
-    def set_active(self, agent_type: str, task: str, snap_name: str = "") -> None:
+    def set_active(
+        self,
+        key: object,
+        agent_type: str,
+        task: str,
+        snap_name: str = "",
+        user_id: int | None = None,
+    ) -> None:
         with self._lock:
-            self._active[agent_type] = {
+            self._active[key] = {
+                "agent_type": agent_type,
                 "task": task,
                 "snap_name": snap_name,
+                "user_id": user_id,
                 "started_at": time.monotonic(),
             }
             self._seq += 1
@@ -47,23 +63,42 @@ class ActivityTracker:
                 "agent_type": agent_type,
                 "message": task,
                 "snap_name": snap_name,
+                "user_id": user_id,
             })
 
-    def clear_active(self, agent_type: str) -> None:
+    def clear_active(self, key: object) -> None:
         with self._lock:
-            self._active.pop(agent_type, None)
+            self._active.pop(key, None)
 
-    def get_active(self) -> dict:
-        with self._lock:
-            return dict(self._active)
+    def get_active(self, user_id: int | None = None) -> dict:
+        """Return ``{agent_type: {task, snap_name, started_at}}`` visible to *user_id*.
 
-    def get_log_since(self, seq: int) -> list[dict]:
+        With several instances of one type active, the most recently
+        updated one wins. ``user_id=None`` returns everything.
+        """
         with self._lock:
-            return [e for e in self._log if e["seq"] > seq]
+            entries = sorted(self._active.values(), key=lambda e: e["started_at"])
+        result: dict[str, dict] = {}
+        for e in entries:
+            if _visible(e, user_id):
+                result[e["agent_type"]] = {
+                    "task": e["task"],
+                    "snap_name": e["snap_name"],
+                    "started_at": e["started_at"],
+                }
+        return result
+
+    def get_log_since(self, seq: int, user_id: int | None = None) -> list[dict]:
+        with self._lock:
+            return [e for e in self._log if e["seq"] > seq and _visible(e, user_id)]
 
     def latest_seq(self) -> int:
         with self._lock:
             return self._seq
+
+
+def _visible(entry: dict, user_id: int | None) -> bool:
+    return user_id is None or entry.get("user_id") in (None, user_id)
 
 
 # Module-level tracker shared across all agents

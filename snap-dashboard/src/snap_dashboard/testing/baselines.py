@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 
@@ -216,9 +217,12 @@ def pair_screenshots(
     return []
 
 
+_GITHUB_HOSTS = {"github.com", "api.github.com", "raw.githubusercontent.com"}
+
+
 def _download_image(url: str, token: str = "") -> bytes | None:
     headers: dict[str, str] = {}
-    if token and "github.com" in url:
+    if token and urlparse(url).hostname in _GITHUB_HOSTS:
         headers["Authorization"] = f"Bearer {token}"
     try:
         with httpx.Client(timeout=30, follow_redirects=True) as client:

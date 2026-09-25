@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import ScreenshotComparison, TestRun, VersionBumpPR
+from snap_dashboard.db.models import ScreenshotComparison, VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_owner_repo
 
@@ -134,7 +134,7 @@ async def version_bump_detail(bump_id: int, request: Request) -> HTMLResponse:
 
 
 @router.post("/version-bumps/{bump_id}/merge")
-async def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
+def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
     """Merge the bot PR using the user's primary GitHub token."""
     user = get_current_user(request)
     if user is None:
@@ -175,7 +175,7 @@ async def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
 
 
 @router.post("/version-bumps/{bump_id}/reject")
-async def reject_bump(bump_id: int, request: Request) -> RedirectResponse:
+def reject_bump(bump_id: int, request: Request) -> RedirectResponse:
     """Close the bot PR and mark as rejected."""
     user = get_current_user(request)
     if user is None:
@@ -291,16 +291,14 @@ async def promote_bump(
 
     is_override = bool(override)
 
-    from snap_dashboard.testing.orchestrator import resolve_channel_map_revision
+    from snap_dashboard.testing.orchestrator import latest_bump_runs, resolve_channel_map_revision
 
     with get_session() as session:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump:
             return RedirectResponse(url="/version-bumps", status_code=302)
 
-        sibling_runs = session.query(TestRun).filter_by(version_bump_pr_id=bump_id).all()
-        if not sibling_runs and bump.test_run:
-            sibling_runs = [bump.test_run]
+        sibling_runs = latest_bump_runs(session, bump_id, bump.test_run_id)
 
         ready_ids: list[int] = []
         skipped: list[str] = []
@@ -366,13 +364,10 @@ def _serialise_bump(session, b: VersionBumpPR) -> dict:
     # One row per architecture (see agents/pr_monitor.py:_trigger_yarf /
     # orchestrator.queue_yarf_tests_for_bump) so the whole release set —
     # amd64, arm64, ... — displays and gets acted on together instead of
-    # as disconnected individual runs. Pre-migration bumps with no sibling
-    # rows recorded fall back to the single representative test_run.
-    sibling_runs = (
-        session.query(TestRun).filter_by(version_bump_pr_id=b.id).order_by(TestRun.architecture).all()
-    )
-    if not sibling_runs and b.test_run:
-        sibling_runs = [b.test_run]
+    # as disconnected individual runs.
+    from snap_dashboard.testing.orchestrator import latest_bump_runs
+
+    sibling_runs = latest_bump_runs(session, b.id, b.test_run_id)
     architectures = [
         {
             "architecture": r.architecture or "amd64",

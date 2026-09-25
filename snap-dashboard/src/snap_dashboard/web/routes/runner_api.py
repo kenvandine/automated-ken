@@ -20,7 +20,7 @@ import zipfile
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, Request, UploadFile
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import Runner, Snap, TestRun, TestRunScreenshot
@@ -201,15 +201,18 @@ async def next_job(
 def _try_claim_job(runner_id: int) -> dict | None:
     """Atomically claim the highest-priority queued job this runner can actually run.
 
-    A job explicitly pre-assigned to this runner (``TestRun.runner_id``,
-    set by an operator picking a specific machine from the dashboard) is
-    always eligible — that's a deliberate human override. An unassigned job
-    is only eligible if its target architecture matches this runner's
-    reported arch (see ``Runner.arch`` / ``automated_ken_runner.arch``), so
-    e.g. an arm64 job never gets picked up by an amd64 runner and vice
-    versa. A job with no recorded architecture, or a runner with no
-    reported arch yet, is treated as "amd64" for matching purposes — the
-    long-standing default before per-arch dispatch existed.
+    Only jobs belonging to the runner's own user are ever eligible — a
+    runner fetches the job's suite with its owner's GitHub token, so it
+    must never pick up someone else's work. A job explicitly pre-assigned
+    to this runner (``TestRun.runner_id``, set by an operator picking a
+    specific machine from the dashboard) is always eligible — that's a
+    deliberate human override. An unassigned job is only eligible if its
+    target architecture matches this runner's reported arch (see
+    ``Runner.arch`` / ``automated_ken_runner.arch``), so e.g. an arm64 job
+    never gets picked up by an amd64 runner and vice versa. A job with no
+    recorded architecture, or a runner with no reported arch yet, is
+    treated as "amd64" for matching purposes — the long-standing default
+    before per-arch dispatch existed.
     """
     with get_session() as session:
         runner = session.query(Runner).get(runner_id)
@@ -221,7 +224,7 @@ def _try_claim_job(runner_id: int) -> dict | None:
         runner_arch = (runner.arch or "amd64").strip().lower()
         candidates = (
             session.query(TestRun)
-            .filter_by(dispatch_target="remote_runner", status="pending")
+            .filter_by(dispatch_target="remote_runner", status="pending", user_id=runner.user_id)
             .filter((TestRun.runner_id == runner_id) | (TestRun.runner_id.is_(None)))
             .order_by(TestRun.priority.desc(), TestRun.started_at.asc())
             .all()
@@ -239,6 +242,11 @@ def _try_claim_job(runner_id: int) -> dict | None:
 
         candidate.status = "triggered"
         candidate.runner_id = runner_id
+        # started_at doubles as the queue timestamp while pending; reset it
+        # at claim time so the watchdog's timeout (agents/runner_watchdog.py)
+        # measures actual run time, not how long the job waited for a
+        # runner of the right architecture to come free.
+        candidate.started_at = datetime.now(timezone.utc)
         runner.current_test_run_id = candidate.id
         runner.status = "busy"
         session.flush()
@@ -256,7 +264,7 @@ def _try_claim_job(runner_id: int) -> dict | None:
 
 
 @router.get("/{runner_id}/jobs/{job_id}/suite")
-async def job_suite(
+def job_suite(
     runner_id: int, job_id: int, authorization: str | None = Header(default=None)
 ) -> Response:
     result = _auth_or_401(authorization, runner_id)

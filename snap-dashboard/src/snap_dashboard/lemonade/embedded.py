@@ -34,7 +34,7 @@ from pathlib import Path
 import httpx
 
 from snap_dashboard.config import get_config, save_config
-from snap_dashboard.lemonade.models import TASK_CONTEXT_SIZES, TASK_MODELS, TASK_TEXT, default_context_for
+from snap_dashboard.lemonade.models import TASK_CONTEXT_SIZES, TASK_MODELS, TASK_TEXT
 
 logger = logging.getLogger(__name__)
 

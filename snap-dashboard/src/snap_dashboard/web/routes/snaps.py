@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from html import escape
+from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -54,18 +55,25 @@ async def snap_add_get(request: Request) -> HTMLResponse:
 
 
 @router.post("/snaps/search", response_class=HTMLResponse)
-async def snap_search(
+def snap_search(
     request: Request,
     snap_name: str = Form(...),
 ) -> HTMLResponse:
-    """Search Snap Store for a snap and return an HTML fragment for HTMX swap."""
+    """Search Snap Store for a snap and return an HTML fragment for HTMX swap.
+
+    Everything interpolated below is escaped: the snap name is user input,
+    and the publisher/repo values come from third-party Store metadata.
+    """
+    if get_current_user(request) is None:
+        return HTMLResponse(content="", status_code=401)
+
     snap_name = snap_name.strip().lower()
     info = get_snap_info(snap_name)
 
     if not info:
         html = (
             '<div id="search-results" class="search-result not-found">'
-            f'<p class="error-msg">Snap <strong>{snap_name}</strong> not found in the store.</p>'
+            f'<p class="error-msg">Snap <strong>{escape(snap_name)}</strong> not found in the store.</p>'
             "</div>"
         )
         return HTMLResponse(content=html)
@@ -75,8 +83,9 @@ async def snap_search(
     publisher = publisher_info.get("username", "") if isinstance(publisher_info, dict) else ""
 
     repos = extract_repo_urls(info)
-    packaging_repo = repos.get("packaging_repo") or ""
-    upstream_repo = repos.get("upstream_repo") or ""
+    publisher = escape(publisher)
+    packaging_repo = escape(repos.get("packaging_repo") or "")
+    upstream_repo = escape(repos.get("upstream_repo") or "")
 
     html = f"""<div id="search-results" class="search-result found">
   <div class="result-badge">Found in Snap Store</div>
@@ -137,7 +146,7 @@ async def snap_add_post(
 
 
 @router.get("/snap/{name}", response_class=HTMLResponse)
-async def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) -> HTMLResponse:
+def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) -> HTMLResponse:
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)

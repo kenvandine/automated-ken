@@ -63,19 +63,20 @@
 
 <div class="card">
   <h3 class="section-label">Queue</h3>
-  <p class="text-muted small">Pending and in-flight remote-runner jobs. Reorder with the arrows or kick out a stuck job.</p>
+  <p class="text-muted small">Pending and in-flight remote-runner jobs. Each job is only picked up by a runner of the same architecture. Reorder with the arrows or kick out a stuck job.</p>
   {% if not queue %}
   <p class="text-muted">Queue is empty.</p>
   {% else %}
   <div class="table-wrapper">
   <table class="snap-table">
     <thead>
-      <tr><th>Snap</th><th>Status</th><th>Runner</th><th>Priority</th><th>Queued at</th><th></th></tr>
+      <tr><th>Snap</th><th>Arch</th><th>Status</th><th>Runner</th><th>Priority</th><th>Queued / started</th><th></th></tr>
     </thead>
     <tbody>
       {% for j in queue %}
       <tr>
-        <td>{{ j.snap_name }}</td>
+        <td><a href="/testing/runs/{{ j.id }}" class="snap-link">{{ j.snap_name }}</a> <span class="text-muted small">{{ j.version }}</span></td>
+        <td><span class="arch-badge arch-badge--pending">{{ j.architecture }}</span></td>
         <td><span class="p-status-label {{ 'p-status-label--positive' if j.status == 'passed' else 'p-status-label--negative' if j.status in ('failed','error','cancelled') else 'p-status-label--caution' }}">{{ j.status }}{% if j.cancel_requested %} (cancelling…){% endif %}</span></td>
         <td>{{ j.runner_id or 'any' }}</td>
         <td>
@@ -110,11 +111,12 @@
   {% else %}
   <div class="table-wrapper">
   <table class="snap-table">
-    <thead><tr><th>Snap</th><th>Status</th><th>Runner</th><th>Started</th><th>Duration</th></tr></thead>
+    <thead><tr><th>Snap</th><th>Arch</th><th>Status</th><th>Runner</th><th>Started</th><th>Duration</th></tr></thead>
     <tbody>
       {% for r in recent %}
       <tr>
-        <td>{{ r.snap_name }}</td>
+        <td><a href="/testing/runs/{{ r.id }}" class="snap-link">{{ r.snap_name }}</a> <span class="text-muted small">{{ r.version }}</span></td>
+        <td><span class="arch-badge arch-badge--pending">{{ r.architecture }}</span></td>
         <td><span class="p-status-label {{ 'p-status-label--positive' if r.status in ('passed','promoted') else 'p-status-label--negative' if r.status in ('failed','error','cancelled') else 'p-status-label--caution' }}">{{ r.status }}</span></td>
         <td>{{ r.runner_id or '—' }}</td>
         <td>{{ r.started_at }}</td>

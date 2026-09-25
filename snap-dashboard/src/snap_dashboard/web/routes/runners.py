@@ -64,6 +64,8 @@ async def runners_page(request: Request) -> HTMLResponse:
             {
                 "id": j.id,
                 "snap_name": j.snap_name,
+                "architecture": j.architecture or "amd64",
+                "version": j.version or "",
                 "status": j.status,
                 "runner_id": j.runner_id,
                 "priority": j.priority,
@@ -84,6 +86,8 @@ async def runners_page(request: Request) -> HTMLResponse:
             {
                 "id": r.id,
                 "snap_name": r.snap_name,
+                "architecture": r.architecture or "amd64",
+                "version": r.version or "",
                 "status": r.status,
                 "runner_id": r.runner_id,
                 "started_at": r.started_at.strftime("%Y-%m-%d %H:%M") if r.started_at else "",

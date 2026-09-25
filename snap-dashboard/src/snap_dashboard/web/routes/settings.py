@@ -79,6 +79,7 @@ async def settings_post(
     snapcraft_macaroon: str = Form(default=""),
     interval: int = Form(default=6),
     auto_test: str = Form(default=""),
+    runner_job_timeout_minutes: int = Form(default=10),
     lemonade_server_url: str = Form(default=""),
     lemonade_model: str = Form(default=""),
     lemonade_backend: str = Form(default="embedded"),
@@ -151,6 +152,7 @@ async def settings_post(
 
         if "testing" in sections_to_apply:
             uc.auto_test = _auto_test
+            uc.runner_job_timeout_minutes = max(1, min(240, runner_job_timeout_minutes))
 
         if "agents_ai" in sections_to_apply:
             if lemonade_server_url.strip():

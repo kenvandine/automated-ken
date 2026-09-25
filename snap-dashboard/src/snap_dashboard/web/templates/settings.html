@@ -118,12 +118,11 @@
     <input type="hidden" name="section" value="testing">
     <div class="form-row">
       <span class="form-hint">
-        YARF test suites now live colocated with each snap's packaging repo, under
-        <code>tests/suite/</code>, alongside a <code>.github/workflows/snap-test.yml</code>
-        workflow. Tests are triggered automatically against each snap's own
-        packaging repository — no central testing repository needs to be configured.
-        Snaps not yet migrated to a colocated suite fall back to the legacy shared
-        <code>kenvandine/automated-ken-tests</code> repo automatically.
+        Tests run on your enrolled <a href="/runners" class="link-inline">remote runners</a> —
+        real amd64 and arm64 machines that install the snap from the Store and run it on a
+        real desktop. If a snap's packaging repo has a YARF suite at
+        <code>tests/suite/__init__.robot</code> the runner uses it; otherwise it runs a
+        generic launch-and-screenshot smoke test. Only amd64 and arm64 are tested.
       </span>
     </div>
 
@@ -139,27 +138,27 @@
         Enable automatic testing
       </label>
       <span class="form-hint">
-        Automatically trigger tests when a newer version is detected in candidate/beta/edge.
+        After each channel-map refresh, queue a test (one per architecture) for any new
+        candidate or edge version that hasn't been tested yet. Version-bump PRs are always
+        tested regardless of this setting.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label" for="runner_job_timeout_minutes">Runner job timeout (minutes)</label>
+      <input type="number" id="runner_job_timeout_minutes" name="runner_job_timeout_minutes"
+             class="form-input" style="max-width: 120px;" min="1" max="240"
+             value="{{ config.runner_job_timeout_minutes }}">
+      <span class="form-hint">
+        A job that has been running this long without finishing is marked failed and its
+        runner freed. Measured from when a runner picks the job up, not from when it was queued.
       </span>
     </div>
 
     <div class="form-actions">
-      <a href="/testing/workflow-template" class="p-button is-small" download="snap-test.yml">
-        Download Workflow Template
-      </a>
       <button type="submit" class="p-button--positive">Save Testing Config</button>
     </div>
   </form>
-
-  <div class="setup-instructions" style="margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border);">
-    <h4 style="font-size: 13px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 10px;">Setup Instructions (per snap)</h4>
-    <ol style="font-size: 13px; color: var(--text-muted); line-height: 2; padding-left: 18px;">
-      <li>Add the workflow template above to the snap's packaging repo at <code>.github/workflows/snap-test.yml</code>.</li>
-      <li>Add a repository secret named <code>SNAP_DASHBOARD_GITHUB_TOKEN</code> with a token that has <code>repo</code> scope.</li>
-      <li>Create YARF test suites under <code>tests/suite/__init__.robot</code> in that same repo.</li>
-      <li>Enable "automatic testing" above and save — the dashboard will detect and use the colocated suite automatically.</li>
-    </ol>
-  </div>
 </div>
 
 <!-- Agents & AI -->
