@@ -231,6 +231,23 @@ class BotGitHubClient:
         except Exception:
             return False
 
+    def get_pr_head_branch(self, owner: str, repo: str, pr_number: int) -> str | None:
+        """Return a PR's head branch name, or None.
+
+        Used when a coding agent (see ``agents/coding_backend.py``) opens a
+        PR on its own auto-generated branch — we only learn the branch name
+        after the fact, purely for display purposes.
+        """
+        url = f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}"
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(url, headers=_headers(self.token))
+            if resp.status_code == 200:
+                return resp.json().get("head", {}).get("ref")
+        except Exception:
+            pass
+        return None
+
 
 # ---------------------------------------------------------------------------
 # snapcraft.yaml patching

@@ -118,6 +118,31 @@ def extract_pr_url(remote: dict) -> str | None:
     return None
 
 
+def extract_pr_number(remote: dict) -> int | None:
+    """Best-effort PR number extraction from a coding-backend task result.
+
+    Handles the local Lemonade backend's own ``{"number": ...}`` shape, a
+    nested ``pull_request`` dict (either shape), and falls back to parsing
+    the trailing digits off a ``.../pull/123`` URL when nothing else works.
+    """
+    val = remote.get("number")
+    if isinstance(val, int):
+        return val
+    pr = remote.get("pull_request")
+    if isinstance(pr, dict):
+        num = pr.get("number")
+        if isinstance(num, int):
+            return num
+    url = extract_pr_url(remote)
+    if url:
+        import re
+
+        m = re.search(r"/pull/(\d+)/?$", url)
+        if m:
+            return int(m.group(1))
+    return None
+
+
 def task_result_fields(task: dict | None) -> dict:
     """Turn a ``CodingDispatcher.start_task()`` result into ``CopilotTask`` kwargs.
 

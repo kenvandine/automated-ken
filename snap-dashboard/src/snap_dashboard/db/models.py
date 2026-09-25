@@ -524,11 +524,18 @@ class VersionBumpPR(Base):
     branch_name = Column(String(255), nullable=True)
     old_version = Column(String(128), nullable=True)
     new_version = Column(String(128), nullable=True)
-    # open | ci_pending | ci_passed | ci_failed | yarf_running | yarf_passed |
-    # yarf_failed | agent_approved | agent_rejected | needs_review | merged |
-    # closed | awaiting_release | candidate_testing | stable_promoted |
-    # stable_promoted_partial (manual override) — see agents/pr_monitor.py
+    # dispatched | open | ci_pending | ci_passed | ci_failed | yarf_running |
+    # yarf_passed | yarf_failed | agent_approved | agent_rejected |
+    # needs_review | merged | closed | awaiting_release | candidate_testing |
+    # stable_promoted | stable_promoted_partial (manual override)
+    # — see agents/pr_monitor.py. "dispatched" is the initial state when the
+    # version bump was delegated to an async coding backend (GitHub Copilot
+    # cloud agent) and no PR exists yet; pr_monitor.py polls it and advances
+    # to "open" once the agent's PR appears (or "closed" if it never does).
     status = Column(String(64), nullable=False, default="open")
+    # GitHub Copilot cloud agent's task id, set only while status=="dispatched"
+    # — see coding_backend.get_coding_dispatcher()/CopilotAgentClient.
+    external_task_id = Column(String(128), nullable=True)
     test_run_id = Column(
         Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
     )

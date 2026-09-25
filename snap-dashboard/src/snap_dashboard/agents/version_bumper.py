@@ -1,4 +1,22 @@
-"""Version bumper agent — opens a version-bump PR using the bot account."""
+"""Version bumper agent — delegates a version-bump PR to a coding agent.
+
+Patching ``snapcraft.yaml`` used to be a hand-rolled, line-by-line regex
+patch (see ``github.bot_client.patch_snapcraft_yaml``). That's fragile: it
+only recognizes one exact ``source-tag:`` indentation/quoting shape, silently
+does nothing for repos that pin the version a different way (a top-level
+``version:`` only, a version baked into the source URL itself, an
+``override-pull``/``override-build`` script, environment substitution,
+etc.) — every one of those "no source-tag found to patch" skips is a snap
+that silently never gets updated.
+
+So bumping the version is now delegated to whichever "capable coding"
+backend is configured (see ``agents/coding_backend.py`` — GitHub Copilot
+cloud agent by default, or a local Lemonade coding model): it can actually
+read the whole packaging repo, figure out how the version is pinned no
+matter the shape, patch it correctly, and open the PR itself. The old
+regex patch only remains as a last-resort fallback for the (increasingly
+rare) case where no coding backend is configured/available at all.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +24,12 @@ import logging
 from datetime import datetime, timezone
 
 from snap_dashboard.agents.base import BaseAgent
+from snap_dashboard.agents.coding_backend import (
+    extract_pr_number,
+    extract_pr_url,
+    get_coding_dispatcher,
+    task_result_fields,
+)
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import UpstreamRelease, VersionBumpPR
 from snap_dashboard.db.session import get_session
@@ -20,11 +44,7 @@ logger = logging.getLogger(__name__)
 
 
 class VersionBumperAgent(BaseAgent):
-    """Creates a branch and PR on the packaging repo to bump a snap version.
-
-    Uses the bot GitHub account so the PR comes from a clearly identifiable
-    automation user.
-    """
+    """Delegates a version-bump PR on the packaging repo to a coding agent."""
 
     agent_type = "version_bumper"
 
@@ -70,63 +90,97 @@ class VersionBumperAgent(BaseAgent):
             return f"skipped {self.snap_name}: cannot parse packaging_repo URL"
         owner, repo = owner_repo
 
-        client = BotGitHubClient(bot_token)
-
-        # Find snapcraft.yaml
-        found = find_snapcraft_yaml(client, owner, repo)
+        bot_client = BotGitHubClient(bot_token)
+        found = find_snapcraft_yaml(bot_client, owner, repo)
         if not found:
             return f"skipped {self.snap_name}: snapcraft.yaml not found in {owner}/{repo}"
         yaml_path, yaml_content, yaml_sha = found
+        default_branch = bot_client.get_default_branch(owner, repo)
 
-        self._report(f"Patching snapcraft.yaml — {self.snap_name} → {self.new_version}", self.snap_name)
-        patched = patch_snapcraft_yaml(yaml_content, self.part_name, self.new_version)
-        if patched == yaml_content:
-            return (
-                f"skipped {self.snap_name}/{self.part_name}: "
-                f"no source-tag found to patch in {yaml_path}"
+        coding = get_coding_dispatcher(uc)
+        if coding is None:
+            self._report(
+                f"No coding backend configured — falling back to regex patch for {self.snap_name}",
+                self.snap_name,
+            )
+            return self._legacy_regex_bump(
+                bot_client, owner, repo, yaml_path, yaml_content, yaml_sha, default_branch, uc,
             )
 
-        # Create branch
-        default_branch = client.get_default_branch(owner, repo)
-        base_sha = client.get_branch_sha(owner, repo, default_branch)
-        if not base_sha:
-            return f"failed {self.snap_name}: cannot get SHA for branch {default_branch}"
+        self._report(f"Asking coding agent to bump {self.part_name} → {self.new_version}…", self.snap_name)
+        prompt = self._build_bump_prompt(yaml_path)
+        task = coding.start_task(owner, repo, prompt, base_ref=default_branch, create_pull_request=True)
+        if not task:
+            return f"failed {self.snap_name}: coding backend dispatch failed"
 
-        safe_version = self.new_version.replace("/", "-")
-        branch_name = f"version-bump/{self.snap_name}/{safe_version}"
+        fields = task_result_fields(task)
+        return self._persist_from_task(task, fields, bot_client, owner, repo)
 
-        if client.branch_exists(owner, repo, branch_name):
-            return f"skipped {self.snap_name}: branch {branch_name} already exists"
+    # ------------------------------------------------------------------
+    # Coding-agent path (primary)
+    # ------------------------------------------------------------------
 
-        if not client.create_branch(owner, repo, branch_name, base_sha):
-            return f"failed {self.snap_name}: could not create branch {branch_name}"
-
-        # Commit the patched file
-        commit_msg = (
-            f"chore: update {self.part_name} to {self.new_version}\n\n"
-            f"Automated version bump from {self.old_version} to {self.new_version}.\n"
-            f"Upstream: {self.release_url}"
+    def _build_bump_prompt(self, yaml_path: str) -> str:
+        notes_block = f"\n\nUpstream release notes:\n{self.release_notes[:2000]}" if self.release_notes else ""
+        return (
+            f"This repo packages the '{self.snap_name}' snap. Its `{yaml_path}` "
+            f"pins the '{self.part_name}' part at version {self.old_version!r}. A new "
+            f"upstream release, {self.new_version!r}, is available "
+            f"(release page: {self.release_url or 'n/a'}).{notes_block}\n\n"
+            f"Update `{yaml_path}` so the '{self.part_name}' part builds "
+            f"{self.new_version} instead of {self.old_version}. The version may be "
+            "pinned via `source-tag`, a top-level `version:` field, a version "
+            "embedded directly in the `source` URL, or some other mechanism this "
+            "repo uses — inspect the actual file and make whatever change "
+            "correctly bumps it, preserving the surrounding formatting and every "
+            "other field. Don't touch any other part or file unless strictly "
+            "necessary to make the bump work.\n\n"
+            f"Open a single pull request titled roughly "
+            f"'chore: update {self.part_name} to {self.new_version}' with a "
+            "description explaining the version bump and linking the upstream "
+            "release."
         )
-        if not client.update_file(
-            owner, repo, yaml_path, patched, yaml_sha, branch_name, commit_msg
-        ):
-            return f"failed {self.snap_name}: could not push updated {yaml_path}"
 
-        self._report(f"Opening PR on {self.packaging_repo}…", self.snap_name)
-        title, body = self._build_pr_text(uc)
+    def _persist_from_task(self, task: dict, fields: dict, bot_client: BotGitHubClient, owner: str, repo: str) -> str:
+        status = fields["status"]
+        if status == "queued":
+            # Async cloud-agent task — no PR yet, pr_monitor.py polls it.
+            self._save_bump(status="dispatched", external_task_id=fields["external_task_id"])
+            return (
+                f"dispatched coding-agent task for {self.snap_name} "
+                f"{self.old_version}→{self.new_version} (task {fields['external_task_id']})"
+            )
 
-        pr = client.create_pr(
-            owner=owner,
-            repo=repo,
-            title=title,
-            body=body,
-            head=branch_name,
-            base=default_branch,
-        )
-        if not pr:
-            return f"failed {self.snap_name}: PR creation failed"
+        if status == "completed":
+            pr_url = extract_pr_url(task)
+            pr_number = extract_pr_number(task)
+            if not pr_url or not pr_number:
+                return f"failed {self.snap_name}: coding backend finished but produced no PR"
+            branch_name = bot_client.get_pr_head_branch(owner, repo, pr_number) or ""
+            self._save_bump(
+                status="open", bot_pr_url=pr_url, bot_pr_number=pr_number, branch_name=branch_name,
+            )
+            logger.info(
+                "version_bumper: opened PR for %s %s→%s: %s",
+                self.snap_name, self.old_version, self.new_version, pr_url,
+            )
+            return (
+                f"opened PR for {self.snap_name} "
+                f"{self.old_version}→{self.new_version}: {pr_url}"
+            )
 
-        # Persist VersionBumpPR record
+        # dispatch_failed / failed / anything else
+        error = task.get("error") or f"coding backend returned status={status!r}"
+        return f"failed {self.snap_name}: {error}"
+
+    def _save_bump(
+        self,
+        status: str,
+        bot_pr_url: str | None = None,
+        bot_pr_number: int | None = None,
+        branch_name: str = "",
+        external_task_id: str | None = None,
+    ) -> None:
         with get_session() as session:
             release = session.query(UpstreamRelease).get(self.upstream_release_id)
             if release:
@@ -137,24 +191,107 @@ class VersionBumperAgent(BaseAgent):
                 snap_id=self.snap_id,
                 upstream_release_id=self.upstream_release_id,
                 user_id=self.user_id,
-                bot_pr_url=pr.get("html_url"),
-                bot_pr_number=pr.get("number"),
+                bot_pr_url=bot_pr_url,
+                bot_pr_number=bot_pr_number,
                 packaging_repo=self.packaging_repo,
                 branch_name=branch_name,
                 old_version=self.old_version,
                 new_version=self.new_version,
-                status="open",
+                status=status,
+                external_task_id=external_task_id,
             )
             session.add(bump)
 
+    # ------------------------------------------------------------------
+    # Legacy regex path (fallback only — no coding backend configured)
+    # ------------------------------------------------------------------
+
+    def _legacy_regex_bump(
+        self,
+        client: BotGitHubClient,
+        owner: str,
+        repo: str,
+        yaml_path: str,
+        yaml_content: str,
+        yaml_sha: str,
+        default_branch: str,
+        uc,
+    ) -> str:
+        patched = patch_snapcraft_yaml(yaml_content, self.part_name, self.new_version)
+        if patched == yaml_content:
+            return (
+                f"skipped {self.snap_name}/{self.part_name}: "
+                f"no source-tag found to patch in {yaml_path} (and no coding "
+                "backend configured to attempt a smarter fix)"
+            )
+
+        base_sha = client.get_branch_sha(owner, repo, default_branch)
+        if not base_sha:
+            return f"failed {self.snap_name}: cannot get SHA for branch {default_branch}"
+
+        safe_version = self.new_version.replace("/", "-")
+        branch_name = f"version-bump/{self.snap_name}/{safe_version}"
+        if client.branch_exists(owner, repo, branch_name):
+            return f"skipped {self.snap_name}: branch {branch_name} already exists"
+        if not client.create_branch(owner, repo, branch_name, base_sha):
+            return f"failed {self.snap_name}: could not create branch {branch_name}"
+
+        commit_msg = (
+            f"chore: update {self.part_name} to {self.new_version}\n\n"
+            f"Automated version bump from {self.old_version} to {self.new_version}.\n"
+            f"Upstream: {self.release_url}"
+        )
+        if not client.update_file(owner, repo, yaml_path, patched, yaml_sha, branch_name, commit_msg):
+            return f"failed {self.snap_name}: could not push updated {yaml_path}"
+
+        title, body = self._build_pr_text(uc)
+        pr = client.create_pr(
+            owner=owner, repo=repo, title=title, body=body, head=branch_name, base=default_branch,
+        )
+        if not pr:
+            return f"failed {self.snap_name}: PR creation failed"
+
+        self._save_bump(
+            status="open",
+            bot_pr_url=pr.get("html_url"),
+            bot_pr_number=pr.get("number"),
+            branch_name=branch_name,
+        )
         logger.info(
-            "version_bumper: opened PR for %s %s→%s: %s",
+            "version_bumper: opened PR (regex fallback) for %s %s→%s: %s",
             self.snap_name, self.old_version, self.new_version, pr.get("html_url"),
         )
         return (
             f"opened PR for {self.snap_name} "
             f"{self.old_version}→{self.new_version}: {pr.get('html_url')}"
         )
+
+    def _build_pr_text(self, uc) -> tuple[str, str]:
+        default_title = f"chore: update {self.part_name} to {self.new_version}"
+        default_body = (
+            f"## Version bump: {self.part_name} {self.old_version} → {self.new_version}\n\n"
+            f"Upstream release: {self.release_url}\n\n"
+        )
+        if self.release_notes:
+            default_body += f"### Release notes\n\n{self.release_notes[:2000]}\n\n"
+        default_body += (
+            "_This PR was created automatically by snap-dashboard's version bumper agent._"
+        )
+
+        lemonade = self._get_lemonade(uc)
+        if lemonade:
+            self._report(f"⚡ Asking Lemonade AI to draft PR description for {self.snap_name}…", self.snap_name)
+            result = lemonade.generate_pr_description(
+                snap_name=self.snap_name,
+                part_name=self.part_name,
+                old_version=self.old_version,
+                new_version=self.new_version,
+                release_notes=self.release_notes,
+            )
+            if result:
+                return result.get("title", default_title), result.get("body", default_body)
+
+        return default_title, default_body
 
     # ------------------------------------------------------------------
     # Helpers
@@ -181,31 +318,3 @@ class VersionBumperAgent(BaseAgent):
                 .first()
             )
             return bool(existing)
-
-    def _build_pr_text(self, uc) -> tuple[str, str]:
-        default_title = f"chore: update {self.part_name} to {self.new_version}"
-        default_body = (
-            f"## Version bump: {self.part_name} {self.old_version} → {self.new_version}\n\n"
-            f"Upstream release: {self.release_url}\n\n"
-        )
-        if self.release_notes:
-            default_body += f"### Release notes\n\n{self.release_notes[:2000]}\n\n"
-        default_body += (
-            "_This PR was created automatically by snap-dashboard's version bumper agent._"
-        )
-
-        # Try to improve with lemonade
-        lemonade = self._get_lemonade(uc)
-        if lemonade:
-            self._report(f"⚡ Asking Lemonade AI to draft PR description for {self.snap_name}…", self.snap_name)
-            result = lemonade.generate_pr_description(
-                snap_name=self.snap_name,
-                part_name=self.part_name,
-                old_version=self.old_version,
-                new_version=self.new_version,
-                release_notes=self.release_notes,
-            )
-            if result:
-                return result.get("title", default_title), result.get("body", default_body)
-
-        return default_title, default_body

@@ -164,6 +164,10 @@ def _migrate() -> None:
         # LLM-inferred root cause for a failed/errored test run — see
         # agents/test_failure_analyzer.py.
         "ALTER TABLE test_runs ADD COLUMN failure_analysis TEXT",
+        # Async coding-backend task id while a version bump is delegated and
+        # no PR exists yet (status=="dispatched") — see agents/version_bumper.py
+        # and agents/pr_monitor.py's dispatched-state polling.
+        "ALTER TABLE version_bump_prs ADD COLUMN external_task_id VARCHAR(128)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

@@ -37,6 +37,7 @@ _STATUS_GROUPS = [
     ("ci_failed", "CI Failed"),
     ("ci_pending", "CI Pending"),
     ("open", "Open"),
+    ("dispatched", "Coding Agent Working…"),
     ("merged", "Merged"),
     ("closed", "Closed"),
 ]
