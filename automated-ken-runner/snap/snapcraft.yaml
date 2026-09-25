@@ -62,6 +62,24 @@ parts:
     # interpreter at runtime — it must be staged into the payload itself
     # (see snapcraft's python_common.get_system_interpreter()).
     stage-packages: [python3.12-minimal, libpython3.12-minimal, libpython3.12-stdlib]
+    # On a from-scratch build this part stages its own python3.12 binary
+    # (above) into $CRAFT_STAGE/usr/bin, which craft-parts puts ahead of
+    # /usr/bin on PATH for build commands (so later parts can use earlier
+    # parts' staged tools). On any *subsequent* rebuild (without a full
+    # `snapcraft clean`) that already-staged interpreter is present in
+    # $CRAFT_STAGE before this part's own build step reruns, so plain
+    # `python3 -m venv` resolves to it instead of the real build
+    # interpreter — and since it's the "minimal" package, its
+    # self-contained stdlib lacks the ensurepip module venv needs,
+    # failing with "No module named ensurepip"/non-zero ensurepip exit.
+    # Put /usr/bin ahead of the staged dirs (but still behind this part's
+    # own install/bin, which must stay first so pip/python invocations
+    # after venv creation keep using the venv's own interpreter) so venv
+    # creation always uses the genuine build-time interpreter (which has
+    # python3-venv's ensurepip installed), not the minimal one this part
+    # stages for the payload.
+    build-environment:
+      - PATH: "${CRAFT_PART_INSTALL}/bin:/usr/bin:${PATH}"
     # version: git doesn't work here for the same reason as the
     # automated-ken server snap: snapcraft.yaml lives in a subdirectory
     # of the top-level repo, which has no .git of its own.
