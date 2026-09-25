@@ -265,8 +265,13 @@
           <td><span class="p-status-label">{{ run.from_channel }}</span></td>
           <td class="muted small">{{ run.version or '—' }}</td>
           <td>
-            {% if run.status == 'passed' %}
+            {% if run.status == 'passed' and run.review_decision == 'reject' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative" title="AI review rejected this">rejected</a>
+            {% elif run.status == 'passed' %}
             <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
+            {% if run.review_decision == 'needs_review' %}
+            <span class="muted small" title="AI review needs manual attention" style="margin-left:4px;">⚠</span>
+            {% endif %}
             {% elif run.status == 'promoted' %}
             <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">promoted</a>
             {% elif run.status == 'failed' %}

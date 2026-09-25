@@ -17,7 +17,11 @@
     </p>
   </div>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    {% if run.status == 'passed' %}
+    {% if run.status == 'passed' and run.review_decision == 'reject' %}
+    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Rejected by AI review</span>
+    {% elif run.status == 'passed' and run.review_decision == 'needs_review' %}
+    <span class="p-status-label p-status-label--caution" style="font-size:13px; padding: 4px 12px;">Needs review</span>
+    {% elif run.status == 'passed' %}
     <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
     {% elif run.status == 'failed' %}
     <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
