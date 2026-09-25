@@ -6,7 +6,7 @@
 
 <div class="page-title-row">
   <div>
-    <h2 class="page-heading">YARF Testing</h2>
+    <h2 class="page-heading">Testing</h2>
     <p class="text-muted">Queue runner tests, track results, and promote release sets</p>
   </div>
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
@@ -27,8 +27,8 @@
     Tests appear here when a snap has a newer version in <code>candidate</code> or
     <code>edge</code> than in <code>stable</code>, and when a version-bump PR's CI passes.
     They run on your enrolled remote runners (one per architecture: amd64 and arm64).
-    A YARF suite at <code>tests/suite/__init__.robot</code> in the snap's packaging repo
-    is used if present; otherwise the runner does a launch-and-screenshot smoke test.
+    The runner installs the snap and does a launch-and-screenshot smoke test (console
+    apps are launched in a terminal window instead).
   </p>
   <div style="display:flex; gap:10px; flex-wrap:wrap;">
     <a href="/runners" class="p-button--positive is-small">Enroll a runner</a>

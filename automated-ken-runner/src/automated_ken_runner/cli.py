@@ -15,16 +15,16 @@ Commands:
         Print enrollment + idle-detection status and exit.
 
     automated-ken-runner prepare-machine
-        Check (and auto-install where possible, e.g. YARF via `snap
-        install`) the local prerequisites this runner needs: snapd,
-        YARF, and the desktop idle-detection tooling (loginctl/gdbus).
-        Also configures the desktop session for unattended GUI testing —
-        installs/enables the screenshot-capture extension, enables
-        autologin, disables screen lock/blanking — and reboots if any of
-        that changed (see desktop_setup.py). The run loop also performs
-        the dependency check (not the desktop setup) automatically at
-        startup, so already-enrolled runners self-heal on their next
-        service restart without needing this run by hand.
+        Check the local prerequisites this runner needs: snapd, xterm
+        (for console-app snaps), and the desktop idle-detection tooling
+        (loginctl/gdbus). Also configures the desktop session for
+        unattended GUI testing — installs/enables the screenshot-capture
+        extension, enables autologin, disables screen lock/blanking —
+        and reboots if any of that changed (see desktop_setup.py). The
+        run loop also performs the dependency check (not the desktop
+        setup) automatically at startup, so already-enrolled runners
+        self-heal on their next service restart without needing this
+        run by hand.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 @click.group()
 def main() -> None:
-    """automated-ken-runner — remote YARF test execution agent."""
+    """automated-ken-runner — remote desktop smoke-test execution agent."""
 
 
 @main.command()

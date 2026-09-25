@@ -18,9 +18,16 @@ Setup steps are in [`GETTING_STARTED.md`](../GETTING_STARTED.md#part-2-runner-ma
 For each job it:
 
 1. installs or refreshes the snap from the job's channel with `sudo snap install|refresh --channel=…`;
-2. downloads the snap's YARF suite (`tests/suite/` in its packaging repo) and runs it with `yarf` — on the real session (`Mir` platform) when a display is available — for up to 30 minutes;
-3. if there's no suite, launches the app, waits for it to render, and captures a screenshot (a smoke test);
-4. checks screenshots aren't blank, uploads them and the log, and reports `passed`/`failed`.
+2. launches the app, waits for it to render, and captures a screenshot (a smoke test) — console apps (`Snap.is_console_app`, set from the snap's dashboard page) are launched inside an `xterm` window instead of bare, since a text UI has nothing to screenshot when run headless;
+3. checks the screenshot isn't blank, uploads it and the log, and reports `passed`/`failed`.
+
+There is no per-repo Robot/YARF suite support anymore — see
+`REMOTE_RUNNER_PLAN.md`'s Phase R5 findings for why: yarf has no working
+platform against a real GNOME session (its `Mir` platform needs
+wlroots-only protocols Mutter doesn't implement, and its `Vnc` platform has
+no local server to talk to on a stock GNOME desktop). Every snap now gets
+the same generic smoke test, with `is_console_app` as the only per-snap
+opt-in.
 
 ## Requirements
 
@@ -29,13 +36,14 @@ For each job it:
   ```bash
   echo "$USER ALL=(root) NOPASSWD: /usr/bin/snap" | sudo tee /etc/sudoers.d/automated-ken-runner
   ```
+- `xterm` (only needed if you mark any snap as a console app): `sudo apt install xterm`
 - A machine dedicated to testing — preparation disables the screen lock
 
 ## Commands
 
 | Command | Purpose |
 |---------|---------|
-| `automated-ken-runner prepare-machine [--no-reboot]` | Install YARF, check the `sudo` rule, install the screenshot extension, enable autologin, disable screen lock/blanking; reboots if the desktop setup changed |
+| `automated-ken-runner prepare-machine [--no-reboot]` | Check the `sudo` rule, install the screenshot extension, enable autologin, disable screen lock/blanking; reboots if the desktop setup changed |
 | `automated-ken-runner enroll --server URL --token TOKEN [--name NAME]` | Register with a dashboard using a one-time token from its **Runners** page |
 | `automated-ken-runner status` | Show enrollment and whether it would take a job right now |
 | `automated-ken-runner run` | Run the job loop in the foreground |

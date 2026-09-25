@@ -11,7 +11,6 @@ server that doesn't support remote runners at all.
 
 from __future__ import annotations
 
-import io
 import logging
 import os
 import shutil
@@ -20,7 +19,6 @@ import tempfile
 import threading
 import time
 import traceback
-import zipfile
 from pathlib import Path
 from typing import Callable
 
@@ -31,7 +29,7 @@ from automated_ken_runner.config import RunnerConfig
 from automated_ken_runner.deps import ensure_dependencies
 from automated_ken_runner.idle import is_safe_to_claim_job
 from automated_ken_runner.screenshot_capture import ScreenshotCaptureError, capture_screenshot
-from automated_ken_runner.screenshots import analyze_screenshot_png, extract_screenshots
+from automated_ken_runner.screenshots import analyze_screenshot_png
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +37,18 @@ _HEARTBEAT_INTERVAL_SECONDS = 15
 _POLL_TIMEOUT_SECONDS = 25
 _IDLE_THRESHOLD_SECONDS = 120
 # How long to let a newly-launched app finish rendering before screenshotting
-# it in the generic (no-suite) desktop smoke test.
+# it in the generic desktop smoke test.
 _APP_SETTLE_SECONDS = 15
 _APP_LAUNCH_TIMEOUT_SECONDS = 30
-_YARF_TIMEOUT_SECONDS = 1800
+# Terminal emulator used to run "console app" snaps (see Snap.is_console_app)
+# so their text UI actually renders on-screen for the screenshot instead of
+# running headless with nothing to capture. xterm is used rather than
+# gnome-terminal because it *is* the window process itself (killing it
+# reliably closes the window); gnome-terminal is a client of a persistent
+# gnome-terminal-server, so killing the launching process doesn't
+# necessarily close the window it opened. xterm runs fine under GNOME's
+# Wayland session via XWayland, which every stock Ubuntu GNOME desktop has.
+_CONSOLE_TERMINAL = "xterm"
 
 
 def _desktop_env() -> str:
@@ -207,7 +213,12 @@ class RunnerLoop:
         job_id = job["test_run_id"]
         snap_name = job["snap_name"]
         channel = job.get("channel", "stable")
-        logger.info("Claimed job %s: %s (%s, %s)", job_id, snap_name, channel, job.get("architecture", ""))
+        is_console_app = bool(job.get("is_console_app", False))
+        logger.info(
+            "Claimed job %s: %s (%s, %s)%s",
+            job_id, snap_name, channel, job.get("architecture", ""),
+            " [console app]" if is_console_app else "",
+        )
         self._report_status(job_id, "running")
 
         log_lines: list[str] = []
@@ -219,44 +230,32 @@ class RunnerLoop:
         with tempfile.TemporaryDirectory(prefix="automated-ken-runner-") as tmp:
             tmp_path = Path(tmp)
             try:
-                suite_dir = self._fetch_suite(job_id, tmp_path)
                 self._install_snap(snap_name, channel, _log)
                 self._check_cancelled()
-                if suite_dir is not None:
-                    # The packaging repo opted in to a custom Robot/YARF
-                    # suite (real interaction beyond a plain smoke test) —
-                    # keep using it as-is.
-                    if shutil.which("yarf") is None:
-                        # A dependency (installed at startup or via
-                        # `prepare-machine`) has since gone missing — try
-                        # once more to self-heal rather than failing every
-                        # job with a bare FileNotFoundError until someone
-                        # notices.
-                        ensure_dependencies(auto_install=True)
-                    yarf_exit, log_html = self._run_yarf(snap_name, suite_dir, tmp_path, _log)
-                    shots = extract_screenshots(log_html) if log_html else []
-                    passed = yarf_exit == 0 and all(s.is_valid for s in shots)
-                    self._upload_screenshots(job_id, shots)
-                    self._report_status(
-                        job_id, "passed" if passed else "failed",
-                        yarf_exit_code=yarf_exit, log="\n".join(log_lines),
-                    )
-                else:
-                    # No suite configured for this repo — this is the
-                    # common/default case for a plain desktop (GUI) app:
-                    # launch it on the real desktop session, let it
-                    # render, capture a screenshot natively, and do a
-                    # basic sanity check. This is all generic, reusable
-                    # logic that every packaging repo gets for free with
-                    # no suite of its own to write or maintain — deeper
-                    # pass/fail inference (LLM screenshot comparison
-                    # against the stable baseline) happens dashboard-side
-                    # once the screenshot is uploaded.
-                    passed, shots = self._run_desktop_smoke_test(snap_name, tmp_path, _log)
-                    self._upload_screenshots(job_id, shots)
-                    self._report_status(
-                        job_id, "passed" if passed else "failed", log="\n".join(log_lines),
-                    )
+                # Every snap gets the same generic smoke test now — no
+                # per-repo Robot/YARF suite support. yarf has no working
+                # platform against a real GNOME session anyway (see
+                # REMOTE_RUNNER_PLAN.md's Phase R5 findings: its "Mir"
+                # platform needs wlroots-only protocols Mutter doesn't
+                # implement, and its "Vnc" platform has no local server
+                # to talk to on a stock GNOME desktop). Launch the app,
+                # let it render, capture a native screenshot, and do a
+                # basic sanity check — this is all generic, reusable
+                # logic every packaging repo gets for free with nothing
+                # of its own to write or maintain. Deeper pass/fail
+                # inference (LLM screenshot comparison against the
+                # stable baseline) happens dashboard-side once the
+                # screenshot is uploaded. Snaps whose UI is text/console
+                # only (Snap.is_console_app) are launched inside a
+                # terminal window instead of bare on the desktop, since
+                # there'd otherwise be nothing to screenshot.
+                passed, shots = self._run_desktop_smoke_test(
+                    snap_name, is_console_app, tmp_path, _log
+                )
+                self._upload_screenshots(job_id, shots)
+                self._report_status(
+                    job_id, "passed" if passed else "failed", log="\n".join(log_lines),
+                )
             except JobCancelled:
                 logger.info("Job %s cancelled", job_id)
                 self._report_status(job_id, "cancelled", log="\n".join(log_lines))
@@ -264,21 +263,6 @@ class RunnerLoop:
                 logger.exception("Job %s failed with an unexpected error", job_id)
                 _log("traceback", traceback.format_exc())
                 self._report_status(job_id, "failed", error=str(exc), log="\n".join(log_lines))
-
-    def _fetch_suite(self, job_id: int, tmp_path: Path) -> Path | None:
-        """Fetch and unzip this job's suite, or None if the repo has none.
-
-        A suite is optional — see ``_execute_job()`` — so a 404 here just
-        means "run the generic desktop smoke test instead," not a failure.
-        """
-        resp = self.client.get(f"/{self.cfg.runner_id}/jobs/{job_id}/suite")
-        if resp.status_code == 404:
-            return None
-        resp.raise_for_status()
-        suite_dir = tmp_path / "suite"
-        with zipfile.ZipFile(io.BytesIO(resp.content)) as zf:
-            zf.extractall(suite_dir)
-        return suite_dir
 
     def _install_snap(self, snap_name: str, channel: str, log: Callable[[str, str], None]) -> None:
         subprocess.run(
@@ -298,57 +282,40 @@ class RunnerLoop:
         )
         proc.check_returncode()
 
-    def _run_yarf(
-        self, snap_name: str, suite_dir: Path, tmp_path: Path, log: Callable[[str, str], None]
-    ) -> tuple[int, str]:
-        outdir = tmp_path / "results"
-        outdir.mkdir(exist_ok=True)
-        # yarf only accepts "Mir" (real Wayland display, via WAYLAND_DISPLAY)
-        # or "Vnc" (headless). Use Mir whenever a real graphical session is
-        # present on this machine, otherwise fall back to yarf's own
-        # "Vnc" default for headless runners.
-        live_env = _live_session_env()
-        platform_name = "Mir" if live_env.get("WAYLAND_DISPLAY") or live_env.get("DISPLAY") else "Vnc"
-        # automated-ken-runner is a classic-confinement snap and sets
-        # PYTHONHOME/PYTHONPATH for its own bundled interpreter. yarf is a
-        # strictly-confined snap with its own Python — inheriting these
-        # vars makes it try (and get AppArmor-denied) to read this
-        # snap's site-packages. Strip them so yarf uses its own env.
-        yarf_env = {
-            k: v for k, v in live_env.items() if k not in ("PYTHONHOME", "PYTHONPATH")
-        }
-        with tempfile.TemporaryFile() as out:
-            proc = subprocess.Popen(
-                ["yarf", "--platform", platform_name, "--outdir", str(outdir), str(suite_dir)],
-                stdout=out, stderr=subprocess.STDOUT, env=yarf_env,
-            )
-            try:
-                self._wait_or_cancel(proc, timeout=_YARF_TIMEOUT_SECONDS)
-            finally:
-                out.seek(0)
-                log(f"yarf --platform {platform_name}", out.read().decode(errors="replace"))
-        log_html_path = outdir / "log.html"
-        log_html = log_html_path.read_text(errors="replace") if log_html_path.exists() else ""
-        return proc.returncode, log_html
-
     def _run_desktop_smoke_test(
-        self, snap_name: str, tmp_path: Path, log: Callable[[str, str], None]
+        self, snap_name: str, is_console_app: bool, tmp_path: Path, log: Callable[[str, str], None]
     ) -> tuple[bool, list]:
-        """Generic "launch a GUI app, capture a screenshot" flow.
+        """Generic "launch the app, capture a screenshot" flow.
 
-        This is the default test for any packaging repo with no custom
-        suite of its own — it needs no per-repo test code at all. Launches
-        ``snap_name`` on the runner's real desktop session, waits for it to
-        appear and settle, takes one native screenshot (see
-        ``screenshot_capture``), and does the same basic
-        brightness/blank-frame sanity check YARF-sourced screenshots get
-        (see ``screenshots.analyze_screenshot_png``) — deeper pass/fail
+        This is now the only test every packaging repo gets — it needs no
+        per-repo test code at all. Launches ``snap_name`` on the runner's
+        real desktop session, waits for it to appear and settle, takes one
+        native screenshot (see ``screenshot_capture``), and does the same
+        basic brightness/blank-frame sanity check
+        ``screenshots.analyze_screenshot_png`` provides — deeper pass/fail
         inference (LLM comparison against the stable baseline) happens
         dashboard-side once the screenshot is uploaded.
+
+        Console apps (``Snap.is_console_app``) have a text UI with nothing
+        to screenshot when launched bare, so they're launched inside a
+        terminal window (see ``_CONSOLE_TERMINAL``) instead — everything
+        else about the flow (settle, screenshot, sanity check, teardown)
+        is identical.
         """
+        env = _live_session_env()
+        if is_console_app:
+            if shutil.which(_CONSOLE_TERMINAL) is None:
+                log(
+                    "console app launch",
+                    f"{_CONSOLE_TERMINAL} is not installed on this runner — "
+                    f"install it with 'sudo apt install {_CONSOLE_TERMINAL}'",
+                )
+                return False, []
+            cmd = [_CONSOLE_TERMINAL, "-e", "snap", "run", snap_name]
+        else:
+            cmd = ["snap", "run", snap_name]
         app_proc = subprocess.Popen(
-            ["snap", "run", snap_name], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            env=_live_session_env(),
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
         )
         try:
             self._wait_for_app_alive(snap_name, timeout=_APP_LAUNCH_TIMEOUT_SECONDS)
@@ -388,25 +355,6 @@ class RunnerLoop:
     def _check_cancelled(self) -> None:
         if self._cancel.is_set():
             raise JobCancelled()
-
-    def _wait_or_cancel(self, proc: subprocess.Popen, timeout: float) -> int:
-        """Wait for *proc*, terminating it if the job is cancelled or times out."""
-        deadline = time.monotonic() + timeout
-        while True:
-            try:
-                return proc.wait(timeout=1)
-            except subprocess.TimeoutExpired:
-                pass
-            if self._cancel.is_set() or time.monotonic() >= deadline:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=5)
-                if self._cancel.is_set():
-                    raise JobCancelled()
-                return proc.returncode
 
     def _upload_screenshots(self, job_id: int, shots: list) -> None:
         for shot in shots:

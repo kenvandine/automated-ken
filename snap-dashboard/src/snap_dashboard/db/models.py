@@ -158,6 +158,12 @@ class Snap(Base):
     packaging_repo = Column(Text, nullable=True)
     upstream_repo = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # Every snap defaults to the generic graphical desktop smoke test
+    # (launch on the real desktop, screenshot, done). Console apps have
+    # nothing to screenshot when run headless, so this opts a snap into
+    # being launched inside a terminal emulator instead — see
+    # automated_ken_runner.runner._run_desktop_smoke_test.
+    is_console_app = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=_now, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
 

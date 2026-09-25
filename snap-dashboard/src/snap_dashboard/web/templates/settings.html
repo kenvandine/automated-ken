@@ -120,9 +120,8 @@
       <span class="form-hint">
         Tests run on your enrolled <a href="/runners" class="link-inline">remote runners</a> —
         real amd64 and arm64 machines that install the snap from the Store and run it on a
-        real desktop. If a snap's packaging repo has a YARF suite at
-        <code>tests/suite/__init__.robot</code> the runner uses it; otherwise it runs a
-        generic launch-and-screenshot smoke test. Only amd64 and arm64 are tested.
+        real desktop, launches it, and takes a screenshot (a smoke test). Snaps marked as a
+        console app run inside a terminal window instead. Only amd64 and arm64 are tested.
       </span>
     </div>
 

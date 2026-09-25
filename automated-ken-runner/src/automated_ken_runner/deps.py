@@ -16,11 +16,12 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-# Snaps this runner needs installed (beyond the snap-under-test itself)
-# to actually execute a YARF suite. Installed via `snap install <name>`
-# since that's a single, distro-independent method — unlike (say) a
-# pip/apt package whose install command/availability would vary.
-_REQUIRED_SNAPS = ["yarf"]
+# Snaps this runner needs installed (beyond the snap-under-test itself).
+# Every job now runs the same generic desktop smoke test (see runner.py),
+# so nothing beyond `snap`/`sudo` themselves is required here anymore —
+# this list is intentionally empty (kept as a list, not removed, so a
+# future per-repo requirement has an obvious place to go).
+_REQUIRED_SNAPS: list[str] = []
 
 # Other tools we can check for but won't try to auto-install, since
 # there's no single reliable install method for them across distros
@@ -29,6 +30,11 @@ _REQUIRED_SNAPS = ["yarf"]
 _OTHER_REQUIRED_TOOLS = {
     "snap": "Required to install/refresh the snaps under test.",
     "loginctl": "Used for idle/lock detection (part of systemd, should always be present).",
+    "xterm": (
+        "Used to launch 'console app' snaps (Snap.is_console_app) inside a "
+        "terminal window for the smoke test screenshot. Install with "
+        "'sudo apt install xterm'."
+    ),
 }
 
 

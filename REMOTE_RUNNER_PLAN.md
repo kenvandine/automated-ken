@@ -247,89 +247,91 @@ runner instead of (or in addition to) GitHub Actions.
   a short timeout, fall back to `trigger_workflow()` (GitHub Actions)
   automatically.
 
-## Phase R5 — Execution on the runner
+## Phase R5 — Execution on the runner (superseded by the smoke-test pivot below)
 
-**Goal:** Actually run the suite against the real desktop session and
-get validated screenshots back.
+**Original goal:** run the snap's YARF suite against the real desktop
+session and get validated screenshots back, the same way the
+GitHub-hosted CI does with a synthetic Mir compositor.
 
-Reuses the proven sequence from the production workflow, adapted for a
-real logged-in session (no synthetic compositor needed — the runner
-*is* the desktop):
-
-1. `snap install <snap> --channel <channel>` (or `refresh` if already
-   present).
-2. Launch it in the current graphical session — just `snap run <snap>`,
-   inheriting the real `WAYLAND_DISPLAY`/`DISPLAY`, real GPU, real theme.
-3. `yarf --platform <Wayland-or-X11, whatever this desktop actually
-   runs> --outdir <dir> <downloaded suite>`.
-
-   > **⚠️ Verified blocker (2026-09-24): neither of yarf's two built-in
-   > platforms actually works against a real GNOME/Mutter session.**
-   > Confirmed by inspecting yarf 3.16.0 (stable, snap rev 587) *and*
-   > 3.24.7 (edge, rev 676) — `SUPPORTED_PLATFORMS` only ever contains
-   > `Mir` and `Vnc`, there is no third option:
-   > - `--platform Mir` doesn't talk to Mir per se — it binds three
-   >   **wlroots** Wayland protocols directly:
-   >   `zwlr_virtual_pointer_manager_v1`, `zwlr_virtual_keyboard_manager_v1`,
-   >   `zwlr_screencopy_manager_v1`. Mir implements these for
-   >   compatibility; **Mutter does not**, hence the
-   >   `No WLR pointer manager` connection failure on a stock GNOME
-   >   desktop.
-   > - `--platform Vnc` needs an actual VNC server on `VNC_HOST:5900+VNC_PORT`
-   >   (env vars, default `localhost:5900`). On this GNOME 50 test
-   >   machine there is **no local VNC path available**:
-   >   `gnome-remote-desktop` (50.2) has dropped its VNC backend
-   >   entirely (`grdctl vnc ...` no longer exists — RDP only), and
-   >   there is no `/usr/share/xsessions/*` entry at all (GNOME-on-Xorg
-   >   isn't installed), so `x11vnc` has no X server to attach to
-   >   either. `wayvnc` is wlroots-only and doesn't work against
-   >   Mutter.
-   >
-   > **Net effect:** as of today, a runner sitting at a real,
-   > unmodified GNOME/Wayland desktop cannot be driven by yarf at all
-   > — this phase is blocked on one of:
-   >   a. **Preferred fix, upstream in yarf:** add a native GNOME
-   >      platform that drives input/capture through Mutter's own
-   >      `org.gnome.Mutter.RemoteDesktop` (pointer/keyboard, confirmed
-   >      present on the D-Bus session bus as
-   >      `org.gnome.Mutter.RemoteDesktop`) and
-   >      `org.gnome.Mutter.ScreenCast` (confirmed present) + PipeWire,
-   >      matching the existing `PlatformBase` interface so suites
-   >      don't need to change. This is real (multi-day) upstream yarf
-   >      work, not something fixable from this repo or the individual
-   >      snap-packaging repos.
-   >   b. **Fallback, no yarf changes:** provision runner machines with
-   >      GNOME-on-Xorg (`ubuntu-desktop-minimal` still ships an
-   >      Xorg session on most Ubuntu releases even though this
-   >      particular test machine doesn't have one) + `x11vnc` bound to
-   >      `127.0.0.1:5900`, and run `yarf --platform Vnc` against that
-   >      loopback. Real hardware, real GPU/theme, just not native
-   >      Wayland — acceptable for most snap UI regressions, but won't
-   >      catch Wayland-specific bugs.
-   >   c. Keep GitHub-hosted virtual-Mir CI (`mir-test-tools`) as the
-   >      only automated path until (a) or (b) lands; Phase R5 stays
-   >      unimplemented and this plan is blocked on that decision.
-   >
-   >   Recommendation: pursue (a) as the real fix since it's the only
-   >   option that tests an actual native Wayland/GNOME session; use
-   >   (b) only as a stop-gap on machines where Xorg is available.
-
-4. Extract screenshots from `log.html` using the **same** zlib/base64
-   extraction + brightness-validity heuristic already proven in the
-   production workflow — factor that Python snippet out of the inline
-   workflow script into a small shared module
-   (`automated_ken_runner/screenshots.py`) so it has one implementation
-   instead of drifting between CI and the runner.
-5. Clean up: close the app under test so the desktop returns to a clean
-   idle state for the human. `snap remove` is a configurable option
-   (default: keep it installed, for faster subsequent runs).
-6. Report:
-   - `PATCH /api/runners/{id}/jobs/{job_id}` — status
-     (`running`/`passed`/`failed`), `yarf_exit_code`, timestamps.
-   - `POST /api/runners/{id}/jobs/{job_id}/screenshots` — multipart PNG
-     upload(s), written into `test_run_screenshots`.
-   - Optionally raw `log.html`/stdout/stderr for debugging, stored
-     wherever `TestRun` logs already go (or a simple text column).
+> **⚠️ Verified blocker (2026-09-24): neither of yarf's two built-in
+> platforms actually works against a real GNOME/Mutter session.**
+> Confirmed by inspecting yarf 3.16.0 (stable, snap rev 587) *and*
+> 3.24.7 (edge, rev 676) — `SUPPORTED_PLATFORMS` only ever contains
+> `Mir` and `Vnc`, there is no third option:
+> - `--platform Mir` doesn't talk to Mir per se — it binds three
+>   **wlroots** Wayland protocols directly:
+>   `zwlr_virtual_pointer_manager_v1`, `zwlr_virtual_keyboard_manager_v1`,
+>   `zwlr_screencopy_manager_v1`. Mir implements these for
+>   compatibility; **Mutter does not**, hence the
+>   `No WLR pointer manager` connection failure on a stock GNOME
+>   desktop.
+> - `--platform Vnc` needs an actual VNC server on `VNC_HOST:5900+VNC_PORT`
+>   (env vars, default `localhost:5900`). On this GNOME 50 test
+>   machine there is **no local VNC path available**:
+>   `gnome-remote-desktop` (50.2) has dropped its VNC backend
+>   entirely (`grdctl vnc ...` no longer exists — RDP only), and
+>   there is no `/usr/share/xsessions/*` entry at all (GNOME-on-Xorg
+>   isn't installed), so `x11vnc` has no X server to attach to
+>   either. `wayvnc` is wlroots-only and doesn't work against
+>   Mutter.
+>
+> **Decision (2026-09-24, implemented): drop per-repo YARF/Robot suite
+> execution from the remote runner entirely** rather than chase a and
+> b below. Both remaining options add real ongoing cost (multi-day
+> upstream yarf work, or a second desktop-session flavor to provision
+> and maintain per runner) for a capability — scripted input
+> replay/assertions — that isn't needed for the actual goal: catching
+> "did this snap visibly break" regressions. Options considered and
+> rejected for now:
+>   a. Upstream yarf: add a native GNOME platform driving
+>      input/capture through Mutter's own
+>      `org.gnome.Mutter.RemoteDesktop` (confirmed present on the
+>      session bus) and `org.gnome.Mutter.ScreenCast` (confirmed
+>      present) + PipeWire. Real fix, but multi-day work outside this
+>      repo — revisit if suite-level (not just launch) testing is
+>      needed later.
+>   b. GNOME-on-Xorg + `x11vnc` loopback + `yarf --platform Vnc`.
+>      Works on hardware that has an Xorg session, but is a
+>      per-machine special case and doesn't exercise Wayland.
+>   c. Keep GitHub-hosted virtual-Mir CI (`mir-test-tools`) as-is —
+>      **this was kept**, unmodified, as the CI-only path for
+>      version-bump PRs (`snap-dashboard/.../testing/workflow_template.py`).
+>      It's a fundamentally different, disposable-container execution
+>      context (synthetic Xvfb + mir-test-tools compositor) from the
+>      remote-runner's real, persistent desktop session, so it wasn't
+>      affected by this pivot and needed no changes.
+>
+> **What the remote runner does instead — a generic smoke test for
+> every snap:**
+> 1. `snap install <snap> --channel <channel>` (or `refresh`).
+> 2. Launch it in the current graphical session: `snap run <snap>` —
+>    or, if the snap is flagged **console app** (`Snap.is_console_app`,
+>    set per-snap on its dashboard detail page), `xterm -e snap run
+>    <snap>` instead, since a text-only UI has nothing to screenshot
+>    when launched bare. `xterm` was chosen over `gnome-terminal`
+>    because xterm's process *is* the window — killing/terminating it
+>    reliably closes the window, whereas `gnome-terminal` is a thin
+>    client to a persistent `gnome-terminal-server`, and killing the
+>    client doesn't reliably close the window it spawned (would leave
+>    orphaned windows accumulating on an unattended physical runner).
+> 3. Wait for the process to come up, let it settle, then capture a
+>    screenshot via the runner's existing native GNOME Shell extension
+>    D-Bus service (`screenshot_capture.py`) — no yarf, Mir, or VNC
+>    involved.
+> 4. Validate the screenshot isn't blank (`analyze_screenshot_png`),
+>    tear down (kill the app, and the `xterm` if one was used), and
+>    report `passed`/`failed` plus the screenshot and log the same way
+>    as before.
+>
+> No suite is fetched or executed by the runner anymore — `deps.py` no
+> longer requires the `yarf` snap, and requires `xterm` instead (only
+> actually needed on runners with a console-app snap assigned to
+> them). Server-side suite-discovery code
+> (`testing/suite_zip.py`, the `/api/runners/{id}/jobs/{id}/suite`
+> endpoint, `agents/repo_normalizer.py`'s suite handling) was left in
+> place, unused by this path, since it's harmless and
+> `repo_normalizer.py` still uses suite discovery for its own
+> unrelated packaging-repo-normalization purpose.
 
 Once `TestRun.status` flips to `passed`/`failed`, everything downstream
 (`_maybe_submit_auto_promoter`, `ScreenshotReviewerAgent`, promotion)
@@ -586,26 +588,19 @@ note — worth stating plainly in both the CLI output and the docs.
    people registering their own machines against your dashboard
    instance later? (Affects whether runner registration needs
    allowlisting/approval beyond "logged-in user generated a token".)
-4. **Suite fetch mechanism.** Proposed: dashboard proxies the specific
-   `suites/<snap>/suite/` directory from the testing repo via the
-   GitHub Contents API and zips it on the fly. Alternative: the runner
-   does a shallow `git clone` of the whole testing repo itself (simpler
-   code, but now the runner machine needs its own scoped GitHub read
-   token, and re-clones/pulls the whole repo instead of just the one
-   suite). Proxying is my default recommendation (keeps runner
-   credential-free), but flagging the tradeoff.
+4. ~~Suite fetch mechanism.~~ **Moot: the runner no longer fetches or
+   executes per-repo suites at all** (see Phase R5). This question
+   only applied to the abandoned suite-execution design.
 5. **PPA access.** Does this repo's GitHub Actions have access to the
    same `GPG_PRIVATE_KEY`/`GPG_PASSPHRASE`/`GPG_KEY_ID` secrets used for
    `ailab`'s release-ppa.yml, or does a new Launchpad PPA + GPG key need
    to be set up for `automated-ken-runner` specifically? Not blocking
    for R1–R6 (only matters once we get to actually cutting a release).
-6. **This one now blocks Phase R5.** yarf has no working platform
-   against a real GNOME/Mutter session today (see the verified findings
-   in Phase R5 above) — pick (a) upstream native-GNOME yarf platform via
-   `org.gnome.Mutter.RemoteDesktop`/`ScreenCast`, (b) GNOME-on-Xorg +
-   `x11vnc` loopback as a stop-gap, or (c) leave R5 unimplemented and
-   keep the GitHub-hosted virtual-Mir workflow as the only automated
-   path for now.
+6. ~~This one now blocks Phase R5.~~ **Resolved (2026-09-24): dropped
+   per-repo suite execution instead of picking (a)/(b)/(c)** — see
+   Phase R5 above for the decision and what the runner does instead
+   (generic launch-and-screenshot smoke test, with an opt-in
+   console-app/`xterm` mode).
 
 ## Also Worth Doing (adjacent, smaller, not blocking this plan)
 

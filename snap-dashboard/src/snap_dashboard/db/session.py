@@ -103,6 +103,9 @@ def _migrate() -> None:
         "ALTER TABLE test_runs ADD COLUMN architecture VARCHAR(32)",
         # Multi-tenant phase: user_id columns on existing tables
         "ALTER TABLE snaps ADD COLUMN user_id INTEGER REFERENCES users(id)",
+        # Console-app opt-in for the generic desktop smoke test (see
+        # Snap.is_console_app in db/models.py).
+        "ALTER TABLE snaps ADD COLUMN is_console_app BOOLEAN DEFAULT 0",
         "ALTER TABLE collection_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
         "ALTER TABLE test_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
         # Agentic phase: new UserConfig columns

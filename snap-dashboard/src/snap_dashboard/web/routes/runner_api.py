@@ -253,6 +253,11 @@ def _try_claim_job(runner_id: int) -> dict | None:
 
         uc = get_user_config(candidate.user_id) if candidate.user_id else None
         testing_repo = getattr(uc, "testing_repo", "") if uc else ""
+        snap_row = (
+            session.query(Snap)
+            .filter_by(name=candidate.snap_name, user_id=candidate.user_id)
+            .first()
+        )
 
         return {
             "test_run_id": candidate.id,
@@ -260,6 +265,7 @@ def _try_claim_job(runner_id: int) -> dict | None:
             "channel": candidate.from_channel,
             "architecture": candidate.architecture or "amd64",
             "testing_repo": testing_repo,
+            "is_console_app": bool(snap_row.is_console_app) if snap_row else False,
         }
 
 

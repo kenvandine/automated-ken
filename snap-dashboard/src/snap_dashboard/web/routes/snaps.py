@@ -194,6 +194,7 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             "packaging_repo": snap.packaging_repo,
             "upstream_repo": snap.upstream_repo,
             "notes": snap.notes,
+            "is_console_app": snap.is_console_app,
             "created_at": snap.created_at,
             "updated_at": snap.updated_at,
             "packaging_repo_suggested": None,
@@ -315,6 +316,7 @@ async def snap_edit(
     packaging_repo: str = Form(default=""),
     upstream_repo: str = Form(default=""),
     notes: str = Form(default=""),
+    is_console_app: str = Form(default=""),
 ) -> RedirectResponse:
     """Update snap metadata."""
     user = get_current_user(request)
@@ -330,5 +332,6 @@ async def snap_edit(
         snap.packaging_repo = packaging_repo.strip() or None
         snap.upstream_repo = upstream_repo.strip() or None
         snap.notes = notes.strip() or None
+        snap.is_console_app = is_console_app == "true"
 
     return RedirectResponse(url=f"/snap/{name}", status_code=303)

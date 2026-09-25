@@ -93,8 +93,7 @@ paste it on **Settings → GitHub Token** (or in onboarding).
 
 It's used to read packaging repos and their issues/PRs, merge bump PRs,
 create and dispatch build workflows, set Actions secrets, and create
-Copilot agent tasks. Test jobs also use it to download a snap's YARF suite
-from its packaging repo.
+Copilot agent tasks.
 
 ## 6. Add the Snap Store credential
 
@@ -163,7 +162,7 @@ echo "$USER ALL=(root) NOPASSWD: /usr/bin/snap" | sudo tee /etc/sudoers.d/automa
 automated-ken-runner prepare-machine
 ```
 
-This installs YARF, checks the `sudo` rule above, installs and enables the
+This checks the `sudo` rule above, installs and enables the
 screenshot extension, enables autologin, and disables screen lock/blanking.
 It reboots if the desktop setup changed (pass `--no-reboot` to skip). It's
 safe to re-run.
@@ -209,9 +208,14 @@ Every test job is one snap version on one architecture, run on a runner of
 that architecture:
 
 - The runner installs the snap from the job's channel (`candidate` or `edge`).
-- If the packaging repo has a YARF suite at `tests/suite/__init__.robot`, it runs that suite.
-- Otherwise it launches the app, waits for it to render, and takes a screenshot (a smoke test).
-- Screenshots and the full log are uploaded to the dashboard.
+- It launches the app, waits for it to render, and takes a screenshot (a smoke test). Snaps
+  marked as a **console app** on their dashboard page are launched inside a terminal window
+  instead of bare, since a text UI has nothing to screenshot when run headless.
+- The screenshot and the full log are uploaded to the dashboard.
+
+There is no per-repo YARF/Robot suite support — every snap gets this same generic smoke
+test (see `REMOTE_RUNNER_PLAN.md` for why yarf's own platforms don't work against a real
+GNOME session).
 
 Only **amd64** and **arm64** are tested. Other architectures a snap ships
 are ignored.
@@ -272,7 +276,7 @@ With auto-promote off, a merged bump stops at *merged*; its page still shows
 the candidate release set so you can promote it by hand.
 
 On **Version Bumps**, open a PR to see each architecture's pre-merge result
-and screenshots, then **Merge**, **Reject** or **Re-run YARF** (re-tests
+and screenshots, then **Merge**, **Reject** or **Re-run tests** (re-tests
 every architecture; only the newest run per architecture counts). After
 merge the page shows the candidate release set with **Promote** — all
 architectures, or a confirmed override recorded as *partially promoted* —

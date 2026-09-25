@@ -205,11 +205,30 @@
             placeholder="Any notes about this snap..."
           >{{ snap.notes or '' }}</textarea>
         </div>
+        <div class="form-row">
+          <label class="form-label checkbox-label">
+            <input
+              type="checkbox"
+              name="is_console_app"
+              value="true"
+              {% if snap.is_console_app %}checked{% endif %}
+              style="margin-right: 6px;"
+            >
+            Console app
+          </label>
+          <span class="form-hint">
+            Every snap gets the same generic desktop smoke test by default (launch,
+            screenshot, done) — check this only if this snap has a text/terminal UI
+            with nothing to screenshot when launched directly. The runner will launch
+            it inside a terminal window instead and screenshot that.
+          </span>
+        </div>
         <div class="form-actions">
           <button type="submit" class="p-button--positive">Save Changes</button>
         </div>
       </form>
     </div>
+
   </details>
 </div>
 

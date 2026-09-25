@@ -1,9 +1,10 @@
-"""automated-ken-runner — remote YARF test execution agent.
+"""automated-ken-runner — remote desktop smoke-test execution agent.
 
 Installed on an idle desktop/laptop with a real, logged-in graphical
-session. Polls a snap-dashboard server for queued test jobs, runs YARF
-against the real desktop (no synthetic compositor needed), and reports
-status + screenshots back over HTTPS (outbound only — works behind NAT).
+session. Polls a snap-dashboard server for queued test jobs, launches
+each snap on the real desktop (no synthetic compositor needed) for a
+launch-and-screenshot smoke test, and reports status + screenshots back
+over HTTPS (outbound only — works behind NAT).
 
 See REMOTE_RUNNER_PLAN.md in the automated-ken repo for the full design.
 """

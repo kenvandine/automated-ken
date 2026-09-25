@@ -30,7 +30,7 @@
       <span class="docs-nav-heading">Testing</span>
       <a href="#testing-overview" class="docs-nav-link">How testing works</a>
       <a href="#runners" class="docs-nav-link">Runners</a>
-      <a href="#suite-structure" class="docs-nav-link">YARF suites</a>
+      <a href="#suite-structure" class="docs-nav-link">Console apps</a>
       <a href="#running-tests" class="docs-nav-link">Running tests</a>
       <a href="#test-results" class="docs-nav-link">Results &amp; AI review</a>
       <a href="#promotion" class="docs-nav-link">Promoting a release set</a>
@@ -112,7 +112,7 @@
             <tr>
               <td><strong>GitHub token</strong><br><span class="text-muted small">classic PAT: <code>repo</code> + <code>workflow</code></span></td>
               <td>Settings → GitHub Token</td>
-              <td>Reading packaging repos and issues/PRs, downloading YARF suites for runners, merging bump PRs, creating and dispatching build workflows, setting Actions secrets, creating Copilot tasks. Without it, GitHub allows only 60 API requests an hour.</td>
+              <td>Reading packaging repos and issues/PRs, merging bump PRs, creating and dispatching build workflows, setting Actions secrets, creating Copilot tasks. Without it, GitHub allows only 60 API requests an hour.</td>
             </tr>
             <tr>
               <td><strong>Snap Store credential</strong><br><span class="text-muted small"><code>snapcraft export-login -</code></span></td>
@@ -128,7 +128,7 @@
         </table>
       </div>
       <div class="docs-callout docs-callout-info">
-        Credentials are stored per user in the server's database and only used server-side. Runners never see them — they fetch test suites through the dashboard.
+        Credentials are stored per user in the server's database and only used server-side. Runners never see them — they only fetch the snap store credential for installs, via the dashboard.
       </div>
     </section>
 
@@ -154,7 +154,7 @@
       <p>Snaps published by your Store account are discovered automatically on the first collection. Use <a href="/snaps/add">Add Snap</a> to track any other snap by name.</p>
       <p>Each snap has two repository URLs, filled in from Store metadata (or by finding a <code>snapcraft.yaml</code> with that name in your GitHub repos) and editable on its detail page:</p>
       <ul class="docs-list">
-        <li><strong>Packaging repo</strong> — where the snapcraft recipe lives. Needed for version bumps, YARF suites, and rebuilds.</li>
+        <li><strong>Packaging repo</strong> — where the snapcraft recipe lives. Needed for version bumps and rebuilds.</li>
         <li><strong>Upstream repo</strong> — the upstream project, for issues/PRs and upstream maintenance.</li>
       </ul>
     </section>
@@ -171,8 +171,8 @@
       <p>Every test job is <strong>one snap version on one architecture</strong>, run on an enrolled <a href="/runners">runner</a> of that architecture:</p>
       <ol class="docs-steps">
         <li>The runner installs the snap from the job's channel (<code>candidate</code> or <code>edge</code>) in its real desktop session.</li>
-        <li>If the snap's packaging repo has a YARF suite, the runner runs it. Otherwise it launches the app, lets it render, and takes a screenshot (a smoke test).</li>
-        <li>Screenshots and the log are uploaded; the run is <em>passed</em> if the suite passed and no screenshot is blank.</li>
+        <li>It launches the app, lets it render, and takes a screenshot (a smoke test). Snaps marked as a <strong>console app</strong> on their detail page are launched inside a terminal window instead of bare, since a text UI has nothing to screenshot when run headless.</li>
+        <li>The screenshot and the log are uploaded; the run is <em>passed</em> if the app stayed running and the screenshot isn't blank.</li>
         <li>Candidate runs are then reviewed by the vision model (see <a href="#test-results">Results &amp; AI review</a>).</li>
       </ol>
       <h3 class="docs-h3">Architectures</h3>
@@ -197,7 +197,7 @@
       <h3 class="docs-h3">Setting one up</h3>
       <pre class="docs-code">sudo snap install automated-ken-runner --classic
 echo "$USER ALL=(root) NOPASSWD: /usr/bin/snap" | sudo tee /etc/sudoers.d/automated-ken-runner
-automated-ken-runner prepare-machine      # YARF, screenshot extension, autologin, no screen lock
+automated-ken-runner prepare-machine      # screenshot extension, autologin, no screen lock
 
 # On the Runners page: "+ Enroll a runner", then run the command it shows:
 automated-ken-runner enroll --server http://&lt;this-host&gt;:9080 --token &lt;token&gt;
@@ -216,27 +216,11 @@ systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
       <p>The <a href="/runners">Runners</a> page lists queued and running jobs with their architecture. Use ▲/▼ to change priority and <strong>Cancel</strong> to drop a queued job or stop a running one (the runner stops the test within about 15 seconds). A job running longer than the <strong>runner job timeout</strong> (Settings → Testing, default 10 minutes, counted from when a runner picks it up) is marked failed and its runner freed.</p>
     </section>
 
-    <!-- ================================================================ SUITE STRUCTURE -->
+    <!-- ================================================================ CONSOLE APPS -->
     <section class="docs-section" id="suite-structure">
-      <h2 class="docs-h2">YARF suites</h2>
-      <p>A suite is optional — without one, runners do a launch-and-screenshot smoke test. To test real interaction, add a YARF suite to the snap's <strong>packaging repo</strong>:</p>
-      <pre class="docs-code">tests/
-└── suite/
-    ├── __init__.robot      ← required: marks the suite
-    └── test_mysnap.robot   ← test cases</pre>
-      <p>The dashboard fetches <code>tests/suite/</code> with your GitHub token and hands it to the runner. The runner has already installed the snap, and runs the suite with YARF's <code>Mir</code> platform against its real display, for up to 30 minutes.</p>
-      <h3 class="docs-h3">Screenshots</h3>
-      <p>Screenshots embedded in YARF's <code>log.html</code> (from YARF's screenshot keywords) are extracted, checked for blank frames, and shown on the run's page. They're what the vision review compares, so capture the app's main views.</p>
-      <h3 class="docs-h3">Example test</h3>
-      <pre class="docs-code">*** Settings ***
-Library    Process
-
-*** Test Cases ***
-Application Launches
-    ${proc}=    Start Process    mysnap    alias=app
-    Sleep    5s
-    Process Should Be Running    app
-    Terminate Process    app</pre>
+      <h2 class="docs-h2">Console apps</h2>
+      <p>Every snap gets the same generic smoke test: install, launch, let it render, screenshot, done — no per-repo test code to write or maintain. There's no per-repo Robot/YARF suite support; a suite would run against yarf's <code>Mir</code> or <code>Vnc</code> platform, and neither has a working way to drive input/capture on a real GNOME/Wayland session (yarf's <code>Mir</code> platform needs wlroots-only Wayland protocols Mutter doesn't implement, and its <code>Vnc</code> platform has no local server to talk to on a stock GNOME desktop).</p>
+      <p>If a snap's UI is text/terminal only, launching it bare leaves nothing on screen to screenshot. Check <strong>Console app</strong> on the snap's detail page and the runner launches it inside a terminal window (<code>xterm</code>) instead, then screenshots that.</p>
     </section>
 
     <!-- ================================================================ RUNNING TESTS -->
@@ -315,7 +299,7 @@ Application Launches
         <li><strong>Stable</strong> — once every architecture is approved, the set is promoted. If any fails or isn't approved, the bump stops at <em>needs review</em> with the reason.</li>
       </ol>
       <p>With auto-promote off, a merged bump stops at <em>merged</em>, and its page shows the candidate release set to promote by hand.</p>
-      <p>On <a href="/version-bumps">Version Bumps</a>, open a PR to see each architecture's pre-merge status and screenshots side by side, then <strong>Merge</strong>, <strong>Reject</strong> or <strong>Re-run YARF</strong> (re-tests every architecture; only the newest run per architecture counts). After merge it shows the candidate release set with <strong>Promote</strong> (all architectures, or a confirmed override) and <strong>Re-run candidate tests</strong>. PRs merged or closed on GitHub are picked up automatically, and a merged bump never blocks the next bump for the same part.</p>
+      <p>On <a href="/version-bumps">Version Bumps</a>, open a PR to see each architecture's pre-merge status and screenshots side by side, then <strong>Merge</strong>, <strong>Reject</strong> or <strong>Re-run Tests</strong> (re-tests every architecture; only the newest run per architecture counts). After merge it shows the candidate release set with <strong>Promote</strong> (all architectures, or a confirmed override) and <strong>Re-run candidate tests</strong>. PRs merged or closed on GitHub are picked up automatically, and a merged bump never blocks the next bump for the same part.</p>
     </section>
 
     <!-- ================================================================ CODING TASKS -->
@@ -401,10 +385,9 @@ Application Launches
       <h3 class="docs-h3">GitHub rate limits</h3>
       <p>Set a GitHub token — the limit goes from 60 to 5,000 requests an hour.</p>
 
-      <h3 class="docs-h3">Running a suite by hand</h3>
-      <pre class="docs-code">sudo snap install yarf
-sudo snap install mysnap --channel candidate
-yarf --platform Mir --outdir /tmp/results path/to/packaging-repo/tests/suite</pre>
+      <h3 class="docs-h3">Reproducing a smoke test by hand</h3>
+      <pre class="docs-code">sudo snap install mysnap --channel candidate
+snap run mysnap          # or: xterm -e snap run mysnap, for a console app</pre>
     </section>
 
   </div>{# end docs-content #}

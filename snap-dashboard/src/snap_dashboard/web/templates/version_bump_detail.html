@@ -220,7 +220,7 @@
     {% endif %}
     {% if bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed') and not bump.merged_at %}
     <form method="post" action="/version-bumps/{{ bump.id }}/re-run-yarf">
-      <button type="submit" class="p-button">↺ Re-run YARF</button>
+      <button type="submit" class="p-button">↺ Re-run Tests</button>
     </form>
     {% endif %}
     {% if not bump.merged_at and bump.status != 'closed' %}
