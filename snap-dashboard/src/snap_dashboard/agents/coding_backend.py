@@ -56,6 +56,67 @@ class CodingDispatcher(Protocol):
     ) -> dict | None: ...
 
 
+class _CopilotWithLocalFallback:
+    """Wraps ``copilot_cloud_agent`` (the default backend) so an account with
+    no Copilot license degrades gracefully to the local Lemonade backend
+    instead of just failing every dispatch for the rest of the run.
+
+    ``CopilotAgentClient.start_task()`` already short-circuits its own
+    repeated 403s within a run (see ``github/copilot_agent.py``) and sets
+    ``_plan_required`` the first time it sees GitHub's
+    ``copilot_plan_required`` error — once that's set, every subsequent
+    (and the triggering) call here is instead delegated to a lazily-created
+    ``LocalLemonadeCodingDispatcher``, so a fleet-wide campaign started
+    against the default backend still makes progress with whatever local
+    model is configured, rather than the caller having to notice the 403s
+    and manually flip ``coding_task_backend`` to ``local_lemonade`` in
+    Settings.
+    """
+
+    def __init__(self, copilot: CopilotAgentClient, user_config, token: str) -> None:
+        self._copilot = copilot
+        self._uc = user_config
+        self._token = token
+        self._local = None
+
+    @property
+    def token(self) -> str:
+        return self._token
+
+    def _local_dispatcher(self):
+        if self._local is None:
+            from snap_dashboard.lemonade.coding_agent import LocalLemonadeCodingDispatcher
+
+            self._local = LocalLemonadeCodingDispatcher(self._uc, self._token)
+        return self._local
+
+    def start_task(
+        self,
+        owner: str,
+        repo: str,
+        prompt: str,
+        base_ref: str = "main",
+        create_pull_request: bool = True,
+        model: str | None = None,
+    ) -> dict | None:
+        if not self._copilot.plan_required:
+            task = self._copilot.start_task(
+                owner, repo, prompt, base_ref=base_ref,
+                create_pull_request=create_pull_request, model=model,
+            )
+            if task is not None or not self._copilot.plan_required:
+                return task
+            logger.info(
+                "coding_task_backend=copilot_cloud_agent has no Copilot license on this "
+                "account — falling back to the local Lemonade model for %s/%s (and the "
+                "rest of this run)", owner, repo,
+            )
+        return self._local_dispatcher().start_task(
+            owner, repo, prompt, base_ref=base_ref,
+            create_pull_request=create_pull_request, model=model,
+        )
+
+
 def get_coding_dispatcher(uc) -> CodingDispatcher | None:
     """Return the configured coding-task dispatcher for this user, or None.
 
@@ -72,7 +133,7 @@ def get_coding_dispatcher(uc) -> CodingDispatcher | None:
         if not token:
             logger.info("coding_task_backend=copilot_cloud_agent but no GitHub token configured")
             return None
-        return CopilotAgentClient(token)
+        return _CopilotWithLocalFallback(CopilotAgentClient(token), uc, token)
 
     if backend == "local_lemonade":
         token = getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or ""

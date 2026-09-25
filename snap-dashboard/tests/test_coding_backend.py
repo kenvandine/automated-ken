@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from snap_dashboard.agents.coding_backend import get_coding_dispatcher
+from snap_dashboard.agents.coding_backend import _CopilotWithLocalFallback, get_coding_dispatcher
 from snap_dashboard.github.copilot_agent import CopilotAgentClient
 
 
@@ -31,13 +31,14 @@ def test_none_config_returns_none() -> None:
 
 def test_default_backend_is_copilot_cloud_agent() -> None:
     client = get_coding_dispatcher(_uc(bot_github_token="tok123"))
-    assert isinstance(client, CopilotAgentClient)
+    assert isinstance(client, _CopilotWithLocalFallback)
+    assert isinstance(client._copilot, CopilotAgentClient)
     assert client.token == "tok123"
 
 
 def test_copilot_backend_falls_back_to_plain_github_token() -> None:
     client = get_coding_dispatcher(_uc(bot_github_token="", github_token="tok456"))
-    assert isinstance(client, CopilotAgentClient)
+    assert isinstance(client, _CopilotWithLocalFallback)
     assert client.token == "tok456"
 
 
