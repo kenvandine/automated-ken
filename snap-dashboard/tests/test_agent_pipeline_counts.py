@@ -111,4 +111,5 @@ async def test_pipeline_counts_standalone_test_runs(monkeypatch, isolated_sessio
     # "reviewing" plus the "passed"-but-undecided run both need attention.
     assert pipeline["under_review"] == 2
     assert pipeline["approved"] == 1
-    assert pipeline["merged"] == 1
+    assert pipeline["merged"] == 0
+    assert pipeline["released"] == 1

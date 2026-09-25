@@ -96,7 +96,7 @@ def agent_status(request: Request) -> JSONResponse:
         standalone_yarf_running = 0
         standalone_under_review = 0
         standalone_approved = 0
-        standalone_merged = 0
+        standalone_released = 0
         for r in standalone_runs:
             if r.status in ("triggered", "running"):
                 standalone_yarf_running += 1
@@ -108,7 +108,11 @@ def agent_status(request: Request) -> JSONResponse:
                 else:
                     standalone_under_review += 1
             elif r.status == "promoted":
-                standalone_merged += 1
+                # release_set.py sets this once a release set has actually
+                # been promoted to stable — i.e. "released", not merely
+                # "merged" (there's no PR/merge step at all for standalone
+                # runs against manually-added snaps).
+                standalone_released += 1
 
         pipeline = {
             "new_releases": new_releases,
@@ -116,9 +120,15 @@ def agent_status(request: Request) -> JSONResponse:
             "yarf_running": _bump_count("yarf_running") + standalone_yarf_running,
             "under_review": _bump_count("yarf_passed", "yarf_failed", "needs_review") + standalone_under_review,
             "approved": _bump_count("agent_approved") + standalone_approved,
-            "merged": _bump_count(
-                "merged", "awaiting_release", "candidate_testing", "stable_promoted", "stable_promoted_partial"
-            ) + standalone_merged,
+            # "Merged" = the PR merged on GitHub but not yet published/
+            # released anywhere. "Released" = actually shipped — published
+            # to edge and promoted through candidate to stable. These used
+            # to be lumped into a single misleading "merged" bucket that
+            # also counted fully-stable-released snaps.
+            "merged": _bump_count("merged", "awaiting_release"),
+            "released": _bump_count(
+                "candidate_testing", "stable_promoted", "stable_promoted_partial"
+            ) + standalone_released,
         }
 
         # Recent agent run history (last 20)

@@ -65,9 +65,15 @@
     </div>
     <div class="pipeline-arrow" id="arrow-4"><span class="arrow-dot"></span></div>
     <div class="pipeline-stage" id="stage-merged">
-      <div class="stage-icon">🚀</div>
+      <div class="stage-icon">🔗</div>
       <div class="stage-count" id="count-merged">—</div>
       <div class="stage-name">Merged</div>
+    </div>
+    <div class="pipeline-arrow" id="arrow-5"><span class="arrow-dot"></span></div>
+    <div class="pipeline-stage" id="stage-released">
+      <div class="stage-icon">🚀</div>
+      <div class="stage-count" id="count-released">—</div>
+      <div class="stage-name">Released</div>
     </div>
   </div>
 </div>
@@ -231,6 +237,7 @@ function updatePipeline(p) {
   setCount('count-review',   p.under_review);
   setCount('count-approved', p.approved);
   setCount('count-merged',   p.merged);
+  setCount('count-released', p.released);
 
   // Animate arrows when the destination stage has work
   setArrow('arrow-0', p.prs_open > 0);
@@ -238,6 +245,7 @@ function updatePipeline(p) {
   setArrow('arrow-2', p.under_review > 0);
   setArrow('arrow-3', p.approved > 0);
   setArrow('arrow-4', p.merged > 0);
+  setArrow('arrow-5', p.released > 0);
 
   // Highlight active stages
   highlightStage('stage-releases', p.new_releases > 0);
@@ -246,6 +254,7 @@ function updatePipeline(p) {
   highlightStage('stage-review',   p.under_review > 0);
   highlightStage('stage-approved', p.approved > 0);
   highlightStage('stage-merged',   p.merged > 0);
+  highlightStage('stage-released', p.released > 0);
 }
 
 function setCount(id, n) {
