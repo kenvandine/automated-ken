@@ -2,9 +2,27 @@
 
 ## Status
 
-Planning document. Nothing in this file is implemented yet. Mirrors the
-style of [`AGENTIC_PLAN.md`](AGENTIC_PLAN.md) — phased, independently
-shippable, with explicit DB changes per phase.
+**Implemented (September 2026)** — kept as the design record; the rest of
+this document is the original plan. How the shipped runner differs:
+
+- **Packaging:** a classic snap (`automated-ken-runner`, run as a
+  `systemctl --user` service), not the Debian package/PPA of Phase R7.
+- **Dispatch:** remote runners are the only dispatch path. There is no
+  GitHub Actions fallback and no per-test "Run on" picker; jobs are queued
+  per architecture and any idle runner of the same user and architecture
+  claims them (an operator can still pin a job to one runner).
+- **Architectures:** each runner reports its architecture; only amd64 and
+  arm64 are tested, and a candidate version's architectures are promoted
+  to stable together (`testing/release_set.py`).
+- **Machine preparation:** `automated-ken-runner prepare-machine` (not
+  `enroll`) installs YARF and a screenshot GNOME Shell extension, enables
+  autologin and disables lock/blanking. There is no `--skip-power-settings`.
+- **Suites:** read from the snap's own packaging repo (`tests/suite/`);
+  with no suite, the runner does a launch-and-screenshot smoke test.
+- **Cancellation/heartbeats:** heartbeats run on a background thread, so
+  cancels and liveness work while a job runs.
+
+Current setup instructions are in [`GETTING_STARTED.md`](GETTING_STARTED.md).
 
 ## Motivation
 

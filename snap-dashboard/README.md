@@ -1,201 +1,133 @@
-# snap-dashboard
+# snap-dashboard (the `automated-ken` snap)
 
-A self-hosted web dashboard for managing Ubuntu snap packages. It tracks channel versions, open issues and pull requests across your published snaps, and integrates with [YARF](https://snapcraft.io/yarf) for automated snap testing and promotion.
-
-## Features
-
-- **Auto-discovery** — finds all snaps for a given Snap Store publisher
-- **Channel tracking** — shows stable / candidate / beta / edge versions per architecture
-- **Issue & PR tracking** — fetches open GitHub issues and PRs from packaging and upstream repos
-- **YARF testing** — triggers GitHub Actions workflows to run YARF test suites against snaps, then shows results inline
-- **One-click promotion** — promotes a tested snap revision to stable via `snapcraft release`
-- **Multi-tenant** — GitHub OAuth login; first user becomes admin and manages an access allowlist
-- **Per-user isolation** — each user has their own set of snaps, test runs, and configuration
+The Automated Ken server: a FastAPI web dashboard plus the background
+agents that monitor snaps, open version-bump PRs, queue runner tests and
+promote release sets. For what the system does and how to set it up, see
+the [top-level README](../README.md) and
+[`GETTING_STARTED.md`](../GETTING_STARTED.md). This file covers running and
+developing the server itself.
 
 ## Requirements
 
 - Python 3.11+
-- A Snap Store publisher account
-- A GitHub account (for OAuth login)
-- A GitHub OAuth App (for multi-user login)
-- Optional: a [YARF testing repository](#yarf-testing-setup)
+- A GitHub OAuth App (for login)
 
-## Installation
+## Running from source
 
 ```bash
-git clone https://github.com/kenvandine/automated-ken
-cd automated-ken/snap-dashboard
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && . .venv/bin/activate
 pip install -e .
+snap-dashboard serve            # http://127.0.0.1:9080
 ```
 
-## Configuration
+## Server configuration
 
-Configuration is read from environment variables first, then from `~/.local/share/snap-dashboard/config.env` (or `$SNAP_DATA/config.env` when running as a snap).
+Read from environment variables first, then from `config.env` —
+`$SNAP_COMMON/config.env` in the snap (written by the `configure` hook from
+`snap set automated-ken …`), otherwise `~/.local/share/snap-dashboard/config.env`.
 
-### Server-level settings (config.env or environment)
+| Key | snap option | Default | Description |
+|-----|-------------|---------|-------------|
+| `GITHUB_CLIENT_ID` | `github-client-id` | — | OAuth App client ID (required) |
+| `GITHUB_CLIENT_SECRET` | `github-client-secret` | — | OAuth App client secret (required) |
+| `SESSION_SECRET` | `session-secret` | generated | Cookie-signing secret; generated and persisted on first run if unset |
+| `BIND` | `bind` | `127.0.0.1` | Listen address |
+| `PORT` | `port` | `9080` | Listen port |
+| `LEMONADE_EMBEDDED_PORT` | — | `13411` | Port of the bundled Lemonade server |
+| `GITHUB_TOKEN`, `PUBLISHER`, `COLLECT_INTERVAL_HOURS` | `github-token`, `publisher`, `interval` | — | Fallbacks for the `collect`/`add` CLI commands only |
 
-| Key | Required | Description |
-|-----|----------|-------------|
-| `SESSION_SECRET` | Yes | Random secret for signing session cookies. Generate with `python3 -c "import secrets; print(secrets.token_hex(32))"` |
-| `GITHUB_CLIENT_ID` | Yes | GitHub OAuth App client ID |
-| `GITHUB_CLIENT_SECRET` | Yes | GitHub OAuth App client secret |
-| `BIND` | No | Listen address (default: `127.0.0.1`) |
-| `PORT` | No | Listen port (default: `9080`) |
+Everything else is per user and set in the web UI (**Settings**).
 
-Example `~/.local/share/snap-dashboard/config.env`:
+## CLI
 
-```
-SESSION_SECRET=your-random-secret-here
-GITHUB_CLIENT_ID=Ov23liXXXXXXXXXXXXXX
-GITHUB_CLIENT_SECRET=your_client_secret_here
-```
+| Command | Purpose |
+|---------|---------|
+| `snap-dashboard serve [--bind ADDR] [--port N]` | Run the web server and agents |
+| `snap-dashboard collect` | Run one data collection using the CLI fallback settings |
+| `snap-dashboard add NAME [--packaging-repo URL] [--upstream-repo URL] [--notes TEXT]` | Track a snap |
+| `snap-dashboard remove NAME` | Stop tracking a snap |
+| `snap-dashboard list` | List tracked snaps |
 
-### Per-user settings
+In the snap, the `serve` app is a daemon and the CLI is `automated-ken.snap-dashboard`.
 
-All per-user settings (publisher, GitHub token, testing repo, collection interval) are configured through the **Settings** page in the web UI after logging in.
+## Users and access
 
-## GitHub OAuth App setup
+The first GitHub account to sign in becomes the administrator. Later logins
+must be on the allowlist (**Admin** page; logins are matched
+case-insensitively). Every user has their own snaps, runners, test runs,
+settings and agent activity.
 
-1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**
-2. Set **Application name**: `snap-dashboard`
-3. Set **Homepage URL**: `http://localhost:9080` (or your public URL)
-4. Set **Authorization callback URL**: `http://localhost:9080/auth/callback`
-5. Click **Register application**
-6. Copy the **Client ID** and generate a **Client Secret**
-7. Add both to your `config.env`
-
-## Running
+## Tests
 
 ```bash
-snap-dashboard serve
-```
-
-The dashboard will be available at `http://localhost:9080`.
-
-On first startup:
-1. Visit `http://localhost:9080` — you will be redirected to the login page
-2. Sign in with GitHub; you become the administrator automatically
-3. Complete the onboarding wizard (publisher name, GitHub token)
-4. A first collection run discovers your snaps
-
-## First-user admin
-
-The **first GitHub account to log in** becomes the administrator. As admin you can:
-- Add other GitHub accounts to the access allowlist (via `/admin`)
-- Toggle admin status for other users
-
-All subsequent logins require the user's GitHub account to be on the allowlist.
-
-## YARF Testing Setup
-
-YARF testing requires a separate **testing repository** on GitHub that contains your test suites and a GitHub Actions workflow.
-
-### 1. Create the testing repository
-
-Create a new GitHub repository (e.g. `you/snap-tests`).
-
-### 2. Add the workflow
-
-Download the workflow template from **Settings → Download Workflow Template** (or the Testing page when no repo is configured) and commit it to `.github/workflows/snap-test.yml` in your testing repository.
-
-### 3. Add a repository secret
-
-In your testing repository, go to **Settings → Secrets and variables → Actions** and add:
-
-- `SNAP_DASHBOARD_GITHUB_TOKEN` — a GitHub Personal Access Token with **repo** scope. This allows the workflow to push result branches and create PRs.
-
-### 4. Create test suites
-
-Organise YARF suites under:
-
-```
-suites/<snap_name>/suite/
-├── __init__.robot      # Suite setup/teardown (variables, Xvfb, etc.)
-└── test_<name>.robot   # Test cases
-```
-
-### 5. Configure snap-dashboard
-
-In **Settings**, set **Testing Repository** to `owner/repo` (e.g. `kenvandine/snap-tests`).
-
-### Testing workflow
-
-1. snap-dashboard detects a snap with a newer version in **candidate** or **edge** than **stable**
-2. You click **Run Tests** (or enable auto-test)
-3. snap-dashboard dispatches a `workflow_dispatch` event to the testing repository
-4. The workflow installs YARF, the snap under test, and runs the suite
-5. Results (including screenshots) are committed to a branch and a PR is opened
-6. snap-dashboard polls GitHub and updates the run status live
-7. Once tests pass, you can **Promote to Stable** directly from the dashboard
-
-## YARF suite structure
-
-```robot
-# suites/mysnap/suite/__init__.robot
-*** Settings ***
-Suite Setup     Start Virtual Display
-Suite Teardown  Stop Virtual Display
-
-*** Keywords ***
-Start Virtual Display
-    # Xvfb is started by the CI workflow; set DISPLAY if needed
-    Set Environment Variable    DISPLAY    :99
-
-Stop Virtual Display
-    Pass
-```
-
-```robot
-# suites/mysnap/suite/test_mysnap.robot
-*** Settings ***
-Library    Collections
-Library    OperatingSystem
-
-*** Test Cases ***
-Snap Is Installed
-    ${rc}=    Run And Return RC    snap list mysnap
-    Should Be Equal As Integers    ${rc}    0
-
-App Launches
-    ${handle}=    Start Process    mysnap
-    Sleep    2s
-    Process Should Be Running    ${handle}
-    Terminate Process    ${handle}
+pip install pytest anyio
+python -m pytest
 ```
 
 ## Project structure
 
 ```
-snap-dashboard/
-├── src/snap_dashboard/
-│   ├── auth.py               # Session auth helpers
-│   ├── collector.py          # Snap Store + GitHub data fetcher
-│   ├── config.py             # Server-level configuration
-│   ├── db/
-│   │   ├── models.py         # SQLAlchemy ORM models
-│   │   └── session.py        # DB engine, migrations
-│   ├── github/
-│   │   ├── client.py         # GitHub issues/PR client
-│   │   └── pr_viewer.py      # Test PR parsing
-│   ├── store/
-│   │   └── client.py         # Snap Store API client
-│   ├── testing/
-│   │   ├── orchestrator.py   # Workflow dispatch + status polling
-│   │   ├── promoter.py       # snapcraft release + PR closing
-│   │   └── workflow_template.py  # Embeds snap-test.yml template
-│   └── web/
-│       ├── app.py            # FastAPI app + middleware
-│       └── routes/           # auth, admin, dashboard, snaps, settings, testing
-├── pyproject.toml
-└── README.md
+src/snap_dashboard/
+├── cli.py                    Click CLI (serve, collect, add, remove, list)
+├── config.py                 Server config (env → config.env → defaults)
+├── auth.py                   Session auth + per-user settings view
+├── collector.py              Snap Store + GitHub/GitLab data collection
+├── agents/
+│   ├── base.py / runner.py   BaseAgent, thread pool, scheduler, live activity tracker
+│   ├── scheduling.py         Per-user periodic agent schedule
+│   ├── collector_agent.py    Periodic collection (+ automatic test queuing)
+│   ├── release_scanner.py    Upstream release detection
+│   ├── version_bumper.py     Version-bump PRs from the bot account
+│   ├── pr_monitor.py         Bump PR state machine: CI → runner tests → review → merge
+│   ├── screenshot_reviewer.py  Vision review of a bump's per-arch runs; one verdict per set
+│   ├── stable_promoter.py    Promotes a bump's architectures to stable together
+│   ├── test_run_auto_promoter.py  Reviews candidate runs; auto-promotes complete sets
+│   ├── runner_watchdog.py    Fails runner jobs that exceed the job timeout
+│   ├── stale_build_scanner.py  Rebuilds snaps with no recent publication
+│   ├── upstream_maintainer.py, repo_normalizer.py, coding_backend.py
+│   │                         Delegated coding tasks (Copilot cloud agent by default)
+│   └── snapcraft_credential_sync.py  Pushes the Store credential to repo secrets
+├── db/                       SQLAlchemy models; session + additive migrations
+├── github/                   GitHub/GitLab clients, bot client, Copilot agent API, secrets sync
+├── lemonade/                 Lemonade client, bundled server manager, task→model defaults
+├── runners/                  Runner token helpers and online/offline status
+├── snapcraft/                snapcraft.yaml fetch/parse, upstream version checks, build workflow template
+├── store/                    Snap Store API client
+├── testing/
+│   ├── orchestrator.py       What needs testing, testable architectures, job queuing
+│   ├── release_set.py        Candidate release sets: readiness and set promotion
+│   ├── baselines.py          Stable screenshot baselines
+│   ├── promoter.py           Store release API, PR merge
+│   └── suite_zip.py          Packages a repo's YARF suite for runners
+└── web/
+    ├── app.py                FastAPI app, startup scheduling
+    ├── routes/               Pages and APIs (runner_api.py is the runner protocol)
+    ├── templates/            Jinja2 templates
+    └── static/               CSS
 ```
+
+## Runner API
+
+Runners authenticate with a bearer secret issued at enrollment
+(`web/routes/runner_api.py`):
+
+| Endpoint | Purpose |
+|----------|---------|
+| `POST /api/runners/enroll` | Exchange a one-time token for a runner secret (reports name and architecture) |
+| `PATCH /api/runners/{id}/heartbeat` | Idle/lock state and architecture; response carries `cancel_requested` |
+| `GET /api/runners/{id}/next-job` | Long-poll for a job of this runner's user and architecture |
+| `GET /api/runners/{id}/jobs/{job}/suite` | Zip of the snap's YARF suite (404 → smoke test) |
+| `PATCH /api/runners/{id}/jobs/{job}` | Report status (`running`, `passed`, `failed`, `cancelled`, …) and log |
+| `POST /api/runners/{id}/jobs/{job}/screenshots` | Upload a screenshot |
 
 ## Data storage
 
-All data is stored in a SQLite database at `~/.local/share/snap-dashboard/snap-dashboard.db` (or `$SNAP_DATA/snap-dashboard.db` when running as a snap).
+SQLite at `$SNAP_COMMON/snap-dashboard.db` in the snap (shared across
+revisions, so refreshes don't duplicate it), or
+`~/.local/share/snap-dashboard/snap-dashboard.db` from source. Schema
+changes are additive `ALTER TABLE` migrations applied at startup
+(`db/session.py`).
 
 ## License
 
-GPL-3.0-or-later
+GPL-3.0-or-later (see `pyproject.toml`).

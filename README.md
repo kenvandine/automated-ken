@@ -1,56 +1,96 @@
-# snap-dashboard
+# Automated Ken
 
-An agentic snap maintenance platform for snap publishers. Monitors channel versions, automates version bump PRs, triggers YARF tests, rebuilds stale snaps, and presents everything in a live web dashboard — all running as a self-hosted snap.
+A self-hosted, agentic snap maintenance platform for snap publishers. It
+watches your snaps' channels and upstream projects, opens version-bump PRs,
+tests new versions on real amd64 and arm64 machines, reviews the
+screenshots with a local vision model, and promotes each version to
+`stable` for all architectures at once.
+
+It has two parts:
+
+| Component | What it is | Where it runs |
+|-----------|------------|---------------|
+| **`automated-ken`** (`snap-dashboard/`) | The web dashboard and the background agents | One server (strict snap) |
+| **`automated-ken-runner`** (`automated-ken-runner/`) | A test-execution agent that runs tests in a real desktop session | One or more dedicated test machines (classic snap) |
+
+New here? Follow [`GETTING_STARTED.md`](GETTING_STARTED.md), or
+[`QUICKSTART.md`](QUICKSTART.md) for the condensed version. The dashboard
+also has built-in help at `/docs`.
+
+## How it works
+
+```
+upstream release ──► Release Scanner ──► Version Bumper ──► bump PR on packaging repo
+                                                               │
+                                                  PR Monitor waits for CI to pass
+                                                               │
+                              one test job per architecture ◄──┘
+                              (amd64 runner, arm64 runner)
+                                                               │
+                        Screenshot Reviewer compares each arch against its stable baseline
+                                                               │
+                                        verdict for the whole set ──► you merge (or auto-merge)
+
+new candidate version ──► (auto-)test amd64 + arm64 on runners ──► vision review per arch
+                                                               │
+                       all architectures approved ──► promote the whole set to stable
+```
+
+- **Runners are matched by architecture.** Each test job targets one
+  architecture and is only picked up by a runner of that architecture
+  belonging to the same user. Only **amd64** and **arm64** are tested; other
+  architectures a snap ships (armhf, riscv64, …) are skipped.
+- **Releases are promoted as a set.** A candidate version's amd64 and arm64
+  revisions go to `stable` together, only once every architecture has passed
+  and (for auto-promotion) been approved by the vision review. You can
+  override a missing architecture manually, but the override has to be
+  confirmed and is recorded.
 
 ## Features
 
 ### Monitoring
-- **Channel comparison** — `stable`, `candidate`, `beta`, and `edge` side-by-side for every snap, colour-coded so promotable updates stand out
-- **Attention-needed highlights** — snaps where a newer revision is waiting in candidate/edge are surfaced at the top of the dashboard
-- **Issue & PR tracking** — open issues and pull requests fetched from GitHub and GitLab packaging repos, shown per snap
-- **Auto-discovery** — on first run, all snaps published by the configured publisher account are discovered via the Snap Store API
+- **Channel map** — `stable`, `candidate`, `beta` and `edge` per architecture for every snap
+- **Attention-needed highlights** — snaps with a newer version waiting in candidate/edge
+- **Issues & PRs** — open issues and PRs from the packaging and upstream repos (GitHub and GitLab)
+- **Auto-discovery** — on first run, every snap published by your Store account is added
 
 ### Agents
-A pool of background agents runs continuously and reports live to the dashboard:
 
-| Agent | What it does |
-|-------|-------------|
-| **Collector** | Refreshes Snap Store channel maps and GitHub/GitLab issue/PR counts on a per-user interval, so the dashboard stays current without manual refreshes |
-| **Release Scanner** | Checks packaging repos for new upstream releases; spawns a Version Bumper when found |
-| **Version Bumper** | Opens a version bump PR on the packaging repo via a bot GitHub account (no git clone — uses GitHub Contents API) |
-| **PR Monitor** | Polls open version bump PRs; triggers YARF tests when build CI passes |
-| **Screenshot Reviewer** | Uses a local Lemonade LLM (vision model) to compare before/after screenshots and approve or reject the PR |
-| **Stale Build Scanner** | Finds snaps with no new publication in N days; creates `automated-snap-build.yml` in the packaging repo if absent and dispatches a rebuild to the `candidate` channel |
+Background agents run on a schedule and report live on the **Agents** page.
 
-### YARF Testing
-- Trigger YARF snap tests against a GitHub Actions–based testing repository
-- Test results are polled from the Actions run status and reflected on the dashboard
-- Passed tests can be promoted to stable from the dashboard
-- **Planned:** a private remote test runner lets you register idle desktop/laptop machines as test-execution resources — see [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md) (not implemented yet)
+| Agent | What it does | When |
+|-------|-------------|------|
+| **Collector** | Refreshes Store channel maps and issue/PR data; with *automatic testing* on, queues tests for new candidate/edge versions | Every *collection interval* (default 6 h) |
+| **Release Scanner** | Checks each packaging repo's `snapcraft.yaml` parts for newer upstream releases | Every *release scan interval* (default 4 h), or **Scan Now** |
+| **Version Bumper** | Opens a version-bump PR from the bot account (GitHub Contents API, no clone) | When the scanner finds a release |
+| **PR Monitor** | Advances bump PRs: waits for CI, queues one runner test per architecture, hands results to the reviewer, auto-merges if enabled, and notices PRs merged/closed on GitHub | Every 5 min |
+| **Screenshot Reviewer** | Compares each architecture's screenshots with its stable baseline using the local vision model; gives the bump one verdict for the whole set | After a bump's tests finish |
+| **Candidate Reviewer / Auto-promoter** | Reviews candidate test runs the same way; with auto-promote on, promotes the release set when every architecture is approved | After a candidate run passes |
+| **Runner Watchdog** | Fails runner jobs that exceed the job timeout and frees the runner | Every 2 min |
+| **Stale Build Scanner** | Rebuilds snaps with no new publication in N days (adds `automated-snap-build.yml` if needed, publishes to `candidate`) | Daily, if enabled |
+| **Upstream Maintainer** | For upstream repos you own: dependency-update PRs, review requests, issue triage (via the coding backend) | Daily, if enabled |
+| **Fleet Normalization** | One-off pass that opens a PR per packaging repo to drop legacy `sync-release`-style workflows, normalise the build/publish workflow and add an `AGENTS.md` (via the coding backend) | On demand, if enabled |
+| **Snapcraft Credential Sync** | Pushes your Store credential into every packaging repo's Actions secrets | On demand |
 
-## Quick start (development)
+Tasks that need real code changes (fixing CI on a bump PR, upstream
+maintenance, fleet normalization) are delegated to a **coding backend** —
+GitHub Copilot cloud agent by default. Every dispatched task is listed on the
+**Copilot Tasks** page.
 
-```sh
-git clone https://github.com/kenvandine/automated-ken
-cd automated-ken/snap-dashboard
+### Testing on real hardware
+- Runners install the snap under test from the Store (`snap install/refresh --channel=…`) and run it in a real logged-in desktop session.
+- If the packaging repo has a YARF suite at `tests/suite/__init__.robot` the runner uses it; otherwise it runs a launch-and-screenshot smoke test.
+- A runner only takes jobs while its desktop has been idle for 2 minutes and isn't locked, so it never interferes with someone using the machine.
+- Queue, priorities, cancellation and per-runner status are on the **Runners** page.
 
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+### Local AI
+A private Lemonade server is
+bundled and started automatically (no setup), used for screenshot review
+and PR descriptions. You can point it at an existing Lemonade server
+instead in **Settings → Agents & AI**. Without a model, reviews fall back to
+"needs manual review" rather than approving anything.
 
-# Set a GitHub OAuth app client ID/secret in the environment
-export GITHUB_CLIENT_ID=...
-export GITHUB_CLIENT_SECRET=...
-
-snap-dashboard serve          # http://127.0.0.1:9080
-```
-
-Open `http://127.0.0.1:9080` and log in with your GitHub account. The first-run onboarding wizard guides you through configuring your publisher name, GitHub token, and (optionally) bot account details.
-
-## Snap installation
-
-This snap isn't tied to any particular publisher account — anyone can
-install it and point it at their own snaps.
+## Installation
 
 ```sh
 sudo snap install automated-ken
@@ -58,171 +98,94 @@ sudo snap install automated-ken
 
 Create a GitHub OAuth App (**GitHub → Settings → Developer settings → OAuth
 Apps → New OAuth App**) with callback URL `http://<host>:9080/auth/callback`,
-then configure it and start the server:
+then:
 
 ```sh
-snap set automated-ken github-client-id=...
-snap set automated-ken github-client-secret=...
+sudo snap set automated-ken github-client-id=... github-client-secret=...
 ```
 
-The `serve` daemon starts (and restarts itself to pick up the new config)
-automatically. Open `http://127.0.0.1:9080`, sign in with GitHub, and the
-onboarding wizard walks you through the rest (Snap Store publisher account,
-personal access token, etc.) — all stored per-account in the local database,
-so multiple people can run their own independent setups against the same
-snap-dashboard instance if they want to.
+The `serve` daemon restarts itself with the new config. Open
+`http://127.0.0.1:9080`, sign in with GitHub (the first account to sign in
+becomes the admin), and the onboarding wizard asks for your Store publisher
+name and a GitHub token.
 
-A session-signing secret is generated automatically on first run and
-persisted (`snap get automated-ken session-secret`), so logins survive
-daemon restarts without any extra configuration. To bind to a non-default
-address/port:
+Optional snap settings:
 
-```sh
-snap set automated-ken bind=0.0.0.0 port=8080
-```
+| Key | Default | Purpose |
+|-----|---------|---------|
+| `bind` | `127.0.0.1` | Listen address (use `0.0.0.0` so runners on other machines can reach it) |
+| `port` | `9080` | Listen port |
+| `session-secret` | generated | Cookie-signing secret; generated and persisted on first run |
+
+Then set up at least one runner — see
+[`GETTING_STARTED.md`](GETTING_STARTED.md#part-2-runner-machines).
 
 ## Configuration
 
-All per-user settings are managed through the **Settings** page in the web UI. The available settings are:
+Everything else is per user, on the **Settings** page:
 
-| Setting | Purpose |
-|---------|---------|
-| Publisher | Snap Store publisher account for auto-discovery |
-| GitHub token | Primary PAT — read issues/PRs, dispatch workflows |
-| Bot GitHub token | Secondary PAT for a bot account that opens version bump PRs |
-| Bot GitHub login | Display name of the bot account |
-| Testing repo | `owner/repo` of the YARF test repository |
-| Auto-test | Automatically trigger YARF tests when new versions land in candidate/edge |
-| Lemonade server URL | Base URL of a local lemonade-server for LLM vision analysis |
-| Lemonade model | Vision-capable model name (e.g. `llava`) |
-| Release scan interval | How often the release scanner runs (1–24 h) |
-| Auto-merge | Automatically merge agent-approved version bump PRs |
-| Auto-rebuild stale snaps | Dispatch rebuilds for snaps with no recent publication |
-| Staleness window | How many days without a publish before a snap is considered stale (default 30) |
+| Section | Settings |
+|---------|----------|
+| Publisher | Snap Store publisher account; collection interval |
+| GitHub Token | Personal access token with `repo` and `workflow` scopes — reading repos and issues/PRs, merging bump PRs, creating/dispatching build workflows, and Copilot tasks |
+| Snapcraft Store Credential | A `snapcraft export-login` credential — used to promote to `stable`, and synced into packaging repos for rebuilds |
+| Testing | Automatic testing of new candidate/edge versions; runner job timeout |
+| Agents & AI | Lemonade backend (embedded or system) and model override; bot account login/token for bump PRs; release scan interval; auto-merge; auto-promote and its confidence threshold; stale rebuilds and staleness window; coding backend and the delegated-task toggles |
 
-## Web dashboard
-
-### Pages
+## Pages
 
 | Path | Description |
 |------|-------------|
-| `/` | Summary dashboard — channel comparison + attention-needed cards |
-| `/snap/<name>` | Snap detail — full channel map, issue/PR list, edit repo URLs |
-| `/snaps/add` | Add a snap — Store search, auto-populate repo URLs |
-| `/testing` | YARF test runs — trigger, monitor, promote to stable |
-| `/agents` | Live agent activity feed |
-| `/version-bumps` | Version bump PRs grouped by status (approved / needs review / rejected) |
-| `/version-bumps/<id>` | PR detail — screenshots, agent reasoning, merge/reject actions |
+| `/` | Dashboard — channel comparison and attention-needed cards |
+| `/snap/<name>` | Snap detail — channel map, issues/PRs, repo URLs |
+| `/snaps/add` | Add a snap manually |
+| `/testing` | Needs-testing list (one row per version, all architectures), pending release sets, run history |
+| `/testing/runs/<id>` | One run — screenshots, AI review, and its release set |
+| `/runners` | Enroll/revoke runners; job queue with priorities and cancel |
+| `/version-bumps` | Version-bump PRs grouped by status |
+| `/version-bumps/<id>` | One bump — per-architecture results and screenshots, promote/merge/reject |
+| `/agents` | Live agent status and activity feed |
+| `/copilot-tasks` | Delegated coding tasks and their PRs |
+| `/stats` | Model usage stats |
 | `/settings` | Per-user configuration |
-| `/onboarding` | First-run wizard |
-| `/docs` | In-app workflow documentation |
+| `/admin` | Allowlist and admin users (admins only) |
+| `/docs` | Built-in help |
 
-## Automated snap builds (stale rebuild)
+## Data and network access
 
-When **Auto-rebuild stale snaps** is enabled, the Stale Build Scanner agent:
+All state lives in SQLite at `$SNAP_COMMON/snap-dashboard.db` (snap) or
+`~/.local/share/snap-dashboard/snap-dashboard.db` (dev). The server talks to:
 
-1. Identifies snaps where the most recent channel map publication is older than the configured staleness window.
-2. Creates `.github/workflows/automated-snap-build.yml` in the snap's packaging repo if it doesn't exist (via GitHub Contents API — no clone needed).
-3. Dispatches a `workflow_dispatch` event to trigger the workflow, which builds and publishes to the `candidate` channel.
-4. Records the trigger to avoid re-firing within the same window.
+- `api.snapcraft.io` / `dashboard.snapcraft.io` — channel maps, and releasing revisions to `stable`
+- `api.github.com` — repos, issues/PRs, branches/PRs from the bot account, Actions secrets, Copilot agent tasks
+- `gitlab.com` — issues/PRs for GitLab-hosted repos
+- The bundled Lemonade server (localhost) — or your own, if configured
+- Your runners, which poll the server over HTTP(S); runners never accept inbound connections
 
-The build workflow requires a `SNAPCRAFT_STORE_CREDENTIALS` secret in each packaging repo. Use the bundled helper script to set it across all repos at once:
-
-```sh
-snapcraft export-login --snaps '*' --channels candidate --acls package_upload creds.txt
-./set-snapcraft-secret.sh creds.txt
-```
-
-> **Note:** GitHub personal accounts don't support account-level secrets. Either add the secret to each repo individually (the script handles this), or create a GitHub Organisation and use org-level secrets.
-
-## Project structure
-
-```
-snap-dashboard/
-├── src/snap_dashboard/
-│   ├── cli.py                   Click CLI entry point
-│   ├── collector.py             Snap Store + GitHub data collection pipeline
-│   ├── config.py                Config loader (env → config.env → defaults)
-│   ├── auth.py                  GitHub OAuth + session helpers
-│   ├── agents/
-│   │   ├── base.py              BaseAgent abstract class
-│   │   ├── runner.py            Thread pool + periodic scheduler
-│   │   ├── scheduling.py        Per-user agent scheduling (single source of truth)
-│   │   ├── collector_agent.py   Periodic Store/GitHub data refresh
-│   │   ├── release_scanner.py   Upstream release detection
-│   │   ├── version_bumper.py    Version bump PR creation
-│   │   ├── pr_monitor.py        CI status polling + YARF trigger
-│   │   ├── screenshot_reviewer.py  LLM vision comparison
-│   │   └── stale_build_scanner.py  Stale snap rebuild trigger
-│   ├── db/
-│   │   ├── models.py            SQLAlchemy ORM models
-│   │   └── session.py           Session factory + init_db() + migrations
-│   ├── github/
-│   │   ├── client.py            Issues/PR fetching (GitHub + GitLab)
-│   │   ├── utils.py             Repo URL/slug parsing helpers
-│   │   ├── bot_client.py        Bot account: branches, files, PRs, workflow dispatch
-│   │   └── pr_viewer.py         Test result PR parsing
-│   ├── lemonade/
-│   │   └── client.py            OpenAI-compatible client for lemonade-server
-│   ├── snapcraft/
-│   │   ├── fetcher.py           Fetch snapcraft.yaml via GitHub Contents API
-│   │   ├── parser.py            Parse snapcraft.yaml source parts
-│   │   ├── upstream.py          Latest-version detection (GitHub/PyPI/GitLab)
-│   │   └── build_workflow_template.py  automated-snap-build.yml template
-│   ├── store/
-│   │   └── client.py            Snap Store API v2 client
-│   ├── testing/
-│   │   ├── orchestrator.py      YARF workflow dispatch + status polling
-│   │   ├── promoter.py          Snap Store channel promotion
-│   │   └── workflow_template.py snap-test.yml YARF workflow template
-│   └── web/
-│       ├── app.py               FastAPI application + agent startup
-│       ├── routes/              Route handlers
-│       ├── templates/           Jinja2 HTML templates
-│       └── static/              CSS + JS assets
-├── set-snapcraft-secret.sh      Helper: set SNAPCRAFT_STORE_CREDENTIALS across all repos
-├── snap/
-│   ├── snapcraft.yaml           Snap package definition
-│   └── hooks/configure          snap set handler
-└── bin/snap-dashboard           Wrapper script for the snap
-```
-
-## Data storage
-
-All data is stored locally in SQLite:
-- **Snap (runtime):** `$SNAP_COMMON/snap-dashboard.db` — deliberately
-  `$SNAP_COMMON` (shared across snap revisions) rather than `$SNAP_DATA`
-  (per-revision), so refreshes don't leave duplicate copies of the
-  database, config, and downloaded Lemonade model behind.
-- **Dev mode:** `~/.local/share/snap-dashboard/snap-dashboard.db`
-
-No data is sent to any third party. The tool only reads from:
-- `https://api.snapcraft.io` — public snap metadata and channel maps
-- `https://api.github.com` — repository data (token optional but recommended)
-- `https://gitlab.com/api/v4` — GitLab repository data (optional)
-- Local lemonade-server — LLM vision analysis (optional, self-hosted)
-
-## Building the snap
+## Development
 
 ```sh
-cd snap-dashboard
-snapcraft
-sudo snap install automated-ken_*.snap --dangerous
+git clone https://github.com/kenvandine/automated-ken
+cd automated-ken/snap-dashboard
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e . pytest anyio
+export GITHUB_CLIENT_ID=... GITHUB_CLIENT_SECRET=...
+snap-dashboard serve          # http://127.0.0.1:9080
+python -m pytest              # test suite
 ```
 
-## Dependencies
+Build the snaps with `snapcraft pack` in `snap-dashboard/` and
+`automated-ken-runner/`. See [`snap-dashboard/README.md`](snap-dashboard/README.md)
+and [`automated-ken-runner/README.md`](automated-ken-runner/README.md) for
+component details.
 
-| Package | Use |
-|---------|-----|
-| `fastapi` | Web framework |
-| `uvicorn` | ASGI server |
-| `sqlalchemy` | ORM / SQLite |
-| `click` | CLI framework |
-| `httpx` | HTTP client (Store, GitHub, Lemonade) |
-| `jinja2` | HTML templating |
-| `python-multipart` | Form parsing |
-| `pyyaml` | snapcraft.yaml parsing |
+## Design documents
+
+[`SPEC.md`](SPEC.md), [`AGENTIC_PLAN.md`](AGENTIC_PLAN.md) and
+[`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md) record the original designs.
+Each has a status note at the top describing how the shipped system differs.
 
 ## License
 
-MIT
+The server (`snap-dashboard/`) is GPL-3.0-or-later and the runner
+(`automated-ken-runner/`) is MIT, as declared in each `pyproject.toml`.

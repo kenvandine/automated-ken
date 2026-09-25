@@ -10,8 +10,8 @@ to screenshot), and the screenshot-capture GNOME Shell extension (see
 Called from ``automated-ken-runner prepare-machine`` alongside
 ``deps.ensure_dependencies`` so onboarding a machine is a single command.
 Every step here is idempotent — re-running this on an already-configured
-machine is a no-op (returns quickly, does not reboot) — since the run
-loop's startup self-heal also invokes it on every service restart.
+machine is a no-op (returns quickly, does not reboot). Unlike the
+dependency check, the run loop does not call this on startup.
 """
 
 from __future__ import annotations

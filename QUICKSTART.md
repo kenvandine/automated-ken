@@ -1,77 +1,71 @@
 # Quick Start
 
-Locally-built snaps for both components — not yet published to the Snap
-Store. Full details in [`GETTING_STARTED.md`](GETTING_STARTED.md); this is
-the condensed "just get it running" version.
+The condensed "just get it running" version. Details and explanations are
+in [`GETTING_STARTED.md`](GETTING_STARTED.md).
 
-Artifacts built this session:
-- `snap-dashboard/automated-ken_0.1.0_amd64.snap` (strict confinement)
-- `automated-ken-runner/automated-ken-runner_0.1.0_amd64.snap` (classic confinement)
+## 1. Dashboard server
 
-## 1. Install the dashboard
+Create a GitHub OAuth App (**GitHub → Settings → Developer settings → OAuth
+Apps**) with callback `http://<host>:9080/auth/callback`, then:
 
 ```bash
-cd ~/src/github/kenvandine/automated-ken/snap-dashboard
-sudo snap install ./automated-ken_0.1.0_amd64.snap --dangerous
+sudo snap install automated-ken
+sudo snap set automated-ken github-client-id=<id> github-client-secret=<secret> bind=0.0.0.0
 ```
 
-## 2. GitHub OAuth App + PAT
+Open **http://&lt;host&gt;:9080**, sign in with GitHub (first login = admin),
+and enter your Store publisher name in onboarding. Then in **Settings**:
 
-- Create an OAuth App: **GitHub → Settings → Developer settings → OAuth Apps**
-  - Homepage: `http://127.0.0.1:9080`
-  - Callback: `http://127.0.0.1:9080/auth/callback`
-- Create a PAT with `repo` + `actions` scopes.
+- **GitHub Token** — a PAT with `repo` and `workflow` scopes
+- **Snapcraft Store Credential** — output of `snapcraft export-login -`
+- **Agents & AI** — bot account login + token (for version-bump PRs)
+
+## 2. Runners (one amd64, one arm64)
+
+On each **dedicated** test machine (logged into GNOME; this enables
+autologin and disables screen lock):
 
 ```bash
-sudo snap set automated-ken github-client-id=<id> github-client-secret=<secret>
-sudo snap start automated-ken
+sudo snap install automated-ken-runner --classic
+echo "$USER ALL=(root) NOPASSWD: /usr/bin/snap" | sudo tee /etc/sudoers.d/automated-ken-runner
+automated-ken-runner prepare-machine
 ```
 
-Open **http://127.0.0.1:9080**, sign in with GitHub, and complete onboarding
-(publisher name, PAT, testing repo — see `GETTING_STARTED.md` steps 5–7).
-
-## 3. Install a runner (optional, for real-desktop YARF testing)
-
-On a **dedicated** test machine (this disables screen-lock/suspend):
-
-```bash
-sudo snap install ./automated-ken-runner_0.1.0_amd64.snap --classic --dangerous
-```
-
-On the dashboard, **Runners → Add runner** for a one-time token, then:
+On the dashboard, **Runners → + Enroll a runner**, then run the command it
+shows on the machine and start the service:
 
 ```bash
 automated-ken-runner enroll --server http://<dashboard-host>:9080 --token <token>
-systemctl --user enable --now automated-ken-runner
+systemctl --user enable --now snap.automated-ken-runner.run.service
 ```
 
-Verify it shows `idle` on the **Runners** page.
+It should appear on **Runners** as `idle` with its architecture.
 
-## 4. Try it out
+## 3. Try it out
 
-1. **Testing** page → trigger a YARF test on a snap with a version bump pending.
-2. **Version bumps** page → review/merge agent-opened PRs.
-3. **Settings → Agents & AI** → enable auto-test, auto-merge, delegated coding
-   tasks as desired.
+1. **Testing** → **Run Tests (amd64, arm64)** on a snap with a newer candidate version.
+2. When both architectures pass, **Pending Promotion → 🚀 Promote set to Stable**.
+3. **Version Bumps** → review agent-opened PRs; each shows every architecture's result.
+4. **Settings** → turn on automatic testing, auto-merge and auto-promote once you trust it.
 
-## Rebuilding the snaps
+## Building the snaps yourself
 
 ```bash
 cd snap-dashboard && snapcraft pack
 cd ../automated-ken-runner && snapcraft pack
+sudo snap install ./automated-ken_*.snap --dangerous
+sudo snap install ./automated-ken-runner_*.snap --classic --dangerous
 ```
 
-Note: `automated-ken-runner` is classic-confinement, so its `snapcraft.yaml`
-explicitly stages a Python interpreter (`stage-packages:
-python3.12-minimal`, etc.) — classic snaps don't get the base snap's
-runtime mounted, so the strict-confinement fallback to `/usr/bin/python3.12`
-doesn't apply there.
+`automated-ken-runner` is classic, so its `snapcraft.yaml` stages its own
+Python interpreter (classic snaps don't get the base snap's runtime).
 
-| Page | URL |
+| Page | Path |
 |---|---|
-| Dashboard | http://127.0.0.1:9080 |
-| Testing | http://127.0.0.1:9080/testing |
-| Agent activity | http://127.0.0.1:9080/agents |
-| Version bumps | http://127.0.0.1:9080/version-bumps |
-| Runners | http://127.0.0.1:9080/runners |
-| Settings | http://127.0.0.1:9080/settings |
+| Dashboard | `/` |
+| Testing | `/testing` |
+| Runners | `/runners` |
+| Version bumps | `/version-bumps` |
+| Agent activity | `/agents` |
+| Settings | `/settings` |
+| Help | `/docs` |

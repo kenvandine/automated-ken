@@ -71,13 +71,8 @@
         {% endif %}
         {% endif %}
       </div>
-      {% elif config.testing_repo %}
-      <form method="post" action="/testing/trigger/{{ item.snap.name }}" class="attention-test-form">
-        <input type="hidden" name="from_channel" value="edge">
-        <input type="hidden" name="version" value="{{ item.edge_ver }}">
-        <input type="hidden" name="revision" value="">
-        <button type="submit" class="p-button is-small">Run Tests</button>
-      </form>
+      {% else %}
+      <a href="/testing" class="p-button is-small">Test on runners</a>
       {% endif %}
     </div>
     {% endfor %}

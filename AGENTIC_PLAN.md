@@ -1,5 +1,15 @@
 # Agentic Snap Maintenance System — Implementation Plan
 
+> **Status:** Implemented — kept as the design record. Differences from the
+> plan below: YARF tests run on enrolled remote runners (one job per
+> architecture, amd64 and arm64) rather than GitHub Actions; a bump's
+> architectures are reviewed as a set and promoted together; Lemonade is
+> bundled and started automatically (task-specific default models) rather
+> than an external server you configure; and more agents were added since
+> (collector, runner watchdog, candidate reviewer/auto-promoter, upstream
+> maintainer, fleet normalization, credential sync). See
+> [`README.md`](README.md) for the current system.
+
 ## Overview
 
 This document describes the planned evolution of snap-dashboard from a monitoring

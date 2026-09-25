@@ -1,10 +1,12 @@
 # snap-dashboard — Original Project Specification
 
-> **Note:** This document describes the initial scope (Phases 1–6). The project
-> has since grown significantly. For the current architecture and feature set see
-> [`README.md`](README.md). For the agentic features (Phases 7–13) see
-> [`AGENTIC_PLAN.md`](AGENTIC_PLAN.md). For the (planned) private remote test
-> runner see [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md).
+> **Status:** Historical — the initial scope (Phases 1–6). The project has
+> since grown significantly; for the current architecture and feature set see
+> [`README.md`](README.md). Notably, YARF tests no longer run on GitHub Actions
+> from a shared testing repo: they run on enrolled remote runners (see
+> [`REMOTE_RUNNER_PLAN.md`](REMOTE_RUNNER_PLAN.md)), and promotion goes
+> through the Store API rather than the `snapcraft` CLI. The agentic features
+> (Phases 7–13) are described in [`AGENTIC_PLAN.md`](AGENTIC_PLAN.md).
 
 A personal snap maintenance dashboard for ken-vandine. Tracks channel versions,
 open PRs, issues, and release status across all snaps published by (or maintained

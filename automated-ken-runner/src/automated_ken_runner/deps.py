@@ -33,6 +33,8 @@ _OTHER_REQUIRED_TOOLS = {
 
 
 def _snap_installed(name: str) -> bool:
+    if not shutil.which("snap"):
+        return False
     return (
         subprocess.run(
             ["snap", "list", name], capture_output=True, timeout=15, check=False
@@ -76,6 +78,22 @@ def ensure_dependencies(echo: Callable[[str], None] | None = None, auto_install:
         if not found:
             ok = False
 
+    # Jobs run `sudo snap install/refresh` from a background service with
+    # no terminal, so sudo must not prompt for a password for `snap`.
+    if shutil.which("sudo") and shutil.which("snap"):
+        nopasswd = subprocess.run(
+            ["sudo", "-n", "snap", "version"], capture_output=True, timeout=15, check=False
+        ).returncode == 0
+        if nopasswd:
+            _say(f"  {'sudo snap':12s} {'OK (no password prompt)':30s}")
+        else:
+            _say(
+                f"  {'sudo snap':12s} {'NEEDS A PASSWORD':30s} Jobs can't install snaps. Allow it with a "
+                "sudoers drop-in, e.g.: echo \"$USER ALL=(root) NOPASSWD: /usr/bin/snap\" | "
+                "sudo tee /etc/sudoers.d/automated-ken-runner"
+            )
+            ok = False
+
     for snap_name in _REQUIRED_SNAPS:
         found = shutil.which(snap_name)
         if found:
@@ -87,7 +105,7 @@ def ensure_dependencies(echo: Callable[[str], None] | None = None, auto_install:
             # restart picks up the new PATH) — nothing more to do here.
             _say(f"  {snap_name:12s} installed via snap but not yet on PATH")
             continue
-        if not auto_install:
+        if not auto_install or not shutil.which("snap"):
             _say(f"  {snap_name:12s} NOT FOUND — run 'sudo snap install {snap_name}'")
             ok = False
             continue

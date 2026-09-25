@@ -6,7 +6,7 @@
 <div class="page-title-row">
   <div>
     <h2 class="page-heading">Help &amp; Documentation</h2>
-    <p class="text-muted">Everything you need to get the most out of snap-dashboard</p>
+    <p class="text-muted">How Automated Ken monitors, tests and promotes your snaps</p>
   </div>
 </div>
 
@@ -17,500 +17,387 @@
     <div class="docs-nav-group">
       <span class="docs-nav-heading">Getting Started</span>
       <a href="#overview" class="docs-nav-link">Overview</a>
-      <a href="#first-login" class="docs-nav-link">First login</a>
-      <a href="#onboarding" class="docs-nav-link">Onboarding</a>
+      <a href="#first-login" class="docs-nav-link">First login &amp; onboarding</a>
+      <a href="#credentials" class="docs-nav-link">Tokens &amp; credentials</a>
     </div>
     <div class="docs-nav-group">
       <span class="docs-nav-heading">Dashboard</span>
       <a href="#dashboard" class="docs-nav-link">Dashboard overview</a>
       <a href="#adding-snaps" class="docs-nav-link">Adding snaps</a>
-      <a href="#channel-map" class="docs-nav-link">Channel map</a>
       <a href="#issues-prs" class="docs-nav-link">Issues &amp; PRs</a>
     </div>
     <div class="docs-nav-group">
-      <span class="docs-nav-heading">YARF Testing</span>
-      <a href="#testing-overview" class="docs-nav-link">Testing overview</a>
-      <a href="#testing-repo-setup" class="docs-nav-link">Testing repo setup</a>
-      <a href="#suite-structure" class="docs-nav-link">Suite structure</a>
+      <span class="docs-nav-heading">Testing</span>
+      <a href="#testing-overview" class="docs-nav-link">How testing works</a>
+      <a href="#runners" class="docs-nav-link">Runners</a>
+      <a href="#suite-structure" class="docs-nav-link">YARF suites</a>
       <a href="#running-tests" class="docs-nav-link">Running tests</a>
-      <a href="#test-results" class="docs-nav-link">Reading results</a>
-      <a href="#promotion" class="docs-nav-link">Promoting to stable</a>
+      <a href="#test-results" class="docs-nav-link">Results &amp; AI review</a>
+      <a href="#promotion" class="docs-nav-link">Promoting a release set</a>
     </div>
     <div class="docs-nav-group">
-      <span class="docs-nav-heading">Configuration</span>
-      <a href="#settings" class="docs-nav-link">Settings reference</a>
-      <a href="#github-token" class="docs-nav-link">GitHub token</a>
-      <a href="#admin" class="docs-nav-link">Admin &amp; allowlist</a>
+      <span class="docs-nav-heading">Automation</span>
+      <a href="#agents" class="docs-nav-link">Agents</a>
+      <a href="#version-bumps" class="docs-nav-link">Version-bump PRs</a>
+      <a href="#coding-tasks" class="docs-nav-link">Delegated coding tasks</a>
+      <a href="#lemonade" class="docs-nav-link">Local AI (Lemonade)</a>
     </div>
     <div class="docs-nav-group">
       <span class="docs-nav-heading">Reference</span>
+      <a href="#settings" class="docs-nav-link">Settings reference</a>
+      <a href="#admin" class="docs-nav-link">Admin &amp; allowlist</a>
       <a href="#troubleshooting" class="docs-nav-link">Troubleshooting</a>
-      <a href="#local-testing" class="docs-nav-link">Running tests locally</a>
     </div>
   </nav>
 
   <!-- Main content -->
   <div class="docs-content" id="docs-content">
 
-    <!-- ================================================================
-         OVERVIEW
-         ================================================================ -->
+    <!-- ================================================================ OVERVIEW -->
     <section class="docs-section" id="overview">
       <h2 class="docs-h2">Overview</h2>
-      <p>snap-dashboard is a self-hosted web application for managing Ubuntu snap packages. It keeps track of your published snaps, monitors channel versions across architectures, surfaces open GitHub issues and pull requests, and integrates with <strong>YARF</strong> (Yet Another Robot Framework) to run automated tests against snaps before promoting them to stable.</p>
+      <p>Automated Ken watches your snaps' channels and upstream projects, opens version-bump PRs, tests new versions on real amd64 and arm64 machines, reviews the screenshots with a local vision model, and promotes each version to <code>stable</code> for all its architectures at once.</p>
 
       <div class="docs-feature-grid">
         <div class="docs-feature-card">
           <div class="docs-feature-icon">📦</div>
           <div>
             <strong>Channel tracking</strong>
-            <p>See stable, candidate, beta, and edge versions per architecture side-by-side.</p>
+            <p>stable, candidate, beta and edge per architecture, plus open issues and PRs.</p>
           </div>
         </div>
         <div class="docs-feature-card">
-          <div class="docs-feature-icon">🐛</div>
+          <div class="docs-feature-icon">🔧</div>
           <div>
-            <strong>Issue &amp; PR tracking</strong>
-            <p>Open GitHub issues and PRs from packaging and upstream repositories, in one place.</p>
+            <strong>Version bumps</strong>
+            <p>New upstream releases become PRs on your packaging repos, opened by a bot account.</p>
           </div>
         </div>
         <div class="docs-feature-card">
-          <div class="docs-feature-icon">🧪</div>
+          <div class="docs-feature-icon">🖥</div>
           <div>
-            <strong>Automated YARF testing</strong>
-            <p>Trigger GitHub Actions test runs against any snap, see results and screenshots inline.</p>
+            <strong>Real-hardware testing</strong>
+            <p>Each architecture is tested on its own runner machine, in a real desktop session.</p>
           </div>
         </div>
         <div class="docs-feature-card">
           <div class="docs-feature-icon">🚀</div>
           <div>
-            <strong>One-click promotion</strong>
-            <p>Promote a tested revision to stable directly from the dashboard.</p>
+            <strong>Release sets</strong>
+            <p>amd64 and arm64 are promoted to stable together, after every architecture passes.</p>
           </div>
         </div>
       </div>
     </section>
 
-    <!-- ================================================================
-         FIRST LOGIN
-         ================================================================ -->
+    <!-- ================================================================ FIRST LOGIN -->
     <section class="docs-section" id="first-login">
-      <h2 class="docs-h2">First login</h2>
-      <p>snap-dashboard uses <strong>GitHub OAuth</strong> for authentication. Click <strong>Sign in with GitHub</strong> on the login page and authorise the app.</p>
-
-      <h3 class="docs-h3">First-user admin</h3>
-      <p>The <strong>first GitHub account to log in</strong> becomes the administrator automatically. As admin you can:</p>
-      <ul class="docs-list">
-        <li>Add other users to the <strong>access allowlist</strong> via the <a href="/admin">Admin</a> page</li>
-        <li>Toggle admin status for other users</li>
-      </ul>
-      <p>All subsequent logins require the account to be on the allowlist first.</p>
-    </section>
-
-    <!-- ================================================================
-         ONBOARDING
-         ================================================================ -->
-    <section class="docs-section" id="onboarding">
-      <h2 class="docs-h2">Onboarding</h2>
-      <p>After your first login, an onboarding wizard guides you through setup:</p>
-
+      <h2 class="docs-h2">First login &amp; onboarding</h2>
+      <p>Sign in with <strong>GitHub</strong>. The first account to sign in becomes the administrator; everyone after that must be added to the allowlist on the <a href="/admin">Admin</a> page first.</p>
+      <p>The onboarding wizard asks for:</p>
       <ol class="docs-steps">
-        <li>
-          <strong>Publisher name</strong> — your Snap Store publisher account name (e.g. <code>ken-vandine</code>). snap-dashboard uses this to auto-discover all your published snaps.
-        </li>
-        <li>
-          <strong>GitHub token</strong> — optional, but recommended. A Personal Access Token increases the GitHub API rate limit from 60 to 5,000 requests/hour, enabling issue and PR tracking and test workflow dispatch.
-        </li>
-        <li>
-          <strong>First collection</strong> — once you click "Go to Dashboard" the first collection run is triggered in the background. It may take a minute or two to fetch all snap data.
-        </li>
+        <li><strong>Snap Store publisher</strong> — your Store account name (e.g. <code>ken-vandine</code>). Every snap it publishes is added automatically.</li>
+        <li><strong>GitHub token</strong> — optional in the wizard, but most features need it (see below).</li>
       </ol>
-
-      <p>You can change any of these settings later from <a href="/settings">Settings</a>.</p>
+      <p>When you finish, the first data collection runs in the background and your agents are scheduled. Everything can be changed later in <a href="/settings">Settings</a>.</p>
     </section>
 
-    <!-- ================================================================
-         DASHBOARD
-         ================================================================ -->
+    <!-- ================================================================ CREDENTIALS -->
+    <section class="docs-section" id="credentials">
+      <h2 class="docs-h2">Tokens &amp; credentials</h2>
+      <div class="docs-table-wrapper">
+        <table class="docs-table">
+          <thead><tr><th>Credential</th><th>Where</th><th>Used for</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><strong>GitHub token</strong><br><span class="text-muted small">classic PAT: <code>repo</code> + <code>workflow</code></span></td>
+              <td>Settings → GitHub Token</td>
+              <td>Reading packaging repos and issues/PRs, downloading YARF suites for runners, merging bump PRs, creating and dispatching build workflows, setting Actions secrets, creating Copilot tasks. Without it, GitHub allows only 60 API requests an hour.</td>
+            </tr>
+            <tr>
+              <td><strong>Snap Store credential</strong><br><span class="text-muted small"><code>snapcraft export-login -</code></span></td>
+              <td>Settings → Snapcraft Store Credential</td>
+              <td>Releasing revisions to <code>stable</code> through the Store API, and — with <strong>Sync to All Packaging Repos Now</strong> — the <code>SNAPCRAFT_STORE_CREDENTIALS</code> secret that rebuild workflows publish with.</td>
+            </tr>
+            <tr>
+              <td><strong>Bot account token</strong><br><span class="text-muted small"><code>repo</code></span></td>
+              <td>Settings → Agents &amp; AI</td>
+              <td>Opening version-bump PRs from a separate account. Without it, no bump PRs are opened.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="docs-callout docs-callout-info">
+        Credentials are stored per user in the server's database and only used server-side. Runners never see them — they fetch test suites through the dashboard.
+      </div>
+    </section>
+
+    <!-- ================================================================ DASHBOARD -->
     <section class="docs-section" id="dashboard">
       <h2 class="docs-h2">Dashboard overview</h2>
-      <p>The dashboard shows all your tracked snaps at a glance. The <strong>Attention Needed</strong> section at the top highlights snaps where a newer version exists in candidate/edge than stable — these are candidates for testing and promotion.</p>
-
+      <p>The dashboard lists every tracked snap with its channel versions. <strong>Attention Needed</strong> at the top highlights snaps with a newer version in candidate or edge than in stable.</p>
       <h3 class="docs-h3">Channel version badges</h3>
       <ul class="docs-list">
         <li><span class="p-status-label p-status-label--positive">green</span> — same as stable (or is stable)</li>
-        <li><span class="p-status-label p-status-label--caution">amber</span> — different from stable (newer)</li>
+        <li><span class="p-status-label p-status-label--caution">amber</span> — differs from stable</li>
         <li><span class="p-status-label">—</span> — not published in this channel</li>
         <li><span class="p-status-label p-status-label--negative">—</span> — not published in stable at all</li>
       </ul>
-
-      <h3 class="docs-h3">Refresh All</h3>
-      <p>Clicking <strong>Refresh All</strong> triggers a background collection run that fetches updated channel data and GitHub issues for all tracked snaps. You can also refresh a single snap from its detail page.</p>
+      <h3 class="docs-h3">Refreshing</h3>
+      <p>Channel maps and issues refresh on the <strong>collection interval</strong> (Settings → Publisher, default 6 hours). <strong>Refresh All</strong> runs a collection now; a snap's detail page has its own <strong>Refresh</strong>.</p>
+      <p>The snap detail page shows the full channel map — every channel and architecture with its version and revision.</p>
     </section>
 
-    <!-- ================================================================
-         ADDING SNAPS
-         ================================================================ -->
+    <!-- ================================================================ ADDING SNAPS -->
     <section class="docs-section" id="adding-snaps">
       <h2 class="docs-h2">Adding snaps</h2>
-      <p>Snaps are added in two ways:</p>
-
-      <h3 class="docs-h3">Auto-discovery</h3>
-      <p>When a publisher is configured, the first collection run fetches all snaps published by that account from the Snap Store. This happens automatically.</p>
-
-      <h3 class="docs-h3">Manual addition</h3>
-      <p>Use <a href="/snaps/add">Add Snap</a> to add any snap by name — even ones you don't publish. Search by snap name, then optionally set the packaging repo and upstream repo URLs for GitHub issue tracking.</p>
-
-      <h3 class="docs-h3">Repository URLs</h3>
-      <p>For each snap you can set two repo URLs:</p>
+      <p>Snaps published by your Store account are discovered automatically on the first collection. Use <a href="/snaps/add">Add Snap</a> to track any other snap by name.</p>
+      <p>Each snap has two repository URLs, filled in from Store metadata (or by finding a <code>snapcraft.yaml</code> with that name in your GitHub repos) and editable on its detail page:</p>
       <ul class="docs-list">
-        <li><strong>Packaging repo</strong> — where the snapcraft recipe lives (e.g. a <code>snap/</code> folder or dedicated snap packaging repo)</li>
-        <li><strong>Upstream repo</strong> — the upstream project repo (may be the same as packaging, or separate)</li>
+        <li><strong>Packaging repo</strong> — where the snapcraft recipe lives. Needed for version bumps, YARF suites, and rebuilds.</li>
+        <li><strong>Upstream repo</strong> — the upstream project, for issues/PRs and upstream maintenance.</li>
       </ul>
-      <p>For auto-discovered snaps, these are populated automatically from Snap Store metadata when available.</p>
     </section>
 
-    <!-- ================================================================
-         CHANNEL MAP
-         ================================================================ -->
-    <section class="docs-section" id="channel-map">
-      <h2 class="docs-h2">Channel map</h2>
-      <p>The snap detail page shows the full channel map — every published channel/architecture combination with its version and revision number. Versions that differ from stable are highlighted amber.</p>
-
-      <p>Channels are collected on a schedule (configurable in Settings, default: every 6 hours) or on demand via the <strong>Refresh</strong> button.</p>
-    </section>
-
-    <!-- ================================================================
-         ISSUES & PRS
-         ================================================================ -->
+    <!-- ================================================================ ISSUES & PRS -->
     <section class="docs-section" id="issues-prs">
       <h2 class="docs-h2">Issues &amp; Pull Requests</h2>
-      <p>For each snap with repository URLs set, snap-dashboard fetches all open GitHub issues and PRs. These are shown on the snap detail page and counted in the dashboard table.</p>
-
-      <p>The snap detail page has filter tabs to view:</p>
-      <ul class="docs-list">
-        <li>All issues and PRs together</li>
-        <li>Issues only / PRs only</li>
-        <li>Packaging repo items / Upstream repo items (if both repos are set)</li>
-      </ul>
-
-      <div class="docs-callout docs-callout-info">
-        <strong>Rate limits:</strong> Without a GitHub token, GitHub API calls are limited to 60/hour. With a token, the limit is 5,000/hour. Set your token in <a href="/settings">Settings</a>.
-      </div>
+      <p>Open issues and PRs from each snap's packaging and upstream repos (GitHub or GitLab) are shown on its detail page, with tabs to filter by type and by repo, and counted on the dashboard.</p>
     </section>
 
-    <!-- ================================================================
-         TESTING OVERVIEW
-         ================================================================ -->
+    <!-- ================================================================ TESTING OVERVIEW -->
     <section class="docs-section" id="testing-overview">
-      <h2 class="docs-h2">YARF testing — overview</h2>
-      <p><a href="/testing">Testing</a> integrates with YARF (Yet Another Robot Framework) to run automated tests against snaps in CI, then report results back to the dashboard.</p>
-
-      <h3 class="docs-h3">How it works</h3>
+      <h2 class="docs-h2">How testing works</h2>
+      <p>Every test job is <strong>one snap version on one architecture</strong>, run on an enrolled <a href="/runners">runner</a> of that architecture:</p>
       <ol class="docs-steps">
-        <li>snap-dashboard finds snaps with a newer version in <strong>candidate</strong> or <strong>edge</strong> than stable and lists them on the Testing page.</li>
-        <li>You click <strong>Run Tests</strong> (or enable auto-test). snap-dashboard dispatches a <code>workflow_dispatch</code> event to your testing repository on GitHub.</li>
-        <li>The GitHub Actions workflow installs YARF, the snap, and runs your test suite. Screenshots and results are committed to a result branch.</li>
-        <li>A Pull Request is opened in the testing repo summarising the results.</li>
-        <li>snap-dashboard polls GitHub and updates the run status live (pending → running → passed/failed).</li>
-        <li>For <strong>passed candidate runs</strong>, a <strong>Promote to Stable</strong> button appears.</li>
+        <li>The runner installs the snap from the job's channel (<code>candidate</code> or <code>edge</code>) in its real desktop session.</li>
+        <li>If the snap's packaging repo has a YARF suite, the runner runs it. Otherwise it launches the app, lets it render, and takes a screenshot (a smoke test).</li>
+        <li>Screenshots and the log are uploaded; the run is <em>passed</em> if the suite passed and no screenshot is blank.</li>
+        <li>Candidate runs are then reviewed by the vision model (see <a href="#test-results">Results &amp; AI review</a>).</li>
       </ol>
-
-      <h3 class="docs-h3">Candidate vs Edge</h3>
+      <h3 class="docs-h3">Architectures</h3>
+      <p>Only <strong>amd64</strong> and <strong>arm64</strong> are tested. A version built for both is one row on the Testing page and one <em>release set</em>; architectures a snap also ships (armhf, riscv64, …) are ignored because there's no runner for them.</p>
+      <h3 class="docs-h3">Candidate vs edge</h3>
       <ul class="docs-list">
-        <li><strong>Candidate</strong> — has a promotion path. After tests pass you can promote directly to stable from the dashboard.</li>
-        <li><strong>Edge</strong> — test-only. No direct promotion path; edge snaps need to be moved to candidate first via <code>snapcraft release</code> before promotion.</li>
+        <li><strong>Candidate</strong> — the promotion path. Passed runs are reviewed, and the release set can be promoted to stable.</li>
+        <li><strong>Edge</strong> — test-only. Version-bump PRs are tested from edge; there's no promotion from edge.</li>
       </ul>
     </section>
 
-    <!-- ================================================================
-         TESTING REPO SETUP
-         ================================================================ -->
-    <section class="docs-section" id="testing-repo-setup">
-      <h2 class="docs-h2">Testing repository setup</h2>
-      <p>You need a dedicated GitHub repository to hold your YARF suites and the GitHub Actions workflow.</p>
-
-      <h3 class="docs-h3">Step 1 — Create the repository</h3>
-      <p>Create a new GitHub repository (e.g. <code>you/snap-tests</code>). It can be private.</p>
-
-      <h3 class="docs-h3">Step 2 — Add the workflow</h3>
-      <p>Download the workflow template from <a href="/testing/workflow-template" download="snap-test.yml">here</a> and commit it to <code>.github/workflows/snap-test.yml</code> in your testing repository.</p>
-
-      <h3 class="docs-h3">Step 3 — Add a repository secret</h3>
-      <p>In your testing repository: <strong>Settings → Secrets and variables → Actions → New repository secret</strong></p>
+    <!-- ================================================================ RUNNERS -->
+    <section class="docs-section" id="runners">
+      <h2 class="docs-h2">Runners</h2>
+      <p>A runner is a dedicated desktop or laptop running the <code>automated-ken-runner</code> snap. It polls this server for work over HTTP(S) — no inbound ports — and only takes jobs:</p>
       <ul class="docs-list">
-        <li><strong>Name:</strong> <code>SNAP_DASHBOARD_GITHUB_TOKEN</code></li>
-        <li><strong>Value:</strong> a GitHub Personal Access Token with <code>repo</code> scope</li>
+        <li>for <strong>its own architecture</strong> (reported automatically),</li>
+        <li>belonging to <strong>the user it's enrolled under</strong>,</li>
+        <li>while its desktop has been <strong>idle for 2 minutes and isn't locked</strong>, so it never disturbs someone using it.</li>
       </ul>
-      <p>This token lets the workflow push result branches and open PRs.</p>
+      <p>Enroll at least one amd64 and one arm64 runner. A job for an architecture with no runner waits in the queue.</p>
+      <h3 class="docs-h3">Setting one up</h3>
+      <pre class="docs-code">sudo snap install automated-ken-runner --classic
+echo "$USER ALL=(root) NOPASSWD: /usr/bin/snap" | sudo tee /etc/sudoers.d/automated-ken-runner
+automated-ken-runner prepare-machine      # YARF, screenshot extension, autologin, no screen lock
 
-      <h3 class="docs-h3">Step 4 — Configure snap-dashboard</h3>
-      <p>In <a href="/settings">Settings</a>, set <strong>Testing Repository</strong> to <code>owner/repo</code> (e.g. <code>kenvandine/snap-tests</code>) and save.</p>
+# On the Runners page: "+ Enroll a runner", then run the command it shows:
+automated-ken-runner enroll --server http://&lt;this-host&gt;:9080 --token &lt;token&gt;
+systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
+      <div class="docs-callout docs-callout-info">
+        <strong>Use a dedicated machine.</strong> <code>prepare-machine</code> enables autologin and disables the screen lock, so anyone with physical access has full access to whatever is logged in. The runner needs Ubuntu with GNOME, logged into a graphical session. The server must be reachable from the runner — set <code>snap set automated-ken bind=0.0.0.0</code>.
+      </div>
+      <h3 class="docs-h3">Runner status</h3>
+      <ul class="docs-list">
+        <li><span class="p-status-label p-status-label--positive">idle</span> — ready for a job</li>
+        <li><span class="p-status-label p-status-label--caution">busy</span> — running a job, or someone is using the machine</li>
+        <li><span class="p-status-label p-status-label--negative">locked</span> — screen locked; won't take jobs</li>
+        <li><span class="p-status-label p-status-label--negative">offline</span> — no heartbeat for 90 seconds</li>
+      </ul>
+      <h3 class="docs-h3">The queue</h3>
+      <p>The <a href="/runners">Runners</a> page lists queued and running jobs with their architecture. Use ▲/▼ to change priority and <strong>Cancel</strong> to drop a queued job or stop a running one (the runner stops the test within about 15 seconds). A job running longer than the <strong>runner job timeout</strong> (Settings → Testing, default 10 minutes, counted from when a runner picks it up) is marked failed and its runner freed.</p>
     </section>
 
-    <!-- ================================================================
-         SUITE STRUCTURE
-         ================================================================ -->
+    <!-- ================================================================ SUITE STRUCTURE -->
     <section class="docs-section" id="suite-structure">
-      <h2 class="docs-h2">YARF suite structure</h2>
-      <p>Test suites live under <code>suites/</code> in your testing repository:</p>
-
-      <pre class="docs-code">suites/
-└── mysnap/
-    └── suite/
-        ├── __init__.robot      ← Suite setup/teardown
-        └── test_mysnap.robot   ← Test cases</pre>
-
-      <p>The workflow looks for <code>suites/&lt;snap_name&gt;/suite/__init__.robot</code> to confirm a suite exists before offering the Run Tests button.</p>
-
-      <h3 class="docs-h3">__init__.robot example</h3>
+      <h2 class="docs-h2">YARF suites</h2>
+      <p>A suite is optional — without one, runners do a launch-and-screenshot smoke test. To test real interaction, add a YARF suite to the snap's <strong>packaging repo</strong>:</p>
+      <pre class="docs-code">tests/
+└── suite/
+    ├── __init__.robot      ← required: marks the suite
+    └── test_mysnap.robot   ← test cases</pre>
+      <p>The dashboard fetches <code>tests/suite/</code> with your GitHub token and hands it to the runner. The runner has already installed the snap, and runs the suite with YARF's <code>Mir</code> platform against its real display, for up to 30 minutes.</p>
+      <h3 class="docs-h3">Screenshots</h3>
+      <p>Screenshots embedded in YARF's <code>log.html</code> (from YARF's screenshot keywords) are extracted, checked for blank frames, and shown on the run's page. They're what the vision review compares, so capture the app's main views.</p>
+      <h3 class="docs-h3">Example test</h3>
       <pre class="docs-code">*** Settings ***
-Library    Collections
-Library    Process
-Library    OperatingSystem
-
-Suite Setup     Suite Setup Steps
-Suite Teardown  Suite Teardown Steps
-
-*** Keywords ***
-Suite Setup Steps
-    # DISPLAY=:99 is set by the CI workflow via Xvfb
-    Log    Suite starting on display $ENV{DISPLAY}
-
-Suite Teardown Steps
-    Log    Suite complete</pre>
-
-      <h3 class="docs-h3">Test file example</h3>
-      <pre class="docs-code">*** Settings ***
-Library    OperatingSystem
 Library    Process
 
 *** Test Cases ***
-Snap Is Installed
-    ${rc}=    Run And Return RC    snap list mysnap
-    Should Be Equal As Integers    ${rc}    0
-
 Application Launches
     ${proc}=    Start Process    mysnap    alias=app
-    Sleep    3s
+    Sleep    5s
     Process Should Be Running    app
     Terminate Process    app</pre>
-
-      <h3 class="docs-h3">Screenshots</h3>
-      <p>Any PNG files written to <code>results/&lt;snap_name&gt;/</code> during the test run are committed to the result branch and embedded in the test PR body. Use Robot Framework screenshot keywords or any tool that writes PNGs to that directory.</p>
-
-      <pre class="docs-code">*** Settings ***
-Library    Screenshot
-
-*** Test Cases ***
-Capture App Screenshot
-    Take Screenshot    results/mysnap/main_window.png</pre>
     </section>
 
-    <!-- ================================================================
-         RUNNING TESTS
-         ================================================================ -->
+    <!-- ================================================================ RUNNING TESTS -->
     <section class="docs-section" id="running-tests">
       <h2 class="docs-h2">Running tests</h2>
-
-      <h3 class="docs-h3">From the dashboard</h3>
-      <p>The <a href="/testing">Testing</a> page lists all snaps with a newer version in candidate or edge than stable. Click <strong>Run Tests</strong> next to any snap with a suite configured.</p>
-
-      <p>The run status updates live (polling every 15 seconds): <span class="p-status-label p-status-label--caution">pending</span> → <span class="p-status-label p-status-label--caution">running</span> → <span class="p-status-label p-status-label--positive">passed</span> or <span class="p-status-label p-status-label--negative">failed</span>.</p>
-
-      <p>Click the <strong>↗</strong> link next to a running p-status-label to open the GitHub Actions log directly.</p>
-
-      <h3 class="docs-h3">Stuck runs</h3>
-      <p>If a run gets stuck in <em>pending</em> or <em>running</em> state (e.g. the workflow was cancelled externally), click the <strong>✕</strong> button in the Triggered By column to mark it failed and unblock the UI.</p>
-
-      <h3 class="docs-h3">Sync from GitHub</h3>
-      <p>Click <strong>Sync from GitHub</strong> at the top of the Testing page to re-read all open test PRs from GitHub and reconcile their status with the local database. Useful after manual changes or if the auto-poll missed an update.</p>
-
-      <h3 class="docs-h3">Auto-test</h3>
-      <p>Enable <strong>Enable automatic testing</strong> in Settings to automatically trigger a test run whenever a newer version is detected in candidate or edge during a collection. Requires a testing repository to be configured and a suite to exist for the snap.</p>
+      <p>The <a href="/testing">Testing</a> page's <strong>Needs testing</strong> list shows every snap whose candidate or edge version differs from stable — one row per version with all its architectures. <strong>Run Tests (amd64, arm64)</strong> queues one job per architecture; each row shows every architecture's latest run.</p>
+      <p>Statuses: <span class="p-status-label p-status-label--caution">pending</span> (queued) → <span class="p-status-label p-status-label--caution">triggered</span> (claimed by a runner) → <span class="p-status-label p-status-label--caution">running</span> → <span class="p-status-label p-status-label--positive">passed</span> / <span class="p-status-label p-status-label--negative">failed</span>. Candidate runs then go through <span class="p-status-label p-status-label--caution">reviewing</span>. A failed run's page has a <strong>log</strong> link with everything the runner captured.</p>
+      <h3 class="docs-h3">Automatic testing</h3>
+      <p>With <strong>Enable automatic testing</strong> (Settings → Testing), every collection queues tests for any candidate or edge version and architecture that hasn't been tested yet. Version-bump PRs are always tested, regardless of this setting.</p>
     </section>
 
-    <!-- ================================================================
-         TEST RESULTS
-         ================================================================ -->
+    <!-- ================================================================ TEST RESULTS -->
     <section class="docs-section" id="test-results">
-      <h2 class="docs-h2">Reading test results</h2>
-      <p>Each test run opens a PR in your testing repository. Click the PR number in the Testing page to view the full result detail page, which shows:</p>
-
-      <ul class="docs-list">
-        <li>A results table (snap, version, channel, architecture, status)</li>
-        <li>Screenshots (if any PNGs were written to <code>results/&lt;snap&gt;/</code>)</li>
-        <li>The list of files changed (committed results)</li>
-        <li>GitHub Actions run link for full logs</li>
-        <li>The Promote button (for passed candidate runs)</li>
-      </ul>
+      <h2 class="docs-h2">Results &amp; AI review</h2>
+      <p>Open a run from the Testing or Runners page to see its screenshots, log, review, and the other architectures in its release set.</p>
+      <p>When a <strong>candidate</strong> run passes, the local vision model compares its screenshots with the last stable screenshots <em>for the same architecture</em>. The first time a snap is tested there's no baseline, so it only checks that the app visibly launched, and keeps the confidence low. The verdict is <strong>approve</strong>, <strong>reject</strong> or <strong>needs review</strong>, with a confidence score. When a release set is promoted, its screenshots become the new stable baseline for each architecture.</p>
+      <p>Without a vision model available, the review is skipped and the run needs a manual decision — nothing is auto-approved.</p>
     </section>
 
-    <!-- ================================================================
-         PROMOTION
-         ================================================================ -->
+    <!-- ================================================================ PROMOTION -->
     <section class="docs-section" id="promotion">
-      <h2 class="docs-h2">Promoting to stable</h2>
-      <p>When a <strong>candidate</strong> snap passes tests, it appears in the <strong>Pending Promotion</strong> section at the top of the Testing page and on the PR detail page with a <strong>Promote to Stable</strong> button.</p>
-
-      <p>Clicking Promote to Stable:</p>
+      <h2 class="docs-h2">Promoting a release set</h2>
+      <p>A candidate version is promoted to <code>stable</code> <strong>for all its architectures at once</strong>, so stable never ends up with amd64 on the new version and arm64 on the old one.</p>
+      <ul class="docs-list">
+        <li><strong>Pending Promotion</strong> (Testing page) and each run's page show the release set and every architecture's state.</li>
+        <li>When every architecture has passed, <strong>🚀 Promote set to Stable</strong> releases all of their revisions.</li>
+        <li>If any architecture hasn't passed — not tested, still running, failed — the button becomes <strong>⚠ Promote (override)</strong>.</li>
+      </ul>
+      <h3 class="docs-h3">Overriding a missing architecture</h3>
+      <p>An override promotes only the architectures that passed. It's deliberately hard to do by accident:</p>
       <ol class="docs-steps">
-        <li>Runs <code>snapcraft release &lt;snap&gt; &lt;revision&gt; stable</code> on the server</li>
-        <li>Marks the test run as <em>promoted</em> in the database</li>
-        <li>Posts a comment on the test PR and closes it</li>
-        <li>Redirects back to the Testing page</li>
+        <li>The confirmation dialog names every architecture that will be left out.</li>
+        <li>The server refuses a partial promotion unless that confirmation was given.</li>
+        <li>Each promoted run records which architectures were skipped; a version-bump PR promoted this way is marked <strong>partially promoted</strong>.</li>
       </ol>
-
-      <div class="docs-callout docs-callout-info">
-        <strong>Edge snaps</strong> cannot be promoted directly to stable from the dashboard. Edge → Candidate → Stable is the expected flow. Move the snap to candidate first using <code>snapcraft release &lt;snap&gt; &lt;revision&gt; candidate</code>.
-      </div>
+      <h3 class="docs-h3">Auto-promote</h3>
+      <p>With <strong>Auto-promote</strong> on (Settings → Agents &amp; AI), a release set is promoted automatically once every architecture has passed <em>and</em> been approved at or above the confidence threshold. If any architecture is missing or not approved, nothing is auto-promoted — use the override if you mean to release without it.</p>
     </section>
 
-    <!-- ================================================================
-         SETTINGS
-         ================================================================ -->
-    <section class="docs-section" id="settings">
-      <h2 class="docs-h2">Settings reference</h2>
-      <p>All per-user settings are saved in the database and can be changed at any time from <a href="/settings">Settings</a>.</p>
-
+    <!-- ================================================================ AGENTS -->
+    <section class="docs-section" id="agents">
+      <h2 class="docs-h2">Agents</h2>
+      <p>Background agents do the work on a schedule. The <a href="/agents">Agents</a> page shows what each is doing right now (the dot pulses in the agent's colour while it runs), a live activity feed, pipeline counts and recent runs. Most runs finish in seconds, so the feed is the easiest place to see them; <strong>Scan Now</strong> runs the release scanner immediately.</p>
       <div class="docs-table-wrapper">
         <table class="docs-table">
-          <thead>
-            <tr><th>Setting</th><th>Description</th></tr>
-          </thead>
+          <thead><tr><th>Agent</th><th>What it does</th><th>When</th></tr></thead>
           <tbody>
-            <tr>
-              <td><strong>Snap Store Publisher</strong></td>
-              <td>Your Snap Store account name. Used to auto-discover snaps on collection runs.</td>
-            </tr>
-            <tr>
-              <td><strong>Collection Interval</strong></td>
-              <td>How often the background scheduler runs a full collection (1 / 6 / 12 / 24 hours).</td>
-            </tr>
-            <tr>
-              <td><strong>GitHub Token</strong></td>
-              <td>Personal Access Token for GitHub API calls. Increases rate limit from 60 to 5,000 req/hour. Needed for issue/PR tracking and for triggering test workflows.</td>
-            </tr>
-            <tr>
-              <td><strong>Testing Repository</strong></td>
-              <td>GitHub repo containing YARF suites and the workflow, in <code>owner/repo</code> format.</td>
-            </tr>
-            <tr>
-              <td><strong>Enable automatic testing</strong></td>
-              <td>Automatically trigger tests when a new version is detected during collection.</td>
-            </tr>
+            <tr><td><strong>Collector</strong></td><td>Refreshes channel maps and issues/PRs; queues automatic tests if enabled</td><td>Collection interval</td></tr>
+            <tr><td><strong>Release Scanner</strong></td><td>Checks packaging repos' <code>snapcraft.yaml</code> parts for newer upstream releases</td><td>Release scan interval</td></tr>
+            <tr><td><strong>Version Bumper</strong></td><td>Opens a bump PR from the bot account</td><td>When a release is found</td></tr>
+            <tr><td><strong>PR Monitor</strong></td><td>Moves bump PRs through CI → tests → review → merge; syncs PRs merged or closed on GitHub</td><td>Every 5 minutes</td></tr>
+            <tr><td><strong>Screenshot Reviewer</strong></td><td>Reviews each architecture of a bump's tests; one verdict for the set</td><td>When a bump's tests finish</td></tr>
+            <tr><td><strong>Candidate reviewer</strong></td><td>Reviews candidate runs; auto-promotes complete release sets if enabled</td><td>When a candidate run passes</td></tr>
+            <tr><td><strong>Runner Watchdog</strong></td><td>Fails runner jobs past the job timeout</td><td>Every 2 minutes</td></tr>
+            <tr><td><strong>Stale Build Scanner</strong></td><td>Rebuilds snaps with no recent publication</td><td>Daily, if enabled</td></tr>
+            <tr><td><strong>Upstream Maintainer</strong></td><td>Dependency updates, reviews and issue triage for upstream repos you own</td><td>Daily, if enabled</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <!-- ================================================================
-         GITHUB TOKEN
-         ================================================================ -->
-    <section class="docs-section" id="github-token">
-      <h2 class="docs-h2">GitHub token</h2>
-      <p>A GitHub Personal Access Token (PAT) is required for:</p>
-      <ul class="docs-list">
-        <li>Fetching open issues and PRs (rate-limited at 60/hr without a token)</li>
-        <li>Triggering YARF test workflows (<code>workflow_dispatch</code>)</li>
-        <li>Polling workflow run status and syncing test PR data</li>
-      </ul>
-
-      <h3 class="docs-h3">Creating a token</h3>
+    <!-- ================================================================ VERSION BUMPS -->
+    <section class="docs-section" id="version-bumps">
+      <h2 class="docs-h2">Version-bump PRs</h2>
+      <p>When the Release Scanner finds a newer upstream release for a part in a snap's <code>snapcraft.yaml</code>, the Version Bumper opens a PR updating it (one open bump per part at a time). The PR Monitor then:</p>
       <ol class="docs-steps">
-        <li>Go to <strong>GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens</strong> (or Classic tokens)</li>
-        <li>For a Classic token, select scope: <code>repo</code></li>
-        <li>Copy the token and paste it into <a href="/settings">Settings → GitHub Token</a></li>
+        <li>waits for the PR's CI to pass — if it fails and <strong>auto-fix CI</strong> is on, a fix is delegated to the coding backend, and a later green run is picked up;</li>
+        <li>queues one test per architecture from <code>edge</code>;</li>
+        <li>has each architecture's screenshots reviewed, and gives the PR one verdict — a regression on any architecture rejects the set;</li>
+        <li>merges it if <strong>Auto-merge</strong> is on and the verdict is approve.</li>
       </ol>
+      <p>On <a href="/version-bumps">Version Bumps</a>, open a PR to see each architecture's status, revision and screenshots side by side, then <strong>Merge</strong>, <strong>Reject</strong>, <strong>Re-run YARF</strong> (re-tests every architecture; only the newest run per architecture counts) or <strong>Promote</strong> (all architectures, or a confirmed override). PRs merged or closed on GitHub are picked up automatically.</p>
+    </section>
 
-      <div class="docs-callout docs-callout-info">
-        This token is stored per-user in the database. It is only used server-side to make GitHub API calls on your behalf.
+    <!-- ================================================================ CODING TASKS -->
+    <section class="docs-section" id="coding-tasks">
+      <h2 class="docs-h2">Delegated coding tasks</h2>
+      <p>Work that needs real code changes is delegated to the <strong>coding backend</strong> (Settings → Agents &amp; AI; GitHub Copilot cloud agent by default), which opens PRs for you to review. All are opt-in:</p>
+      <ul class="docs-list">
+        <li><strong>Auto-fix failing CI</strong> on version-bump PRs.</li>
+        <li><strong>Auto-maintain upstream repos you own</strong> — dependency updates, review requests on your open PRs, and fixes for a few issues per run.</li>
+        <li><strong>Fleet normalization</strong> — a one-off pass (run from Settings) opening a PR per packaging repo to drop legacy <code>sync-release</code>-style workflows, normalise the build/publish workflow and add an <code>AGENTS.md</code>.</li>
+      </ul>
+      <p>Every dispatched task and its PR is listed on <a href="/copilot-tasks">Copilot Tasks</a>.</p>
+    </section>
+
+    <!-- ================================================================ LEMONADE -->
+    <section class="docs-section" id="lemonade">
+      <h2 class="docs-h2">Local AI (Lemonade)</h2>
+      <p>A private Lemonade server is bundled and started automatically — no setup. It's used for screenshot review (a vision model) and drafting PR descriptions, and downloads its models the first time each is needed. The Agents page header shows whether it's connected; <strong>Test Connection</strong> checks it.</p>
+      <p>To use a Lemonade server you already run, choose <strong>System Lemonade</strong> in Settings → Agents &amp; AI and enter its URL (and API key, if it needs one). <strong>Model override</strong> replaces the default model for every task.</p>
+    </section>
+
+    <!-- ================================================================ SETTINGS -->
+    <section class="docs-section" id="settings">
+      <h2 class="docs-h2">Settings reference</h2>
+      <div class="docs-table-wrapper">
+        <table class="docs-table">
+          <thead><tr><th>Setting</th><th>Description</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Snap Store Publisher</strong></td><td>Store account whose snaps are discovered.</td></tr>
+            <tr><td><strong>Collection Interval</strong></td><td>How often channel maps and issues refresh (1 / 6 / 12 / 24 hours).</td></tr>
+            <tr><td><strong>GitHub Token</strong></td><td>See <a href="#credentials">Tokens &amp; credentials</a>.</td></tr>
+            <tr><td><strong>Snapcraft Store Credential</strong></td><td>For promoting to stable and syncing the rebuild secret to packaging repos.</td></tr>
+            <tr><td><strong>Enable automatic testing</strong></td><td>Queue tests for untested candidate/edge versions after each collection.</td></tr>
+            <tr><td><strong>Runner job timeout</strong></td><td>Minutes a runner job may run before it's marked failed (default 10).</td></tr>
+            <tr><td><strong>Lemonade backend / URL / API key / model</strong></td><td>Bundled or system Lemonade server, and an optional model override.</td></tr>
+            <tr><td><strong>Bot GitHub login / token</strong></td><td>Account that opens version-bump PRs.</td></tr>
+            <tr><td><strong>Release Scan Interval</strong></td><td>How often packaging repos are checked for upstream releases (default 4 hours).</td></tr>
+            <tr><td><strong>Auto-merge</strong></td><td>Merge bump PRs the reviewer approves.</td></tr>
+            <tr><td><strong>Auto-promote</strong> / <strong>confidence threshold</strong></td><td>Promote a candidate release set once every architecture is approved at or above the threshold (default 0.85).</td></tr>
+            <tr><td><strong>Auto-trigger builds for stale snaps</strong> / <strong>staleness window</strong></td><td>Rebuild snaps with no publication in N days (default 30), publishing to candidate.</td></tr>
+            <tr><td><strong>Coding task backend</strong> and task toggles</td><td>See <a href="#coding-tasks">Delegated coding tasks</a>.</td></tr>
+          </tbody>
+        </table>
       </div>
     </section>
 
-    <!-- ================================================================
-         ADMIN
-         ================================================================ -->
+    <!-- ================================================================ ADMIN -->
     <section class="docs-section" id="admin">
       <h2 class="docs-h2">Admin &amp; allowlist</h2>
-      <p>The <a href="/admin">Admin</a> page is visible to admins only. It has two sections:</p>
-
-      <h3 class="docs-h3">Registered users</h3>
-      <p>Shows everyone who has logged in, with their join date and last login. Admins can toggle other users' admin status (but cannot self-demote).</p>
-
-      <h3 class="docs-h3">Access allowlist</h3>
-      <p>Only GitHub accounts on the allowlist can log in. To grant access to someone else:</p>
-      <ol class="docs-steps">
-        <li>Go to <a href="/admin">Admin</a></li>
-        <li>Enter their GitHub username in the Add to Allowlist form</li>
-        <li>Optionally add a note</li>
-        <li>Click <strong>Add to Allowlist</strong></li>
-      </ol>
-      <p>They can now log in with their GitHub account. To revoke access, click <strong>Remove</strong> next to their entry.</p>
+      <p>The <a href="/admin">Admin</a> page (admins only) lists registered users and the access allowlist. Only GitHub accounts on the allowlist can sign in; usernames are matched case-insensitively. Admins can grant or remove admin rights for other users, but not themselves.</p>
+      <p>Every user has their own snaps, runners, tests, settings and agent activity.</p>
     </section>
 
-    <!-- ================================================================
-         TROUBLESHOOTING
-         ================================================================ -->
+    <!-- ================================================================ TROUBLESHOOTING -->
     <section class="docs-section" id="troubleshooting">
       <h2 class="docs-h2">Troubleshooting</h2>
 
-      <h3 class="docs-h3">Test runs stay in "pending" forever</h3>
-      <p>The background poller waits up to 3 minutes to find the GitHub Actions run ID. If the dispatch failed (e.g. invalid token, workflow not found), the run stays pending.</p>
+      <h3 class="docs-h3">Jobs stay "pending"</h3>
       <ul class="docs-list">
-        <li>Check that your GitHub token has <code>repo</code> scope and has not expired</li>
-        <li>Check that <code>.github/workflows/snap-test.yml</code> exists in your testing repository and has a <code>workflow_dispatch</code> trigger</li>
-        <li>Click the <strong>↗</strong> link next to the pending p-status-label to check if a run appeared in GitHub Actions</li>
-        <li>Use the <strong>✕</strong> button to manually mark the run failed and try again</li>
+        <li>Check the <a href="/runners">Runners</a> page has an <em>idle</em> runner of the job's architecture, enrolled under your account.</li>
+        <li>A runner only takes jobs after 2 minutes of desktop inactivity, and never while locked. Run <code>automated-ken-runner status</code> on it.</li>
+        <li>A runner showing the wrong or no architecture corrects itself on its next heartbeat after an upgrade.</li>
       </ul>
 
-      <h3 class="docs-h3">Tests pass but no screenshots appear</h3>
-      <p>Screenshots are only included in the PR if PNG files are written to <code>results/&lt;snap_name&gt;/</code> during the test run. Ensure your YARF test suite saves screenshots there.</p>
-      <p>Also check the GitHub Actions log for YARF errors — if YARF failed to start the Mir compositor (e.g. no display), no tests will run and no files will be created.</p>
+      <h3 class="docs-h3">Runner shows "offline"</h3>
+      <p>On the runner: <code>systemctl --user status snap.automated-ken-runner.run.service</code> and <code>journalctl --user -u snap.automated-ken-runner.run.service -f</code>. Check it can reach this server's address and port.</p>
 
-      <h3 class="docs-h3">YARF fails with "Unable to connect to display"</h3>
-      <p>YARF's Mir platform needs an X11 backend. The workflow installs <code>xvfb</code> and starts <code>Xvfb :99</code> before running YARF. If you see this error on an older workflow version, download the latest workflow template from <a href="/testing/workflow-template" download="snap-test.yml">here</a> and update your testing repository.</p>
+      <h3 class="docs-h3">Jobs fail at "snap install"</h3>
+      <p>The runner needs passwordless <code>sudo</code> for <code>snap</code>; <code>automated-ken-runner prepare-machine</code> checks for it and prints the sudoers line to add.</p>
 
-      <h3 class="docs-h3">GitHub API rate limit errors</h3>
-      <p>Set a GitHub Personal Access Token in <a href="/settings">Settings</a> to increase the rate limit from 60 to 5,000 requests/hour.</p>
+      <h3 class="docs-h3">Runs pass but have no screenshots, or fail as blank</h3>
+      <p>Screenshots come from a GNOME Shell extension that <code>prepare-machine</code> installs; it only loads after a fresh login, which is why <code>prepare-machine</code> reboots. The screen must not be blanked — re-run <code>prepare-machine</code> if power settings were changed.</p>
 
-      <h3 class="docs-h3">Workflow dispatch returns 422</h3>
-      <p>This means the <code>workflow_dispatch</code> trigger was not found. Common causes:</p>
-      <ul class="docs-list">
-        <li>The workflow file has not been pushed to the <code>main</code> branch</li>
-        <li>The workflow file has YAML syntax errors (check GitHub → Actions → Workflows)</li>
-        <li>The workflow file is in a subdirectory other than <code>.github/workflows/</code></li>
-      </ul>
-    </section>
+      <h3 class="docs-h3">A release set isn't auto-promoted</h3>
+      <p>Every tested architecture must have passed and been approved at or above the threshold. The run page's release-set card and the run note say what it's waiting on. Use <strong>⚠ Promote (override)</strong> to release without a missing architecture.</p>
 
-    <!-- ================================================================
-         LOCAL TESTING
-         ================================================================ -->
-    <section class="docs-section" id="local-testing">
-      <h2 class="docs-h2">Running YARF tests locally</h2>
-      <p>You can run tests on your own machine without triggering a GitHub Actions workflow:</p>
+      <h3 class="docs-h3">No version-bump PRs are opened</h3>
+      <p>Set the bot account token in Settings → Agents &amp; AI, and make sure the snap has a GitHub packaging repo whose <code>snapcraft.yaml</code> part uses a <code>source-tag</code> (commit-pinned parts can't be bumped). Only one open bump per part is allowed at a time.</p>
 
-      <pre class="docs-code"># Install YARF and dependencies
-sudo snap install --beta yarf
-sudo snap install mir-test-tools
-sudo snap connect yarf:process-control
+      <h3 class="docs-h3">Promotion fails</h3>
+      <p>Check the Store credential in Settings is current (<code>snapcraft export-login -</code>) and can release the snap. The error is shown on the run page.</p>
 
-# Install the snap under test
+      <h3 class="docs-h3">GitHub rate limits</h3>
+      <p>Set a GitHub token — the limit goes from 60 to 5,000 requests an hour.</p>
+
+      <h3 class="docs-h3">Running a suite by hand</h3>
+      <pre class="docs-code">sudo snap install yarf
 sudo snap install mysnap --channel candidate
-
-# Start a virtual display (Linux only)
-sudo apt-get install -y xvfb
-Xvfb :99 -screen 0 1920x1080x24 &amp;
-
-# Run the suite
-mkdir -p results/mysnap
-DISPLAY=:99 yarf \
-  --platform Mir \
-  --outdir results/mysnap \
-  suites/mysnap/suite
-
-# Check results
-ls results/mysnap/</pre>
+yarf --platform Mir --outdir /tmp/results path/to/packaging-repo/tests/suite</pre>
     </section>
 
   </div>{# end docs-content #}
