@@ -23,6 +23,16 @@ logger = logging.getLogger(__name__)
 READY = "ready"
 PROMOTED = "promoted"
 
+# Used to pick the most conclusive run per architecture when more than one
+# exists for the same version (e.g. a duplicate manual re-trigger) — see
+# candidate_release_set below.
+_STATUS_PRECEDENCE = {"promoted": 3, "passed": 2}
+_DEFAULT_PRECEDENCE = 1  # pending/running/triggered/failed/etc.
+
+
+def _precedence(run: TestRun) -> int:
+    return _STATUS_PRECEDENCE.get(run.status, _DEFAULT_PRECEDENCE)
+
 
 def candidate_release_set(session, user_id: int, snap_name: str, version: str) -> list[dict]:
     """Return one entry per testable architecture of *snap_name* candidate *version*.
@@ -52,7 +62,16 @@ def candidate_release_set(session, user_id: int, snap_name: str, version: str) -
         arch = run.architecture or "amd64"
         if arch not in TESTABLE_ARCHITECTURES:
             continue
-        latest[arch] = run
+        current = latest.get(arch)
+        # Prefer the most conclusive result for this architecture rather
+        # than blindly the highest id: an accidental duplicate trigger
+        # (e.g. clicking "Run test" again after the real run already
+        # passed) shouldn't make an already-tested member look pending
+        # again just because its row happens to be newer. Only a
+        # strictly *more* conclusive later run should replace an earlier
+        # passed/promoted one.
+        if current is None or _precedence(run) >= _precedence(current):
+            latest[arch] = run
         if run.promoted:
             promoted.add(arch)
 

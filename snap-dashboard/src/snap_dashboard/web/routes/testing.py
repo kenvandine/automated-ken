@@ -288,6 +288,7 @@ async def trigger_test(
         architecture=architecture,
         triggered_by="manual",
         user_id=user_id,
+        skip_if_exists=True,
     )
     if not ok:
         logger.error("Failed to trigger test for %s: %s", snap_name, err)
@@ -332,6 +333,7 @@ async def trigger_test_group(
             architecture=arch,
             triggered_by="manual",
             user_id=user_id,
+            skip_if_exists=True,
         )
         if not ok:
             logger.error("Failed to trigger test for %s (%s): %s", snap_name, arch, err)

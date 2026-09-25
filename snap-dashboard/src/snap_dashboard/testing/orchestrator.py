@@ -320,6 +320,7 @@ def trigger_remote_run(
     runner_id: int | None = None,
     priority: int = 0,
     user_id: int | None = None,
+    skip_if_exists: bool = False,
 ) -> tuple[bool, str, int | None]:
     """Queue a ``TestRun`` for a registered remote runner instead of GitHub Actions.
 
@@ -328,6 +329,14 @@ def trigger_remote_run(
     ``GET /api/runners/{id}/next-job`` poll claims it (see
     ``web/routes/runner_api.py``). If ``runner_id`` is None, any idle
     runner belonging to the same user may claim it.
+
+    With ``skip_if_exists`` (used by ad-hoc "test this" UI triggers, not
+    the explicit "Re-run" actions), refuse to queue a duplicate if a run
+    for the exact same snap/arch/channel/version/revision is already
+    active or already finished — otherwise the new pending row's status
+    shadows the older, real result in :func:`candidate_release_set`
+    (which just takes the highest-id run per architecture), making an
+    already-passed set look stuck pending for no reason.
 
     Returns a ``(success, error_message, db_run_id)`` tuple.
     """
@@ -338,6 +347,29 @@ def trigger_remote_run(
             runner = session.query(Runner).get(runner_id)
             if runner is None or runner.revoked_at is not None:
                 return False, f"Runner {runner_id} not found or revoked", None
+
+        if skip_if_exists:
+            existing = (
+                session.query(TestRun)
+                .filter_by(
+                    snap_name=snap_name,
+                    architecture=architecture,
+                    from_channel=from_channel,
+                    version=version,
+                    revision=revision,
+                    user_id=user_id,
+                )
+                .filter(TestRun.status.in_(["pending", "triggered", "running", "passed", "promoted"]))
+                .order_by(TestRun.id.desc())
+                .first()
+            )
+            if existing is not None:
+                return (
+                    False,
+                    f"a test for this revision is already {existing.status} (run #{existing.id}) — "
+                    "use Re-run if you want to test it again",
+                    existing.id,
+                )
 
         run = TestRun(
             snap_name=snap_name,
@@ -355,6 +387,7 @@ def trigger_remote_run(
         session.add(run)
         session.flush()
         return True, "", run.id
+
 
 
 def queue_yarf_tests_for_bump(

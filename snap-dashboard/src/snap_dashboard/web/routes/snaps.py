@@ -6,6 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -394,10 +395,11 @@ async def snap_trigger_test(
         architecture=architecture,
         triggered_by="manual",
         user_id=user_id,
+        skip_if_exists=True,
     )
     if not ok:
         logger.error("Failed to trigger test for %s: %s", name, err)
-        return RedirectResponse(url=f"/snap/{name}?error=trigger_failed", status_code=303)
+        return RedirectResponse(url=f"/snap/{name}?error={quote(err or 'trigger_failed')}", status_code=303)
 
     return RedirectResponse(url=f"/snap/{name}?notice=test_queued", status_code=303)
 
