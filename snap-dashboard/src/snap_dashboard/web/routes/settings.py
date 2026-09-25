@@ -10,7 +10,15 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import CollectionRun, Snap, UserConfig
+from snap_dashboard.db.models import (
+    CollectionRun,
+    Runner,
+    Snap,
+    StableScreenshotBaseline,
+    TestRun,
+    TestRunScreenshot,
+    UserConfig,
+)
 from snap_dashboard.db.session import get_session
 
 logger = logging.getLogger(__name__)
@@ -219,6 +227,36 @@ async def settings_remove_snap(snap_name: str, request: Request):
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
         if snap:
+            # TestRun/StableScreenshotBaseline key off `snap_name` (a
+            # string) rather than `snap_id`, so they aren't covered by
+            # Snap's ORM cascade relationships (see models.py) and would
+            # otherwise survive this delete — leaving stale cards (e.g.
+            # "Pending Promotion" on /testing) for a snap that's no
+            # longer tracked. Clean those up explicitly so removing a
+            # snap here removes it everywhere.
+            runs = (
+                session.query(TestRun)
+                .filter_by(snap_name=snap_name, user_id=user_id)
+                .all()
+            )
+            run_ids = [r.id for r in runs]
+            if run_ids:
+                session.query(TestRunScreenshot).filter(
+                    TestRunScreenshot.test_run_id.in_(run_ids)
+                ).delete(synchronize_session=False)
+                # Runners can point at one of these runs as their
+                # "currently executing" job — clear that back-reference
+                # rather than leaving it dangling.
+                session.query(Runner).filter(
+                    Runner.user_id == user_id,
+                    Runner.current_test_run_id.in_(run_ids),
+                ).update({"current_test_run_id": None}, synchronize_session=False)
+                session.query(TestRun).filter(
+                    TestRun.id.in_(run_ids)
+                ).delete(synchronize_session=False)
+            session.query(StableScreenshotBaseline).filter_by(
+                snap_name=snap_name, user_id=user_id
+            ).delete(synchronize_session=False)
             session.delete(snap)
 
     if request.headers.get("X-Requested-With"):
