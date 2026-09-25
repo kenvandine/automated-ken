@@ -725,6 +725,11 @@ class CopilotTask(Base):
     # GitHub's own agent-task id, e.g. for GET /agents/repos/{o}/{r}/tasks/{id}.
     external_task_id = Column(String(128), nullable=True)
     prompt = Column(Text, nullable=True)
+    # Branch start_task() was dispatched against — needed to retry the exact
+    # same task later (see web/routes/copilot_tasks.py's Retry action).
+    # Usually "main", except ci_fix which retries on the PR's own head
+    # branch (see agents/pr_monitor.py).
+    base_ref = Column(String(255), nullable=True)
     # queued | in_progress | completed | failed | idle | waiting_for_user |
     # timed_out | cancelled | dispatch_failed (our own sentinel if the POST itself failed)
     status = Column(String(32), nullable=False, default="queued")

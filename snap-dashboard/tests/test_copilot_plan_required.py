@@ -60,6 +60,8 @@ def test_start_task_marks_plan_required_on_403():
     assert result is None
     assert client.plan_required is True
     assert fake.post_count == 1
+    assert client.last_error is not None
+    assert "Copilot license" in client.last_error
 
 
 def test_start_task_skips_network_after_plan_required_seen():
@@ -81,6 +83,8 @@ def test_other_403s_do_not_set_plan_required():
         result = client.start_task("kenvandine", "repo-a", "prompt")
     assert result is None
     assert client.plan_required is False
+    assert client.last_error is not None
+    assert "403" in client.last_error
 
 
 def _uc(**kwargs) -> SimpleNamespace:

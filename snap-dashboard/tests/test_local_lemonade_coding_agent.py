@@ -202,20 +202,31 @@ def test_build_repo_context_skips_binary_and_truncates(monkeypatch) -> None:
 
 def test_task_result_fields_dispatch_failed_for_none() -> None:
     assert task_result_fields(None) == {
-        "external_task_id": None, "status": "dispatch_failed", "pr_url": None,
+        "external_task_id": None,
+        "status": "dispatch_failed",
+        "pr_url": None,
+        "error_msg": "Dispatch failed with no further details — see server logs.",
     }
+    assert task_result_fields(None, fallback_error="boom")["error_msg"] == "boom"
 
 
 def test_task_result_fields_async_copilot_style() -> None:
     fields = task_result_fields({"id": "task-42"})
-    assert fields == {"external_task_id": "task-42", "status": "queued", "pr_url": None}
+    assert fields == {
+        "external_task_id": "task-42", "status": "queued", "pr_url": None, "error_msg": None,
+    }
 
 
 def test_task_result_fields_sync_local_lemonade_style() -> None:
     fields = task_result_fields({"state": "completed", "html_url": "https://github.com/o/r/pull/9"})
     assert fields == {
-        "external_task_id": None, "status": "completed", "pr_url": "https://github.com/o/r/pull/9",
+        "external_task_id": None,
+        "status": "completed",
+        "pr_url": "https://github.com/o/r/pull/9",
+        "error_msg": None,
     }
+    failed_fields = task_result_fields({"state": "failed", "error": "no reachable model"})
+    assert failed_fields["error_msg"] == "no reachable model"
 
 
 def test_extract_pr_url_handles_multiple_shapes() -> None:

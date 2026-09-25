@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 import httpx
 
 from snap_dashboard.agents.base import BaseAgent
-from snap_dashboard.agents.coding_backend import extract_pr_number, extract_pr_url, get_coding_dispatcher, task_result_fields
+from snap_dashboard.agents.coding_backend import (
+    extract_pr_number,
+    extract_pr_url,
+    get_coding_dispatcher,
+    task_result_fields,
+)
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
@@ -347,7 +352,8 @@ class PRMonitorAgent(BaseAgent):
                     owner_repo=owner_repo,
                     prompt=prompt,
                     issue_number=pr["bot_pr_number"],
-                    **task_result_fields(task),
+                    base_ref=head_branch or "main",
+                    **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                 )
             )
         if task:

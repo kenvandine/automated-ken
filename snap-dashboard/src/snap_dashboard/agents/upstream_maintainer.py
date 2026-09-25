@@ -25,7 +25,12 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from snap_dashboard.agents.base import BaseAgent
-from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher, task_result_fields
+from snap_dashboard.agents.coding_backend import (
+    RETRY_ELIGIBLE_STATUSES,
+    CodingDispatcher,
+    get_coding_dispatcher,
+    task_result_fields,
+)
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
@@ -138,7 +143,8 @@ class UpstreamMaintainerAgent(BaseAgent):
                     kind="dep_update",
                     owner_repo=owner_repo,
                     prompt=prompt,
-                    **task_result_fields(task),
+                    base_ref="main",
+                    **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                 )
             )
         return bool(task)
@@ -202,11 +208,23 @@ class UpstreamMaintainerAgent(BaseAgent):
             return False
 
         with get_session() as session:
-            already_dispatched = {
-                t.issue_number
-                for t in session.query(CopilotTask)
+            # Only issue numbers whose latest issue_fix attempt is still in
+            # flight or succeeded block a re-dispatch — a failed attempt
+            # (e.g. no Copilot license at the time) shouldn't skip the issue
+            # forever (see RETRY_ELIGIBLE_STATUSES).
+            latest_status_by_issue: dict[int, str] = {}
+            for t in (
+                session.query(CopilotTask)
                 .filter(CopilotTask.kind == "issue_fix", CopilotTask.owner_repo == owner_repo)
+                .order_by(CopilotTask.id.asc())
                 .all()
+            ):
+                if t.issue_number is not None:
+                    latest_status_by_issue[t.issue_number] = t.status or ""
+            already_dispatched = {
+                number
+                for number, status in latest_status_by_issue.items()
+                if status not in RETRY_ELIGIBLE_STATUSES
             }
 
         dispatched = 0
@@ -235,7 +253,8 @@ class UpstreamMaintainerAgent(BaseAgent):
                         owner_repo=owner_repo,
                         prompt=prompt,
                         issue_number=number,
-                        **task_result_fields(task),
+                        base_ref="main",
+                        **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                     )
                 )
             dispatched += 1

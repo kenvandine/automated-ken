@@ -41,6 +41,13 @@ from snap_dashboard.github.copilot_agent import CopilotAgentClient
 
 logger = logging.getLogger(__name__)
 
+# CopilotTask statuses that mean the dispatch never produced usable work and
+# should NOT block a future retry of the same (kind, owner_repo[, issue])
+# combination — used by the various agents' dedup checks (repo_normalizer,
+# upstream_maintainer) and by web/routes/copilot_tasks.py to decide whether
+# to show a "Retry" button.
+RETRY_ELIGIBLE_STATUSES = {"failed", "dispatch_failed", "cancelled", "timed_out"}
+
 
 class CodingDispatcher(Protocol):
     """Common interface every coding backend must expose."""
@@ -78,10 +85,23 @@ class _CopilotWithLocalFallback:
         self._uc = user_config
         self._token = token
         self._local = None
+        self._last_backend_was_local = False
 
     @property
     def token(self) -> str:
         return self._token
+
+    @property
+    def last_error(self) -> str | None:
+        """Reason the most recent ``start_task()`` call failed, if any.
+
+        Only meaningful when the call actually went to Copilot (the local
+        Lemonade backend reports its own failure reason inline in the
+        result dict's ``error`` key instead — see ``task_result_fields()``).
+        """
+        if self._last_backend_was_local:
+            return None
+        return self._copilot.last_error
 
     def _local_dispatcher(self):
         if self._local is None:
@@ -99,6 +119,7 @@ class _CopilotWithLocalFallback:
         create_pull_request: bool = True,
         model: str | None = None,
     ) -> dict | None:
+        self._last_backend_was_local = False
         if not self._copilot.plan_required:
             task = self._copilot.start_task(
                 owner, repo, prompt, base_ref=base_ref,
@@ -111,6 +132,7 @@ class _CopilotWithLocalFallback:
                 "account — falling back to the local Lemonade model for %s/%s (and the "
                 "rest of this run)", owner, repo,
             )
+        self._last_backend_was_local = True
         return self._local_dispatcher().start_task(
             owner, repo, prompt, base_ref=base_ref,
             create_pull_request=create_pull_request, model=model,
@@ -204,7 +226,7 @@ def extract_pr_number(remote: dict) -> int | None:
     return None
 
 
-def task_result_fields(task: dict | None) -> dict:
+def task_result_fields(task: dict | None, fallback_error: str | None = None) -> dict:
     """Turn a ``CodingDispatcher.start_task()`` result into ``CopilotTask`` kwargs.
 
     The two implemented backends return different result shapes:
@@ -216,19 +238,39 @@ def task_result_fields(task: dict | None) -> dict:
     - The local Lemonade backend does all its work synchronously inside
       ``start_task()`` itself, so the result already has a terminal
       ``state`` ("completed"/"failed") and, on success, a PR url — nothing
-      left to poll, and ``external_task_id`` stays unset.
+      left to poll, and ``external_task_id`` stays unset. On failure it also
+      carries an ``error`` string explaining why.
 
-    Returns a dict with ``external_task_id``, ``status``, and ``pr_url``,
-    suitable for ``**``-splatting into a ``CopilotTask(...)`` constructor.
+    ``task is None`` means the dispatch call itself never got a response to
+    interpret (e.g. Copilot's HTTP call raised or returned an unexpected
+    status) — ``fallback_error`` (typically the dispatcher's own
+    ``last_error``, see ``_CopilotWithLocalFallback``) fills in ``error_msg``
+    for that case, so a ``dispatch_failed`` row isn't left with no
+    explanation at all (see web/routes/copilot_tasks.py's Retry action).
+
+    Returns a dict with ``external_task_id``, ``status``, ``pr_url``, and
+    ``error_msg``, suitable for ``**``-splatting into a ``CopilotTask(...)``
+    constructor.
     """
     if not task:
-        return {"external_task_id": None, "status": "dispatch_failed", "pr_url": None}
+        return {
+            "external_task_id": None,
+            "status": "dispatch_failed",
+            "pr_url": None,
+            "error_msg": fallback_error or "Dispatch failed with no further details — see server logs.",
+        }
     state = task.get("state")
     if state:
-        return {"external_task_id": None, "status": state, "pr_url": extract_pr_url(task)}
+        return {
+            "external_task_id": None,
+            "status": state,
+            "pr_url": extract_pr_url(task),
+            "error_msg": task.get("error") if state == "failed" else None,
+        }
     task_id = task.get("id")
     return {
         "external_task_id": str(task_id) if task_id is not None else None,
         "status": "queued",
         "pr_url": None,
+        "error_msg": None,
     }

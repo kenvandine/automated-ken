@@ -175,6 +175,9 @@ def _migrate() -> None:
         # Service snaps (daemon-only, no UI) skip the smoke test entirely
         # — see Snap.is_service in db/models.py.
         "ALTER TABLE snaps ADD COLUMN is_service BOOLEAN DEFAULT 0",
+        # Needed to replay a failed CopilotTask dispatch exactly (Retry) —
+        # see db/models.CopilotTask.base_ref.
+        "ALTER TABLE copilot_tasks ADD COLUMN base_ref VARCHAR(255)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

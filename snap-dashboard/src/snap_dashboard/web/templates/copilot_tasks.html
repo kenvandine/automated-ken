@@ -77,6 +77,13 @@
                 hx-swap="innerHTML" hx-disabled-elt="find button">
             <button type="submit" class="p-button is-small">Refresh</button>
           </form>
+          {% elif t.can_retry %}
+          <form method="post" action="/copilot-tasks/{{ t.id }}/retry"
+                hx-post="/copilot-tasks/{{ t.id }}/retry" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button"
+                onsubmit="return confirm('Retry this task? It will re-dispatch the same prompt as a new task.');">
+            <button type="submit" class="p-button is-small">↺ Retry</button>
+          </form>
           {% endif %}
         </td>
       </tr>

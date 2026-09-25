@@ -32,7 +32,12 @@ from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, Snap
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.bot_client import BotGitHubClient
-from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher, task_result_fields
+from snap_dashboard.agents.coding_backend import (
+    RETRY_ELIGIBLE_STATUSES,
+    CodingDispatcher,
+    get_coding_dispatcher,
+    task_result_fields,
+)
 from snap_dashboard.github.utils import parse_owner_repo
 from snap_dashboard.snapcraft.build_workflow_template import WORKFLOW_PATH, WORKFLOW_YAML
 from snap_dashboard.testing.suite_zip import list_suite_files
@@ -110,16 +115,21 @@ class RepoNormalizerAgent(BaseAgent):
         owner_repo_str = f"{owner}/{repo}"
 
         # Idempotency: skip repos that already have an AGENTS.md, or that
-        # already have a fleet_normalize task in flight/done.
+        # have a fleet_normalize task already in flight or that succeeded.
+        # A previously *failed* attempt (dispatch_failed/failed/cancelled/
+        # timed_out) does NOT block a retry on the next scheduled run —
+        # otherwise one transient failure (e.g. no Copilot license) would
+        # permanently skip the repo forever.
         if bot_client.file_exists(owner, repo, "AGENTS.md"):
             return False
         with get_session() as session:
             existing = (
                 session.query(CopilotTask)
                 .filter(CopilotTask.kind == "fleet_normalize", CopilotTask.owner_repo == owner_repo_str)
+                .order_by(CopilotTask.id.desc())
                 .first()
             )
-            if existing:
+            if existing and existing.status not in RETRY_ELIGIBLE_STATUSES:
                 return False
 
         suite_block, moved_suite = self._build_suite_block(testing_repo, snap_name, token)
@@ -171,7 +181,8 @@ class RepoNormalizerAgent(BaseAgent):
                     kind="fleet_normalize",
                     owner_repo=owner_repo_str,
                     prompt=prompt,
-                    **task_result_fields(task),
+                    base_ref="main",
+                    **task_result_fields(task, fallback_error=getattr(copilot, "last_error", None)),
                 )
             )
         if task and moved_suite and testing_repo:
@@ -221,9 +232,10 @@ class RepoNormalizerAgent(BaseAgent):
                     CopilotTask.owner_repo == owner_repo_str,
                     CopilotTask.issue_number == snap_id,
                 )
+                .order_by(CopilotTask.id.desc())
                 .first()
             )
-            if existing:
+            if existing and existing.status not in RETRY_ELIGIBLE_STATUSES:
                 return
 
         prompt = (
@@ -242,6 +254,7 @@ class RepoNormalizerAgent(BaseAgent):
                     owner_repo=owner_repo_str,
                     prompt=prompt,
                     issue_number=snap_id,  # repurposed here as a "which snap" dedupe key
-                    **task_result_fields(task),
+                    base_ref="main",
+                    **task_result_fields(task, fallback_error=getattr(copilot, "last_error", None)),
                 )
             )
