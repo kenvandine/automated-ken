@@ -262,6 +262,58 @@ real logged-in session (no synthetic compositor needed — the runner
    inheriting the real `WAYLAND_DISPLAY`/`DISPLAY`, real GPU, real theme.
 3. `yarf --platform <Wayland-or-X11, whatever this desktop actually
    runs> --outdir <dir> <downloaded suite>`.
+
+   > **⚠️ Verified blocker (2026-09-24): neither of yarf's two built-in
+   > platforms actually works against a real GNOME/Mutter session.**
+   > Confirmed by inspecting yarf 3.16.0 (stable, snap rev 587) *and*
+   > 3.24.7 (edge, rev 676) — `SUPPORTED_PLATFORMS` only ever contains
+   > `Mir` and `Vnc`, there is no third option:
+   > - `--platform Mir` doesn't talk to Mir per se — it binds three
+   >   **wlroots** Wayland protocols directly:
+   >   `zwlr_virtual_pointer_manager_v1`, `zwlr_virtual_keyboard_manager_v1`,
+   >   `zwlr_screencopy_manager_v1`. Mir implements these for
+   >   compatibility; **Mutter does not**, hence the
+   >   `No WLR pointer manager` connection failure on a stock GNOME
+   >   desktop.
+   > - `--platform Vnc` needs an actual VNC server on `VNC_HOST:5900+VNC_PORT`
+   >   (env vars, default `localhost:5900`). On this GNOME 50 test
+   >   machine there is **no local VNC path available**:
+   >   `gnome-remote-desktop` (50.2) has dropped its VNC backend
+   >   entirely (`grdctl vnc ...` no longer exists — RDP only), and
+   >   there is no `/usr/share/xsessions/*` entry at all (GNOME-on-Xorg
+   >   isn't installed), so `x11vnc` has no X server to attach to
+   >   either. `wayvnc` is wlroots-only and doesn't work against
+   >   Mutter.
+   >
+   > **Net effect:** as of today, a runner sitting at a real,
+   > unmodified GNOME/Wayland desktop cannot be driven by yarf at all
+   > — this phase is blocked on one of:
+   >   a. **Preferred fix, upstream in yarf:** add a native GNOME
+   >      platform that drives input/capture through Mutter's own
+   >      `org.gnome.Mutter.RemoteDesktop` (pointer/keyboard, confirmed
+   >      present on the D-Bus session bus as
+   >      `org.gnome.Mutter.RemoteDesktop`) and
+   >      `org.gnome.Mutter.ScreenCast` (confirmed present) + PipeWire,
+   >      matching the existing `PlatformBase` interface so suites
+   >      don't need to change. This is real (multi-day) upstream yarf
+   >      work, not something fixable from this repo or the individual
+   >      snap-packaging repos.
+   >   b. **Fallback, no yarf changes:** provision runner machines with
+   >      GNOME-on-Xorg (`ubuntu-desktop-minimal` still ships an
+   >      Xorg session on most Ubuntu releases even though this
+   >      particular test machine doesn't have one) + `x11vnc` bound to
+   >      `127.0.0.1:5900`, and run `yarf --platform Vnc` against that
+   >      loopback. Real hardware, real GPU/theme, just not native
+   >      Wayland — acceptable for most snap UI regressions, but won't
+   >      catch Wayland-specific bugs.
+   >   c. Keep GitHub-hosted virtual-Mir CI (`mir-test-tools`) as the
+   >      only automated path until (a) or (b) lands; Phase R5 stays
+   >      unimplemented and this plan is blocked on that decision.
+   >
+   >   Recommendation: pursue (a) as the real fix since it's the only
+   >   option that tests an actual native Wayland/GNOME session; use
+   >   (b) only as a stop-gap on machines where Xorg is available.
+
 4. Extract screenshots from `log.html` using the **same** zlib/base64
    extraction + brightness-validity heuristic already proven in the
    production workflow — factor that Python snippet out of the inline
@@ -547,6 +599,13 @@ note — worth stating plainly in both the CLI output and the docs.
    `ailab`'s release-ppa.yml, or does a new Launchpad PPA + GPG key need
    to be set up for `automated-ken-runner` specifically? Not blocking
    for R1–R6 (only matters once we get to actually cutting a release).
+6. **This one now blocks Phase R5.** yarf has no working platform
+   against a real GNOME/Mutter session today (see the verified findings
+   in Phase R5 above) — pick (a) upstream native-GNOME yarf platform via
+   `org.gnome.Mutter.RemoteDesktop`/`ScreenCast`, (b) GNOME-on-Xorg +
+   `x11vnc` loopback as a stop-gap, or (c) leave R5 unimplemented and
+   keep the GitHub-hosted virtual-Mir workflow as the only automated
+   path for now.
 
 ## Also Worth Doing (adjacent, smaller, not blocking this plan)
 
