@@ -658,6 +658,8 @@ def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
                 "review_reasoning": run_orm.review_reasoning,
                 "error_msg": run_orm.error_msg,
                 "failure_analysis": run_orm.failure_analysis,
+                "started_at": run_orm.started_at,
+                "finished_at": run_orm.finished_at,
             }
             if run_orm
             else None
@@ -694,6 +696,8 @@ def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
             "review_reasoning": None,
             "error_msg": None,
             "failure_analysis": None,
+            "started_at": None,
+            "finished_at": None,
         }
 
     review_context: dict = {}

@@ -15,6 +15,14 @@
       {{ run.version or '' }}
       {% if run.revision %}&nbsp;(rev {{ run.revision }}){% endif %}
     </p>
+    <p class="text-muted small" style="margin-top: 2px;">
+      {% if run.started_at %}
+      Started {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+      {% endif %}
+      {% if run.finished_at %}
+      &nbsp;&middot;&nbsp;Finished {{ run.finished_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+      {% endif %}
+    </p>
   </div>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
     {% if run.status == 'passed' and run.review_decision == 'reject' %}
