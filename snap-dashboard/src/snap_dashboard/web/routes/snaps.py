@@ -11,7 +11,7 @@ from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
+from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, StaleBuildTrigger, TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.repo_discovery import (
     build_packaging_repo_map,
@@ -183,6 +183,18 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             .all()
         )
 
+        # Recent manual/stale-scan rebuild dispatch attempts, so "Rebuild
+        # Now" has visible feedback beyond the queued/"Started" toast (was
+        # previously invisible outside the /agents activity log — see
+        # agents/stale_build_scanner.py).
+        rebuild_triggers = (
+            session.query(StaleBuildTrigger)
+            .filter_by(snap_id=snap.id)
+            .order_by(StaleBuildTrigger.triggered_at.desc())
+            .limit(5)
+            .all()
+        )
+
         # Build channel map table: arch -> {channel: {version, revision, released_at}}
         arch_map: dict[str, dict] = {}
         for cm in cm_rows:
@@ -257,6 +269,16 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             for r in test_runs
         ]
 
+        rebuild_triggers_data = [
+            {
+                "status": t.status,
+                "error_msg": t.error_msg,
+                "workflow_file": t.workflow_file,
+                "triggered_at": t.triggered_at,
+            }
+            for t in rebuild_triggers
+        ]
+
     # The Snap Store lookup and GitHub repo-map cache check below make
     # network calls (get_snap_info hits the Store API with a 30s timeout).
     # These must run with no session/lock held, since get_session() now
@@ -304,6 +326,7 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             "cm_rows": cm_data,
             "issues": issues_data,
             "test_runs": test_runs_data,
+            "rebuild_triggers": rebuild_triggers_data,
             "last_run": _get_last_run(user_id),
             "channels": ["stable", "candidate", "beta", "edge"],
             "current_user": user,

@@ -54,7 +54,7 @@
     <form method="post" action="/snap/{{ snap.name }}/rebuild" style="display:inline"
           hx-post="/snap/{{ snap.name }}/rebuild" hx-target="#page-content" hx-select="#page-content"
           hx-swap="innerHTML" hx-disabled-elt="find button">
-      <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild via the packaging repo's automated-snap-build.yml workflow">Rebuild Now</button>
+      <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild — the dashboard inspects the packaging repo's GitHub Actions workflows and figures out which one builds/publishes the snap">Rebuild Now</button>
     </form>
     {% endif %}
     <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
@@ -65,7 +65,43 @@
   </div>
 </div>
 
-<!-- Channel Map -->
+{% if rebuild_triggers %}
+<div class="card detail-section">
+  <h3 class="section-label">Recent Rebuild Attempts</h3>
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Status</th>
+          <th>Workflow</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in rebuild_triggers %}
+        <tr>
+          <td class="muted small">{{ t.triggered_at.strftime('%Y-%m-%d %H:%M') if t.triggered_at else '—' }}</td>
+          <td>
+            {% if t.status == 'triggered' %}
+            <span class="p-status-label p-status-label--positive">Triggered</span>
+            {% elif t.status == 'skipped' %}
+            <span class="p-status-label p-status-label--caution">Skipped</span>
+            {% else %}
+            <span class="p-status-label p-status-label--negative">Failed</span>
+            {% endif %}
+          </td>
+          <td class="muted small">{{ t.workflow_file or '—' }}</td>
+          <td class="muted small">{{ t.error_msg or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+
 <div class="card detail-section">
   <h3 class="section-label">Channel Map</h3>
   {% if arch_map %}

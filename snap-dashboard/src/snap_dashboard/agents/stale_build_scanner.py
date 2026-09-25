@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -38,6 +40,7 @@ def _record_trigger(
     status: str,
     days_since_publish: int | None = None,
     error: str | None = None,
+    workflow_file: str | None = None,
 ) -> None:
     with get_session() as session:
         trigger = StaleBuildTrigger(
@@ -48,6 +51,7 @@ def _record_trigger(
             days_since_publish=days_since_publish,
             status=status,
             error_msg=error,
+            workflow_file=workflow_file,
         )
         session.add(trigger)
 
@@ -237,55 +241,185 @@ class StaleSnapScannerAgent(BaseAgent):
         return created
 
 
-def _dispatch_rebuild_for_snap(client, snap: dict) -> tuple[str, str | None]:
-    """Dispatch an immediate rebuild for one snap that already has the
-    automated build/publish workflow in its packaging repo.
+def _list_workflow_paths(client, owner: str, repo: str) -> list[str]:
+    """Return every ``.github/workflows/*.yml``/``*.yaml`` path in the repo."""
+    return [
+        p
+        for p in client.list_tree(owner, repo)
+        if p.startswith(".github/workflows/") and p.endswith((".yml", ".yaml"))
+    ]
+
+
+def _dispatchable_workflows(client, owner: str, repo: str) -> list[tuple[str, str]]:
+    """Return ``[(path, content)]`` for workflows that declare
+    ``workflow_dispatch`` — only these can be triggered via the Actions
+    dispatch API, so anything else (push/schedule-only workflows) isn't a
+    candidate at all.
+    """
+    candidates = []
+    for path in _list_workflow_paths(client, owner, repo):
+        got = client.get_file(owner, repo, path)
+        if not got:
+            continue
+        content, _sha = got
+        if re.search(r"(?m)^\s*workflow_dispatch\s*:", content):
+            candidates.append((path, content))
+    return candidates
+
+
+def _heuristic_pick_workflow(candidates: list[tuple[str, str]]) -> str:
+    """Best-effort guess when no local model is available: prefer filenames
+    that look build/publish flavored over e.g. a lint/test-only workflow."""
+    keywords = ("snap", "build", "publish", "release")
+    for path, _content in candidates:
+        name = path.rsplit("/", 1)[-1].lower()
+        if any(k in name for k in keywords):
+            return path.rsplit("/", 1)[-1]
+    return candidates[0][0].rsplit("/", 1)[-1]
+
+
+def _infer_build_workflow(
+    candidates: list[tuple[str, str]], snap_name: str, user_config
+) -> tuple[str | None, str | None]:
+    """Pick which dispatchable workflow builds+publishes the snap package.
+
+    Repos don't necessarily name their build/publish workflow
+    ``automated-snap-build.yml`` — plenty of packaging repos have their own
+    hand-written workflow under an arbitrary filename. When there's exactly
+    one dispatchable workflow it's used directly (no need to ask); when
+    there's more than one, a local Lemonade model reads each workflow's YAML
+    and picks the one that actually builds the snap (snapcraft) and
+    publishes/uploads it to the Snap Store, falling back to a filename
+    heuristic if no model is available or it can't parse a valid answer.
+
+    Returns ``(workflow_filename, note)`` — ``note`` is a short explanation
+    when a heuristic/fallback was used (for logging), or ``None`` when the
+    model made the call (or there was nothing to choose between).
+    """
+    if not candidates:
+        return None, None
+    if len(candidates) == 1:
+        return candidates[0][0].rsplit("/", 1)[-1], None
+
+    from snap_dashboard.lemonade.client import get_lemonade_client
+
+    valid_names = {path.rsplit("/", 1)[-1] for path, _content in candidates}
+    client = get_lemonade_client(user_config, task="text") if user_config else None
+    if client is None or not client.is_available():
+        return _heuristic_pick_workflow(candidates), "no local model available — used heuristic"
+
+    listing = "\n\n".join(
+        f"### {path}\n```yaml\n{content[:4000]}\n```" for path, content in candidates
+    )
+    prompt = (
+        f"This GitHub repo packages the snap '{snap_name}'. It has multiple "
+        "GitHub Actions workflows that can be manually dispatched "
+        "(workflow_dispatch). Identify which ONE of them builds the snap "
+        "package (snapcraft) and publishes/uploads it to the Snap Store "
+        "(e.g. via `snapcraft upload`, `snapcraft push`, or the "
+        "snapcore/action-publish action).\n\n"
+        f"{listing}\n\n"
+        'Respond with ONLY a JSON object: {"workflow_file": "<filename>"}'
+    )
+    reply = client.chat(prompt, temperature=0.1)
+    if not reply:
+        return _heuristic_pick_workflow(candidates), "model call failed — used heuristic"
+    try:
+        start = reply.find("{")
+        end = reply.rfind("}") + 1
+        chosen = json.loads(reply[start:end]).get("workflow_file", "")
+    except Exception:
+        chosen = ""
+    if chosen in valid_names:
+        return chosen, None
+    return (
+        _heuristic_pick_workflow(candidates),
+        "model returned an unrecognized filename — used heuristic",
+    )
+
+
+def _dispatch_rebuild_for_snap(
+    client, snap: dict, user_config=None
+) -> tuple[str, str | None]:
+    """Dispatch an immediate rebuild for one snap's packaging repo.
 
     Shared by :class:`RebuildAllSnapsAgent` (loops over every snap) and
     :class:`RebuildOneSnapAgent` (a single snap, from its detail page or
-    the snaps list). Returns ``(status, error)`` where ``status`` is one
-    of ``"triggered"``, ``"no_repo"`` (no/non-GitHub packaging repo),
-    ``"no_workflow"`` (repo has no automated-snap-build.yml yet — this
-    deliberately does not create it, unlike the staleness scanner), or
-    ``"error"`` (dispatch itself failed).
+    the snaps list). Prefers our own generated ``automated-snap-build.yml``
+    when present (no inference needed), but falls back to inspecting
+    whatever dispatchable workflow(s) the repo already has and inferring
+    the right one to trigger — see ``_infer_build_workflow`` — rather than
+    requiring that exact filename. Returns ``(status, error)`` where
+    ``status`` is one of ``"triggered"``, ``"no_repo"`` (no/non-GitHub
+    packaging repo), ``"no_workflow"`` (repo has no dispatchable
+    build/publish workflow at all — this deliberately does not create one,
+    unlike the staleness scanner), or ``"error"`` (dispatch itself failed).
     """
     owner_repo = _parse_github_owner_repo(snap["packaging_repo"])
     if not owner_repo:
+        _record_trigger(snap, channel=_BUILD_CHANNEL, status="skipped", error="packaging repo isn't a GitHub URL")
         return "no_repo", None
     owner, repo = owner_repo
 
-    if not client.file_exists(owner, repo, WORKFLOW_PATH):
-        logger.debug(
-            "rebuild: %s has no %s, skipping", snap["name"], WORKFLOW_PATH
-        )
-        return "no_workflow", None
+    if client.file_exists(owner, repo, WORKFLOW_PATH):
+        workflow_file = _BUILD_WORKFLOW
+        dispatch_inputs = {"dashboard_trigger_id": str(snap["id"])}
+    else:
+        candidates = _dispatchable_workflows(client, owner, repo)
+        if not candidates:
+            logger.debug(
+                "rebuild: %s has no dispatchable build/publish workflow, skipping",
+                snap["name"],
+            )
+            _record_trigger(
+                snap, channel=_BUILD_CHANNEL, status="skipped",
+                error="no dispatchable (workflow_dispatch) build workflow found in packaging repo",
+            )
+            return "no_workflow", None
+        workflow_file, note = _infer_build_workflow(candidates, snap["name"], user_config)
+        if note:
+            logger.info("rebuild: %s — %s", snap["name"], note)
+        if not workflow_file:
+            _record_trigger(
+                snap, channel=_BUILD_CHANNEL, status="skipped",
+                error="could not determine which workflow builds/publishes this snap",
+            )
+            return "no_workflow", None
+        # Only our own generated workflow declares dashboard_trigger_id —
+        # an arbitrary repo-owned workflow may reject unrecognized inputs.
+        dispatch_inputs = None
 
     default_branch = client.get_default_branch(owner, repo)
     success, err = client.dispatch_workflow(
-        owner, repo, _BUILD_WORKFLOW,
+        owner, repo, workflow_file,
         ref=default_branch,
-        inputs={"dashboard_trigger_id": str(snap["id"])},
+        inputs=dispatch_inputs,
     )
     if success:
-        _record_trigger(snap, channel=_BUILD_CHANNEL, status="triggered")
-        logger.info("rebuild: triggered rebuild for %s", snap["name"])
+        _record_trigger(snap, channel=_BUILD_CHANNEL, status="triggered", workflow_file=workflow_file)
+        logger.info("rebuild: triggered %s via %s", snap["name"], workflow_file)
         return "triggered", None
     else:
-        _record_trigger(snap, channel=_BUILD_CHANNEL, status="failed", error=err)
+        _record_trigger(
+            snap, channel=_BUILD_CHANNEL, status="failed", error=err, workflow_file=workflow_file
+        )
         logger.warning("rebuild: dispatch failed for %s: %s", snap["name"], err)
         return "error", err
 
 
 class RebuildAllSnapsAgent(BaseAgent):
     """Manually triggers an immediate rebuild for every snap with a GitHub
-    packaging repo that already has the automated build/publish workflow.
+    packaging repo that already has a dispatchable build/publish workflow
+    (our own generated one, or an existing hand-written one — see
+    ``_infer_build_workflow``).
 
     Unlike :class:`StaleSnapScannerAgent`, this ignores publish staleness
     entirely (every eligible snap gets a rebuild) and does **not** create
-    the workflow in repos that don't have it yet — "rebuild everything that
-    already has a build workflow" is a deliberate, immediate, user-initiated
-    action (Settings → "Rebuild All Snaps Now"), not the same policy as the
-    automatic staleness-based scanner.
+    a workflow in repos that don't have any dispatchable one at all —
+    "rebuild everything that already has a build workflow" is a
+    deliberate, immediate, user-initiated action (Settings → "Rebuild All
+    Snaps Now"), not the same policy as the automatic staleness-based
+    scanner.
     """
 
     agent_type = "rebuild_all_snaps"
@@ -327,7 +461,7 @@ class RebuildAllSnapsAgent(BaseAgent):
 
         for i, snap in enumerate(snaps, 1):
             self._report(f"Checking {i}/{total}: {snap['name']}", snap["name"])
-            status, _err = _dispatch_rebuild_for_snap(client, snap)
+            status, _err = _dispatch_rebuild_for_snap(client, snap, user_config=uc)
             if status == "triggered":
                 triggered += 1
             elif status == "no_workflow":
@@ -347,10 +481,11 @@ class RebuildOneSnapAgent(BaseAgent):
     """Manually triggers an immediate rebuild for a single snap, the same
     way :class:`RebuildAllSnapsAgent` does for the whole fleet — used by
     the per-snap "Rebuild Now" button on the snap detail page and the
-    Tracked Snaps table (Settings). Requires the snap to already have a
-    GitHub packaging repo with the automated build/publish workflow; it
-    does not create the workflow if missing (use "Check Updates"/the
-    stale-build scanner for that).
+    dashboard's snap list. Requires the snap to already have a GitHub
+    packaging repo with some dispatchable build/publish workflow (ours or
+    a pre-existing hand-written one — see ``_infer_build_workflow``); it
+    does not create a workflow if none exists at all (use "Check
+    Updates"/the stale-build scanner for that).
     """
 
     agent_type = "rebuild_one_snap"
@@ -387,11 +522,11 @@ class RebuildOneSnapAgent(BaseAgent):
         from snap_dashboard.github.bot_client import BotGitHubClient
         client = BotGitHubClient(token=token)
 
-        status, err = _dispatch_rebuild_for_snap(client, snap)
+        status, err = _dispatch_rebuild_for_snap(client, snap, user_config=uc)
         if status == "triggered":
             return f"{snap['name']}: rebuild triggered"
         elif status == "no_workflow":
-            return f"{snap['name']}: skipped — no automated-snap-build.yml in packaging repo"
+            return f"{snap['name']}: skipped — no dispatchable build/publish workflow found in packaging repo"
         elif status == "no_repo":
             return f"{snap['name']}: skipped — packaging repo isn't a GitHub URL"
         else:

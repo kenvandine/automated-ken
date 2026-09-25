@@ -596,6 +596,9 @@ class StaleBuildTrigger(Base):
     # triggered | skipped (workflow missing) | failed
     status = Column(String(32), nullable=False, default="triggered")
     error_msg = Column(Text, nullable=True)
+    # Which workflow file was actually dispatched (or None if never determined
+    # — e.g. status="skipped"). See agents/stale_build_scanner._infer_build_workflow.
+    workflow_file = Column(String(255), nullable=True)
     triggered_at = Column(DateTime, default=_now, nullable=False)
 
     snap = relationship("Snap", back_populates="stale_build_triggers")

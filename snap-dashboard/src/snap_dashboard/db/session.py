@@ -156,6 +156,11 @@ def _migrate() -> None:
         # same VersionBumpPR so all architectures can be gated and promoted
         # together. See agents/pr_monitor.py and testing/release_set.py.
         "ALTER TABLE test_runs ADD COLUMN version_bump_pr_id INTEGER REFERENCES version_bump_prs(id)",
+        # Which workflow file a manual/stale-scan rebuild actually dispatched
+        # — inferred per-repo (see agents/stale_build_scanner._infer_build_workflow)
+        # rather than always automated-snap-build.yml, so it's worth recording
+        # for visibility. See db/models.StaleBuildTrigger.
+        "ALTER TABLE stale_build_triggers ADD COLUMN workflow_file VARCHAR(255)",
     ]
     with engine.connect() as conn:
         for sql in migrations:
