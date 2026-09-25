@@ -186,3 +186,24 @@ def test_dispatch_failure_is_recorded_as_failed(isolated_session):
         trigger = session.query(StaleBuildTrigger).one()
         assert trigger.status == "failed"
         assert trigger.error_msg == "GitHub API returned 404"
+
+
+def test_admin_rights_403_gets_a_friendlier_hint(isolated_session):
+    """The confusing "Must have admin rights to Repository" 403 (really a
+    missing 'workflow'/Actions-write token scope) gets an actionable hint
+    appended rather than being shown to the user verbatim."""
+    client = _FakeGitHubClient({"snap.yaml": _DISPATCHABLE})
+    client.dispatch_result = (
+        False,
+        'GitHub API returned 403: {"message":"Must have admin rights to Repository."}',
+    )
+
+    status, err = sbs._dispatch_rebuild_for_snap(client, _snap())
+
+    assert status == "error"
+    assert "Must have admin rights to Repository" in err
+    assert "'workflow' scope" in err
+    with isolated_session() as session:
+        trigger = session.query(StaleBuildTrigger).one()
+        assert "workflow' scope" in trigger.error_msg
+

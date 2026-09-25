@@ -21,6 +21,30 @@ _BUILD_WORKFLOW = WORKFLOW_FILENAME  # automated-snap-build.yml
 _BUILD_CHANNEL = "candidate"
 
 
+def _friendlify_dispatch_error(err: str | None) -> str | None:
+    """Add an actionable hint to a known-confusing GitHub API dispatch error.
+
+    ``POST .../actions/workflows/{id}/dispatches`` returns a 403 with the
+    message "Must have admin rights to Repository" whenever the token
+    lacks the ``workflow`` scope (classic PAT) or "Actions: Read and
+    write" permission (fine-grained PAT) — despite the wording, it's
+    almost never actually about repo admin rights. Surface that plainly
+    rather than leaving the raw, misleading GitHub message as the only
+    clue in the UI.
+    """
+    if not err:
+        return err
+    if "403" in err and "admin rights to Repository" in err:
+        return (
+            f"{err} — this usually means the configured GitHub token is "
+            "missing the 'workflow' scope (classic PAT) or 'Actions: Read "
+            "and write' permission (fine-grained PAT), not that the "
+            "account actually lacks admin access. Check Settings → GitHub "
+            "token."
+        )
+    return err
+
+
 def _parse_github_owner_repo(repo_url: str) -> tuple[str, str] | None:
     """Return (owner, repo) from a GitHub URL, or None for non-GitHub URLs."""
     if not repo_url:
@@ -206,6 +230,7 @@ class StaleSnapScannerAgent(BaseAgent):
             logger.info("stale_build_scanner: triggered rebuild for %s", snap["name"])
             return "triggered"
         else:
+            err = _friendlify_dispatch_error(err)
             _record_trigger(
                 snap, channel=_BUILD_CHANNEL, days_since_publish=days_stale,
                 status="failed", error=err,
@@ -400,6 +425,7 @@ def _dispatch_rebuild_for_snap(
         logger.info("rebuild: triggered %s via %s", snap["name"], workflow_file)
         return "triggered", None
     else:
+        err = _friendlify_dispatch_error(err)
         _record_trigger(
             snap, channel=_BUILD_CHANNEL, status="failed", error=err, workflow_file=workflow_file
         )
