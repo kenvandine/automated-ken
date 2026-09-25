@@ -502,8 +502,7 @@
     <a href="/snaps/add" class="p-button is-small">+ Add Snap</a>
   </div>
 
-  {% if snaps %}
-  <div class="table-wrapper">
+  <div class="table-wrapper" id="tracked-snaps-wrapper"{% if not snaps %} style="display:none;"{% endif %}>
     <table class="snap-table">
       <thead>
         <tr>
@@ -514,9 +513,9 @@
           <th>Actions</th>
         </tr>
       </thead>
-      <tbody>
+      <tbody id="tracked-snaps-body">
         {% for snap in snaps %}
-        <tr>
+        <tr id="snap-row-{{ snap.name }}" data-snap-name="{{ snap.name }}">
           <td>
             <a href="/snap/{{ snap.name }}" class="snap-link">{{ snap.name }}</a>
             {% if snap.manually_added %}
@@ -537,8 +536,7 @@
             {% if snap.manually_added %}Manual{% else %}Auto{% endif %}
           </td>
           <td>
-            <form method="post" action="/settings/remove/{{ snap.name }}"
-                  onsubmit="return confirm('Remove {{ snap.name }} from tracking?')">
+            <form onsubmit="return removeSnap(event, '{{ snap.name }}')">
               <button type="submit" class="p-button--negative is-small">Remove</button>
             </form>
           </td>
@@ -547,11 +545,55 @@
       </tbody>
     </table>
   </div>
-  {% else %}
-  <div class="empty-state small-empty">
+  <div class="empty-state small-empty" id="tracked-snaps-empty"{% if snaps %} style="display:none;"{% endif %}>
     <p>No snaps tracked yet. <a href="/snaps/add" class="link-inline">Add one</a> or run a collection.</p>
   </div>
-  {% endif %}
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function removeSnap(evt, snapName) {
+  evt.preventDefault();
+  if (!confirm(`Remove ${snapName} from tracking?`)) return false;
+
+  const row = document.getElementById(`snap-row-${snapName}`);
+  const button = evt.target.querySelector('button');
+  if (button) button.disabled = true;
+
+  try {
+    const r = await fetch(`/settings/remove/${encodeURIComponent(snapName)}`, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'fetch' },
+    });
+    if (!r.ok) {
+      alert(`Failed to remove ${snapName} (HTTP ${r.status}).`);
+      if (button) button.disabled = false;
+      return false;
+    }
+  } catch (err) {
+    alert(`Network error removing ${snapName}: ${err}`);
+    if (button) button.disabled = false;
+    return false;
+  }
+
+  if (row) {
+    // Collapse the row in place instead of a full page reload/jump-to-top.
+    row.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
+    row.style.opacity = '0';
+    row.style.transform = 'scaleY(0)';
+    row.style.transformOrigin = 'top';
+    row.addEventListener('transitionend', () => {
+      row.remove();
+      const body = document.getElementById('tracked-snaps-body');
+      if (body && body.children.length === 0) {
+        document.getElementById('tracked-snaps-wrapper').style.display = 'none';
+        document.getElementById('tracked-snaps-empty').style.display = '';
+      }
+    }, { once: true });
+  }
+  return false;
+}
+</script>
 {% endblock %}

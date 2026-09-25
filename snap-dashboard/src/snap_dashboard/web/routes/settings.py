@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
@@ -198,10 +198,20 @@ async def settings_post(
 
 
 @router.post("/settings/remove/{snap_name}")
-async def settings_remove_snap(snap_name: str, request: Request) -> RedirectResponse:
-    """Remove a snap from tracking."""
+async def settings_remove_snap(snap_name: str, request: Request):
+    """Remove a snap from tracking.
+
+    Called via ``fetch()`` from the Settings page's Remove button, which
+    removes the row in place instead of a full page reload — respond with
+    a small JSON body rather than a redirect so that path doesn't need a
+    second round-trip to fetch/parse the whole page. Non-JS form
+    submissions (no ``X-Requested-With`` header) still get the old
+    redirect-to-/settings behavior as a fallback.
+    """
     user = get_current_user(request)
     if user is None:
+        if request.headers.get("X-Requested-With"):
+            return JSONResponse({"error": "not authenticated"}, status_code=401)
         return RedirectResponse(url="/auth/login", status_code=302)
 
     user_id = user["id"]
@@ -211,6 +221,8 @@ async def settings_remove_snap(snap_name: str, request: Request) -> RedirectResp
         if snap:
             session.delete(snap)
 
+    if request.headers.get("X-Requested-With"):
+        return JSONResponse({"removed": snap_name})
     return RedirectResponse(url="/settings", status_code=303)
 
 
