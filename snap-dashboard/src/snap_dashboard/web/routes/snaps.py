@@ -5,12 +5,10 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
-from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
@@ -20,11 +18,11 @@ from snap_dashboard.github.repo_discovery import (
     get_cached_packaging_repo_map,
 )
 from snap_dashboard.store.client import extract_repo_urls, get_snap_info
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 def _get_last_run(user_id: int):

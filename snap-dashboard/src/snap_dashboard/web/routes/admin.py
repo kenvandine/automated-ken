@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user
 from snap_dashboard.db.models import AllowlistedUser, User
 from snap_dashboard.db.session import get_session
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 def _require_admin(request: Request) -> dict | RedirectResponse:

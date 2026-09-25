@@ -5,11 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import PromotionDismissal, Snap, TestRun
@@ -28,11 +26,11 @@ from snap_dashboard.testing.release_set import (
     member_state,
     promote_release_set,
 )
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 # ---------------------------------------------------------------------------

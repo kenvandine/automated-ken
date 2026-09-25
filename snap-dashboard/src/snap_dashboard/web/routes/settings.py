@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import (
@@ -21,11 +19,11 @@ from snap_dashboard.db.models import (
     UserConfig,
 )
 from snap_dashboard.db.session import get_session
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 def _get_last_run(user_id: int):

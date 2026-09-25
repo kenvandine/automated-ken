@@ -10,11 +10,9 @@ their behalf, and refresh each task's live status/PR link from GitHub.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.agents.coding_backend import extract_pr_url
 from snap_dashboard.auth import get_current_user, get_user_config
@@ -22,11 +20,11 @@ from snap_dashboard.db.models import CopilotTask
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 # States GitHub's Copilot cloud agent task API reports.
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out", "dispatch_failed"}
