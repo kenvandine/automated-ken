@@ -438,6 +438,10 @@ class Runner(Base):
     idle_seconds = Column(Integer, nullable=True)
     idle_threshold_seconds = Column(Integer, nullable=False, default=120)
     last_heartbeat_at = Column(DateTime, nullable=True)
+    # Best-effort client IP captured from each enroll/heartbeat request —
+    # purely informational (e.g. "ssh into the runner box"), not used for
+    # auth/access control.
+    ip_address = Column(String(64), nullable=True)
     current_test_run_id = Column(
         Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
     )

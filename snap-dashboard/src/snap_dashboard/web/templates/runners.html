@@ -34,7 +34,7 @@
     <thead>
       <tr>
         <th>Name</th><th>Status</th><th>Idle</th><th>Last heartbeat</th>
-        <th>Current job</th><th>Arch / OS</th><th></th>
+        <th>Current job</th><th>Arch / OS</th><th>IP address</th><th></th>
       </tr>
     </thead>
     <tbody>
@@ -59,6 +59,7 @@
         <td>{{ r.last_heartbeat_at or '—' }}</td>
         <td>{{ r.current_test_run_id or '—' }}</td>
         <td class="text-muted small">{{ r.arch }} {{ r.os_name }} {{ r.desktop_env }}</td>
+        <td class="text-muted small">{{ r.ip_address or '—' }}</td>
         <td>
           {% if r.status != 'revoked' %}
           <form method="post" action="/runners/{{ r.id }}/revoke"

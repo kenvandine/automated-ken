@@ -168,6 +168,10 @@ def _migrate() -> None:
         # no PR exists yet (status=="dispatched") — see agents/version_bumper.py
         # and agents/pr_monitor.py's dispatched-state polling.
         "ALTER TABLE version_bump_prs ADD COLUMN external_task_id VARCHAR(128)",
+        # Best-effort client IP captured on enroll/heartbeat, shown on the
+        # runners page so it's easy to ssh into a specific machine — see
+        # web/routes/runner_api.py.
+        "ALTER TABLE runners ADD COLUMN ip_address VARCHAR(64)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

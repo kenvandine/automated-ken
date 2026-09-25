@@ -41,6 +41,21 @@ _NEXT_JOB_POLL_INTERVAL = 1.0
 _DEFAULT_NEXT_JOB_TIMEOUT = 25
 
 
+def _client_ip(request: Request) -> str | None:
+    """Best-effort caller IP, purely informational (e.g. "ssh in to debug").
+
+    Not trusted for auth — enrollment/heartbeat still require the bearer
+    secret regardless. Prefers X-Forwarded-For (set by uvicorn's
+    ProxyHeadersMiddleware, already enabled by default for
+    ``forwarded_allow_ips``) so a runner behind a reverse proxy still
+    reports its real address; falls back to the direct TCP peer.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
+
+
 def _runner_from_bearer(authorization: str | None) -> Runner | None:
     """Resolve a Runner from the ``Authorization: Bearer <secret>`` header."""
     if not authorization or not authorization.lower().startswith("bearer "):
@@ -112,6 +127,7 @@ async def enroll(request: Request) -> JSONResponse:
         runner.os_name = os_name
         runner.desktop_env = desktop_env
         runner.status = "idle"
+        runner.ip_address = _client_ip(request)
         session.flush()
         runner_id = runner.id
 
@@ -145,6 +161,7 @@ async def heartbeat(
         runner.status = "locked" if locked else status
         runner.idle_seconds = idle_seconds
         runner.last_heartbeat_at = datetime.now(timezone.utc)
+        runner.ip_address = _client_ip(request)
         # Self-heal runners enrolled before arch reporting existed (or
         # whose reported arch has since changed) without requiring a
         # manual re-enrollment — see automated_ken_runner.runner._maybe_heartbeat.
