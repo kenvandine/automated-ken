@@ -79,6 +79,7 @@
 </div>
 
 <!-- ── Agent cards ──────────────────────────────────────────── -->
+<h3 class="section-label agent-group-label">Coding Agents</h3>
 <div class="agent-grid">
 
   <div class="agent-card" id="card-release_scanner" data-type="release_scanner">
@@ -115,6 +116,45 @@
     </div>
   </div>
 
+  <div class="agent-card" id="card-upstream_maintainer" data-type="upstream_maintainer">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">🧑‍💻</span>
+      <div>
+        <div class="agent-card-name">Upstream Maintainer</div>
+        <div class="agent-card-desc">Delegates dep upgrades &amp; issue fixes to the coding backend</div>
+      </div>
+      <div class="agent-status-dot" id="dot-upstream_maintainer"></div>
+    </div>
+    <div class="agent-card-task" id="task-upstream_maintainer">Idle</div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-upstream_maintainer">—</span>
+      <span class="agent-card-badge" id="badge-upstream_maintainer">IDLE</span>
+    </div>
+  </div>
+
+  <div class="agent-card" id="card-repo_normalizer" data-type="repo_normalizer">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">📐</span>
+      <div>
+        <div class="agent-card-name">Repo Normalizer</div>
+        <div class="agent-card-desc">Fleet-wide repo cleanup via the coding backend</div>
+      </div>
+      <div class="agent-status-dot" id="dot-repo_normalizer"></div>
+    </div>
+    <div class="agent-card-task" id="task-repo_normalizer">Idle</div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-repo_normalizer">On demand</span>
+      <span class="agent-card-badge" id="badge-repo_normalizer">IDLE</span>
+    </div>
+  </div>
+
+</div>
+
+<h3 class="section-label agent-group-label">Test Runners</h3>
+<div class="agent-grid">
+
   <div class="agent-card" id="card-pr_monitor" data-type="pr_monitor">
     <div class="agent-card-glow"></div>
     <div class="agent-card-header">
@@ -150,6 +190,44 @@
     <div class="agent-card-footer">
       <span class="agent-card-stat" id="sched-screenshot_reviewer">On demand</span>
       <span class="agent-card-badge" id="badge-screenshot_reviewer">IDLE</span>
+    </div>
+  </div>
+
+  <div class="agent-card agent-card-lemonade" id="card-test_run_auto_promoter" data-type="test_run_auto_promoter">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">🚦</span>
+      <div>
+        <div class="agent-card-name">Test Run Auto-Promoter</div>
+        <div class="agent-card-desc">Reviews runner screenshots, promotes candidate builds</div>
+      </div>
+      <div class="agent-status-dot" id="dot-test_run_auto_promoter"></div>
+    </div>
+    <div class="agent-card-task" id="task-test_run_auto_promoter">Idle</div>
+    <div class="agent-thinking" id="thinking-test_run_auto_promoter" style="display:none;">
+      <span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>
+      <span style="margin-left:6px;font-size:11px;color:var(--accent);">INFERENCE</span>
+    </div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-test_run_auto_promoter">On demand</span>
+      <span class="agent-card-badge" id="badge-test_run_auto_promoter">IDLE</span>
+    </div>
+  </div>
+
+  <div class="agent-card" id="card-test_failure_analyzer" data-type="test_failure_analyzer">
+    <div class="agent-card-glow"></div>
+    <div class="agent-card-header">
+      <span class="agent-card-icon">🩺</span>
+      <div>
+        <div class="agent-card-name">Test Failure Analyzer</div>
+        <div class="agent-card-desc">Infers a plain-English root cause for failed runs</div>
+      </div>
+      <div class="agent-status-dot" id="dot-test_failure_analyzer"></div>
+    </div>
+    <div class="agent-card-task" id="task-test_failure_analyzer">Idle</div>
+    <div class="agent-card-footer">
+      <span class="agent-card-stat" id="sched-test_failure_analyzer">On demand</span>
+      <span class="agent-card-badge" id="badge-test_failure_analyzer">IDLE</span>
     </div>
   </div>
 
@@ -274,14 +352,21 @@ function highlightStage(id, active) {
 
 /* ── Agent cards ────────────────────────────────────────────── */
 const AGENT_COLORS = {
-  release_scanner:    '#7c6af9',
-  version_bumper:     '#38bd82',
-  pr_monitor:         '#f5a623',
-  screenshot_reviewer:'#52b6ff',
+  release_scanner:      '#7c6af9',
+  version_bumper:       '#38bd82',
+  upstream_maintainer:  '#e0607e',
+  repo_normalizer:      '#c98a3e',
+  pr_monitor:           '#f5a623',
+  screenshot_reviewer:  '#52b6ff',
+  test_run_auto_promoter:'#52b6ff',
+  test_failure_analyzer:'#9f7ae0',
 };
 
 function updateAgentCards(active, schedules) {
-  const types = ['release_scanner','version_bumper','pr_monitor','screenshot_reviewer'];
+  const types = [
+    'release_scanner','version_bumper','upstream_maintainer','repo_normalizer',
+    'pr_monitor','screenshot_reviewer','test_run_auto_promoter','test_failure_analyzer',
+  ];
 
   // Build schedule lookup
   const schedMap = {};

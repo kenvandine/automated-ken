@@ -1503,6 +1503,10 @@ footer a:hover {
 }
 
 /* ---- Agent cards grid ------------------------------------ */
+.agent-group-label {
+  margin-top: 24px;
+}
+
 .agent-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1691,6 +1695,10 @@ footer a:hover {
 .agent-version_bumper   { background: rgba(var(--green-rgb), 0.12);  color: var(--green); }
 .agent-pr_monitor       { background: rgba(var(--amber-rgb), 0.12);  color: var(--amber); }
 .agent-screenshot_reviewer { background: rgba(var(--blue-rgb), 0.15); color: var(--blue); }
+.agent-upstream_maintainer { background: rgba(var(--green-rgb), 0.12); color: var(--green); }
+.agent-repo_normalizer  { background: rgba(var(--amber-rgb), 0.12); color: var(--amber); }
+.agent-test_run_auto_promoter { background: rgba(var(--blue-rgb), 0.15); color: var(--blue); }
+.agent-test_failure_analyzer { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-hover); }
 
 /* ---- Version bump rows ----------------------------------- */
 .bump-list {
