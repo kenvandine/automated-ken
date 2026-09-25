@@ -269,7 +269,7 @@ class RunnerLoop:
             ["snap", "info", snap_name], capture_output=True, timeout=30, check=False
         )
         needs_classic = self._snap_needs_classic(
-            (info.stdout or b"").decode(errors="replace")
+            (info.stdout or b"").decode(errors="replace"), channel
         )
         installed = subprocess.run(
             ["snap", "list", snap_name], capture_output=True, timeout=15, check=False
@@ -286,20 +286,61 @@ class RunnerLoop:
         proc.check_returncode()
 
     @staticmethod
-    def _snap_needs_classic(snap_info_output: str) -> bool:
-        """Return True if ``snap info``'s output reports classic confinement.
+    def _snap_needs_classic(snap_info_output: str, channel: str) -> bool:
+        """Return True if ``snap info`` reports *channel* as classic confinement.
 
         Classic-confinement snaps (e.g. fresh-editor) refuse ``snap
         install``/``refresh`` without an explicit ``--classic`` flag —
         this reads that requirement straight from the store metadata
         every job already fetches, so no per-snap runner config is
         needed to know which ones need it.
+
+        Modern ``snap info`` has no single top-level ``confinement:``
+        field — confinement is only shown per line in the ``channels:``
+        block, as a trailing ``classic`` word after the size, e.g.::
+
+            channels:
+              latest/stable:    0.4.6 2026-08-06 (10) 10.5MB classic
+              latest/candidate: 0.5.1 2026-09-25 (14) 11.4MB classic
+
+        so this looks at the specific ``<track>/<channel>`` line being
+        installed (falling back to any channel line, then the
+        ``installed:`` line, if that exact one is a "^" placeholder
+        pointing at another channel or otherwise missing).
         """
-        for line in snap_info_output.splitlines():
-            key, sep, value = line.partition(":")
-            if sep and key.strip() == "confinement":
-                return value.strip() == "classic"
-        return False
+        channel_lines: list[str] = []
+        installed_line = ""
+        in_channels = False
+        for raw_line in snap_info_output.splitlines():
+            if raw_line.startswith("channels:"):
+                in_channels = True
+                continue
+            if raw_line.startswith("installed:"):
+                in_channels = False
+                installed_line = raw_line
+                continue
+            if in_channels:
+                if not raw_line.startswith((" ", "\t")):
+                    in_channels = False
+                    continue
+                stripped = raw_line.strip()
+                track_channel, sep, rest = stripped.partition(":")
+                if not sep:
+                    continue
+                risk = track_channel.rsplit("/", 1)[-1]
+                if "^" in rest:
+                    continue
+                if risk == channel:
+                    return "classic" in rest.split()
+                channel_lines.append(rest)
+
+        # Exact channel wasn't listed (e.g. it's a "^" alias for another
+        # channel) — any channel line reflects the snap's confinement
+        # just as well since it practically never varies by channel.
+        for rest in channel_lines:
+            return "classic" in rest.split()
+        return "classic" in installed_line.split()
+
 
     def _run_desktop_smoke_test(
         self, snap_name: str, is_console_app: bool, tmp_path: Path, log: Callable[[str, str], None]
