@@ -141,6 +141,22 @@ async def new_runner(request: Request, name: str = Form(default="")) -> JSONResp
     })
 
 
+@router.post("/runners/{runner_id}/rename")
+async def rename_runner(runner_id: int, request: Request, name: str = Form(...)) -> RedirectResponse:
+    """Change a runner's display name. Purely cosmetic — has no effect on
+    auth, enrollment, or job dispatch, which are all keyed by ``id``."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    name = name.strip()
+    if name:
+        with get_session() as session:
+            runner = session.query(Runner).filter_by(id=runner_id, user_id=user["id"]).first()
+            if runner:
+                runner.name = name
+    return RedirectResponse(url="/runners", status_code=303)
+
+
 @router.post("/runners/{runner_id}/revoke")
 async def revoke_runner(runner_id: int, request: Request) -> RedirectResponse:
     user = get_current_user(request)

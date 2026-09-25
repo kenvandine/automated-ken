@@ -40,7 +40,20 @@
     <tbody>
       {% for r in runners %}
       <tr>
-        <td>{{ r.name }}</td>
+        <td>
+          <div id="runner-name-display-{{ r.id }}">
+            {{ r.name }}
+            <button type="button" class="rename-trigger" onclick="toggleRename({{ r.id }})" title="Rename runner">✎</button>
+          </div>
+          <form method="post" action="/runners/{{ r.id }}/rename" id="rename-form-{{ r.id }}" style="display:none;"
+                hx-post="/runners/{{ r.id }}/rename" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button">
+            <input type="text" name="name" value="{{ r.name }}" maxlength="255" required
+                   class="rename-input" autofocus>
+            <button type="submit" class="p-button--positive is-small">Save</button>
+            <button type="button" class="p-button is-small" onclick="toggleRename({{ r.id }})">Cancel</button>
+          </form>
+        </td>
         <td><span class="p-status-label {{ 'p-status-label--positive' if r.status == 'idle' else 'p-status-label--caution' if r.status in ('busy','enrolling') else 'p-status-label--negative' if r.status in ('offline','revoked','locked') else 'p-status-label' }}">{{ r.status }}</span></td>
         <td>{{ r.idle_seconds if r.idle_seconds is not none else '—' }}s</td>
         <td>{{ r.last_heartbeat_at or '—' }}</td>
@@ -145,10 +158,9 @@
 // Live-refresh runner/queue status without a full page reload — swaps
 // #page-content in place via htmx instead of navigating, so it doesn't
 // interrupt anything the user's doing elsewhere on the page. Paused
-// while the enrollment flow is open, since `prompt()` blocks this
-// script for as long as the user takes to respond, and a refresh firing
-// right after would wipe the newly-issued (one-time-use) token before
-// it's ever seen.
+// while the enrollment flow or a rename form is open, since a refresh
+// firing then would either wipe the newly-issued (one-time-use) token
+// before it's ever seen, or blow away an in-progress rename edit.
 function refreshRunnersPage() {
   htmx.ajax('GET', location.pathname + location.search, {
     target: '#page-content', select: '#page-content', swap: 'innerHTML',
@@ -156,16 +168,28 @@ function refreshRunnersPage() {
 }
 
 let refreshTimer = setInterval(refreshRunnersPage, 15000);
+let openRenameId = null;
+
+function pauseRefresh() {
+  clearInterval(refreshTimer);
+}
+
+function resumeRefresh() {
+  clearInterval(refreshTimer);
+  if (openRenameId === null) {
+    refreshTimer = setInterval(refreshRunnersPage, 15000);
+  }
+}
 
 function dismissEnrollResult() {
   document.getElementById('enroll-result').style.display = 'none';
-  refreshTimer = setInterval(refreshRunnersPage, 15000);
+  resumeRefresh();
 }
 
 async function newRunner() {
-  clearInterval(refreshTimer);
+  pauseRefresh();
   const name = prompt('Name for this runner (e.g. its hostname):', '');
-  if (name === null) { refreshTimer = setInterval(refreshRunnersPage, 15000); return; }
+  if (name === null) { resumeRefresh(); return; }
   try {
     const form = new FormData();
     form.append('name', name);
@@ -174,7 +198,7 @@ async function newRunner() {
       let detail = '';
       try { detail = (await r.json()).error || ''; } catch (e) { /* non-JSON error body */ }
       alert(`Failed to create enrollment token (HTTP ${r.status}). ${detail}`);
-      refreshTimer = setInterval(refreshRunnersPage, 15000);
+      resumeRefresh();
       return;
     }
     const d = await r.json();
@@ -185,7 +209,35 @@ async function newRunner() {
     // so the one-time token can't be wiped by a background reload.
   } catch (err) {
     alert(`Network error creating enrollment token: ${err}`);
-    refreshTimer = setInterval(refreshRunnersPage, 15000);
+    resumeRefresh();
+  }
+}
+
+// Rename forms submit via htmx (so the whole page doesn't reload) and
+// their swap replaces #page-content — including the form itself — so
+// toggleRename()'s own "closing" branch never runs for a submit. Catch
+// that here instead, or auto-refresh would stay paused forever after a
+// successful (or failed) rename.
+document.body.addEventListener('htmx:afterRequest', (evt) => {
+  const id = evt.detail.elt && evt.detail.elt.id;
+  if (id && id.startsWith('rename-form-')) {
+    openRenameId = null;
+    resumeRefresh();
+  }
+});
+
+function toggleRename(id) {
+  const display = document.getElementById('runner-name-display-' + id);
+  const form = document.getElementById('rename-form-' + id);
+  const opening = form.style.display === 'none';
+  form.style.display = opening ? 'flex' : 'none';
+  display.style.display = opening ? 'none' : 'block';
+  openRenameId = opening ? id : null;
+  if (opening) {
+    pauseRefresh();
+    form.querySelector('input[name="name"]').focus();
+  } else {
+    resumeRefresh();
   }
 }
 </script>
