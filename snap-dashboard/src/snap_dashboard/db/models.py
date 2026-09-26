@@ -480,6 +480,11 @@ class AgentRun(Base):
     status = Column(String(32), nullable=False, default="running")
     result_summary = Column(Text, nullable=True)
     error_msg = Column(Text, nullable=True)
+    # Every log record emitted by this agent's thread while ``_run()`` was
+    # executing — see agents/base.py's ``_ThreadLogCapture`` handler. Lets
+    # the web UI show exactly what an agent did/saw for any given run,
+    # instead of just the one-line summary/error.
+    log_output = Column(Text, nullable=True)
     started_at = Column(DateTime, default=_now, nullable=False)
     finished_at = Column(DateTime, nullable=True)
 

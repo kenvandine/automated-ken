@@ -178,6 +178,9 @@ def _migrate() -> None:
         # Needed to replay a failed CopilotTask dispatch exactly (Retry) —
         # see db/models.CopilotTask.base_ref.
         "ALTER TABLE copilot_tasks ADD COLUMN base_ref VARCHAR(255)",
+        # Full captured log for every agent run — see agents/base.py's
+        # ``_ThreadLogCapture`` handler and db/models.AgentRun.log_output.
+        "ALTER TABLE agent_runs ADD COLUMN log_output TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

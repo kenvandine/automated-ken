@@ -249,7 +249,10 @@
 
 <!-- ── Run history ──────────────────────────────────────────── -->
 <div class="card">
-  <h3 class="section-label">Recent Runs</h3>
+  <div class="section-header-row">
+    <h3 class="section-label">Recent Runs</h3>
+    <a href="/agents/runs" class="p-button is-small">📜 View All Runs &amp; Logs</a>
+  </div>
   <div id="history-container">
     <div class="text-muted small" style="padding:12px 0;">Loading…</div>
   </div>
@@ -442,6 +445,9 @@ function updateHistory(history) {
     const statusClass = r.status === 'done' ? 'p-status-label--positive' :
                         r.status === 'error' ? 'badge-fail' : 'badge-running';
     const dur = r.duration_s !== null ? `${r.duration_s}s` : '…';
+    const logLink = r.has_log
+      ? `<a href="/agents/runs/${r.id}/log" target="_blank" rel="noopener" class="p-button is-small">View Log</a>`
+      : '<span class="muted small">—</span>';
     return `<tr>
       <td><span class="agent-type-badge agent-${r.agent_type}">${r.agent_type.replace(/_/g,' ')}</span></td>
       <td class="muted">${r.snap_name || '—'}</td>
@@ -449,11 +455,12 @@ function updateHistory(history) {
       <td class="muted small" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(r.summary || '—')}</td>
       <td class="muted small">${r.started_at}</td>
       <td class="muted small">${dur}</td>
+      <td>${logLink}</td>
     </tr>`;
   }).join('');
 
   container.innerHTML = `<div class="table-wrapper"><table class="snap-table">
-    <thead><tr><th>Agent</th><th>Snap</th><th>Status</th><th>Result</th><th>Started</th><th>Duration</th></tr></thead>
+    <thead><tr><th>Agent</th><th>Snap</th><th>Status</th><th>Result</th><th>Started</th><th>Duration</th><th>Log</th></tr></thead>
     <tbody>${rows}</tbody>
   </table></div>`;
 }

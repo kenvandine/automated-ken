@@ -7,7 +7,13 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import AgentRun, TestRun, UpstreamRelease, VersionBumpPR
@@ -151,6 +157,7 @@ def agent_status(request: Request) -> JSONResponse:
                     int((r.finished_at - r.started_at).total_seconds())
                     if r.finished_at and r.started_at else None
                 ),
+                "has_log": bool(r.log_output),
             }
             for r in recent_runs
         ]
@@ -191,6 +198,98 @@ def agent_status(request: Request) -> JSONResponse:
         "schedules": schedules,
         "activity_seq": get_tracker().latest_seq(),
     })
+
+
+@router.get("/agents/runs", response_class=HTMLResponse)
+async def agent_runs_page(
+    request: Request,
+    agent_type: str = "",
+    status: str = "",
+    page: int = 1,
+) -> HTMLResponse:
+    """Full, filterable, paginated history of every agent run — the "find any
+    run's logs" page linked from the Agent Fleet dashboard's nav/header.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    page = max(1, page)
+    page_size = 50
+
+    with get_session() as session:
+        query = session.query(AgentRun).filter_by(user_id=user_id)
+        if agent_type:
+            query = query.filter(AgentRun.agent_type == agent_type)
+        if status:
+            query = query.filter(AgentRun.status == status)
+
+        total = query.count()
+        runs = (
+            query.order_by(AgentRun.started_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        agent_types = sorted(
+            t for (t,) in session.query(AgentRun.agent_type).filter_by(user_id=user_id).distinct().all()
+        )
+
+        rows = [
+            {
+                "id": r.id,
+                "agent_type": r.agent_type,
+                "snap_name": r.snap_name or "",
+                "status": r.status,
+                "summary": r.result_summary or r.error_msg or "",
+                "started_at": r.started_at.strftime("%Y-%m-%d %H:%M:%S") if r.started_at else "",
+                "duration_s": (
+                    int((r.finished_at - r.started_at).total_seconds())
+                    if r.finished_at and r.started_at else None
+                ),
+                "has_log": bool(r.log_output),
+            }
+            for r in runs
+        ]
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    return templates.TemplateResponse(
+        request,
+        "agent_runs.html",
+        {
+            "current_user": user,
+            "runs": rows,
+            "agent_types": agent_types,
+            "selected_agent_type": agent_type,
+            "selected_status": status,
+            "page": page,
+            "total_pages": total_pages,
+            "total": total,
+        },
+    )
+
+
+@router.get("/agents/runs/{run_id}/log", response_class=PlainTextResponse)
+async def agent_run_log(run_id: int, request: Request) -> PlainTextResponse:
+    """Return the raw log captured for a single agent run.
+
+    Plain text — same convention as ``/testing/runs/{id}/log`` — so it's easy
+    to view in-browser, download, or curl without any JS/modal plumbing.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return PlainTextResponse("Not authenticated", status_code=401)
+
+    user_id = user["id"]
+    with get_session() as session:
+        run = session.query(AgentRun).filter_by(id=run_id, user_id=user_id).first()
+        if run is None:
+            return PlainTextResponse("Run not found", status_code=404)
+        log = run.log_output or "(no log captured for this run)"
+
+    return PlainTextResponse(log)
 
 
 @router.post("/agents/scan-now")
