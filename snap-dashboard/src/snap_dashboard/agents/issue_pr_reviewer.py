@@ -164,7 +164,14 @@ class IssuePrReviewAgent(BaseAgent):
             llm_summary = self._summarize_with_llm(lemonade, snap_name, items)
             if llm_summary:
                 return llm_summary
-        return self._summarize_heuristic(items)
+            # Lemonade *was* configured/reachable but the chat call itself
+            # failed or returned nothing — a different situation from "not
+            # configured at all", so don't tell the user to go configure
+            # something they already have. See _summarize_with_llm's own
+            # logger.warning (in lemonade.chat) for the actual failure
+            # reason (timeout, non-200, cold model load, etc).
+            return self._summarize_heuristic(items, lemonade_failed=True)
+        return self._summarize_heuristic(items, lemonade_failed=False)
 
     def _summarize_with_llm(self, lemonade, snap_name: str, items: list[dict]) -> str | None:
         listing = "\n".join(
@@ -182,10 +189,19 @@ class IssuePrReviewAgent(BaseAgent):
             "issue/PR numbers matter most and why."
         )
         summary = lemonade.chat(prompt, temperature=0.2, max_tokens=500)
-        return summary.strip() if summary else None
+        if not summary:
+            # lemonade.chat() already logs the specific httpx/HTTP-status
+            # reason at warning level; add snap context here so it's easy
+            # to correlate with the "heuristic summary" fallback the user sees.
+            logger.warning(
+                "issue_pr_reviewer: Lemonade summarization returned nothing for %s "
+                "(%d item(s)) — falling back to heuristic summary", snap_name, len(items),
+            )
+            return None
+        return summary.strip()
 
     @staticmethod
-    def _summarize_heuristic(items: list[dict]) -> str:
+    def _summarize_heuristic(items: list[dict], lemonade_failed: bool = False) -> str:
         issues = [i for i in items if i["type"] == "issue"]
         prs = [i for i in items if i["type"] == "pr"]
         stale = [i for i in items if (i["age_days"] or 0) >= _STALE_DAYS]
@@ -196,10 +212,23 @@ class IssuePrReviewAgent(BaseAgent):
             )
             for it in sorted(stale, key=lambda i: -(i["age_days"] or 0))[:8]:
                 lines.append(f"  - [{it['type'].upper()} #{it['number']}] {it['title']} ({it['age_days']}d old)")
-        no_llm_note = (
-            "\n(No local text model configured — this is a heuristic summary. "
-            "Configure a Lemonade model in Settings for a richer plain-English summary.)"
-        )
+        if lemonade_failed:
+            # Distinct from "not configured": a model *is* set up and the
+            # server was reachable, but the summarization request itself
+            # failed (timed out, cold model load took too long, non-200
+            # response, etc) — see the "issue_pr_reviewer"/"lemonade chat"
+            # warnings in the server log for the specific reason.
+            no_llm_note = (
+                "\n(The local Lemonade text model is configured but the summarization "
+                "request failed or timed out — this is a heuristic summary instead. "
+                "Check the server log for a 'lemonade chat' warning for details; a cold "
+                "model load can take a while on first use, so retrying may help.)"
+            )
+        else:
+            no_llm_note = (
+                "\n(No local text model configured — this is a heuristic summary. "
+                "Configure a Lemonade model in Settings for a richer plain-English summary.)"
+            )
         return "\n".join(lines) + no_llm_note
 
     # ------------------------------------------------------------------

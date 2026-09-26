@@ -184,6 +184,54 @@ def test_fetches_and_summarizes_with_heuristic_fallback(isolated_session, monkey
     session.close()
 
 
+def test_lemonade_configured_but_chat_fails_gives_distinct_heuristic_note(
+    isolated_session, monkeypatch
+) -> None:
+    """A model *is* configured/reachable but the chat call itself fails
+    (timeout, cold model load, non-200, ...) — the fallback message must not
+    claim "no local text model configured" in that case, since that's
+    misleading and sends the user chasing a Settings option that's already set.
+    """
+    user_id, snap_id = _seed(isolated_session)
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    session.close()
+    monkeypatch.setattr(ipr_module, "get_user_config", lambda uid: uc)
+
+    items = [_fake_issue(1, is_pr=False, title="Old bug", age_days=60)]
+
+    class _FakeHttpClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def get(self, url, params=None, headers=None):
+            return _FakeResponse(200, items)
+
+    monkeypatch.setattr(ipr_module.httpx, "Client", _FakeHttpClient)
+
+    class _FailingLemonade:
+        def chat(self, *a, **k):
+            return None  # simulates a timed-out/failed chat call
+
+    agent = IssuePrReviewAgent(user_id=user_id, snap_id=snap_id)
+    monkeypatch.setattr(agent, "_get_lemonade", lambda *a, **k: _FailingLemonade())
+    result = agent._run()
+
+    assert "reviewed 1 open item" in result
+    session = isolated_session()
+    report = session.query(IssueReviewReport).filter_by(snap_id=snap_id).first()
+    assert report is not None
+    assert "No local text model configured" not in report.summary
+    assert "configured but the summarization request failed" in report.summary
+    session.close()
+
+
 def test_uses_llm_summary_when_lemonade_available(isolated_session, monkeypatch) -> None:
     user_id, snap_id = _seed(isolated_session)
     session = isolated_session()
