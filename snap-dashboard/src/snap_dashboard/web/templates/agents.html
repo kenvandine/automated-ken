@@ -427,7 +427,14 @@ function updateLemonade(lem) {
   } else if (lem.available) {
     orb.className = 'lemonade-orb orb-connected';
     const backend = lem.backend === 'system' ? 'System' : 'Embedded';
-    text.textContent = `Connected (${backend}) · ${lem.model}`;
+    const models = (lem.models && lem.models.length) ? lem.models : (lem.model ? [lem.model] : []);
+    if (models.length > 1) {
+      text.textContent = `Connected (${backend}) · ${models.length} models loaded`;
+      text.title = models.join(', ');
+    } else {
+      text.textContent = `Connected (${backend}) · ${models[0] || lem.model}`;
+      text.title = '';
+    }
     text.style.color = '#38bd82';
   } else {
     orb.className = 'lemonade-orb orb-offline';

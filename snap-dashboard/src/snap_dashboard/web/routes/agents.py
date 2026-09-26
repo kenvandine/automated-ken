@@ -167,6 +167,7 @@ def agent_status(request: Request) -> JSONResponse:
     lemonade_model = uc.lemonade_model or ""
     lemonade_backend = getattr(uc, "lemonade_backend", "") or "embedded"
     lemonade_available = False
+    lemonade_models: list[str] = []
     try:
         from snap_dashboard.lemonade.client import get_lemonade_client
         client = get_lemonade_client(uc)  # never blocks — reflects current state only
@@ -174,6 +175,8 @@ def agent_status(request: Request) -> JSONResponse:
             lemonade_url = client.base_url
             lemonade_model = client.model
             lemonade_available = client.is_available()
+            if lemonade_available:
+                lemonade_models = client.list_models()
     except Exception:
         pass
 
@@ -189,6 +192,7 @@ def agent_status(request: Request) -> JSONResponse:
             "available": lemonade_available,
             "url": lemonade_url,
             "model": lemonade_model,
+            "models": lemonade_models,
             "backend": lemonade_backend,
             "inferencing": any(
                 "Lemonade AI" in v.get("task", "") or "⚡" in v.get("task", "")
@@ -313,19 +317,12 @@ async def test_lemonade(request: Request) -> JSONResponse:
     try:
         import asyncio
 
-        import httpx
-
         from snap_dashboard.lemonade.client import get_lemonade_client
 
         def _probe():
             client = get_lemonade_client(uc, ensure_started=True)
             available = client.is_available() if client else False
-            models: list[str] = []
-            if client and available:
-                with httpx.Client(timeout=5) as hc:
-                    resp = hc.get(f"{client.base_url}/v1/models", headers=client._headers())
-                if resp.status_code == 200:
-                    models = [m.get("id", "") for m in resp.json().get("data", [])]
+            models = client.list_models() if client and available else []
             return client, available, models
 
         client, available, models = await asyncio.to_thread(_probe)

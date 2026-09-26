@@ -97,6 +97,24 @@ class LemonadeClient:
         except Exception:
             return False
 
+    def list_models(self) -> list[str]:
+        """Return the model ids lemonade-server currently reports as loaded.
+
+        The embedded server keeps up to 3 task models resident at once (see
+        ``lemonade/models.py``'s TASK_MODELS — vision/text/coding), so this
+        can return more than one entry; the "connected" model shown
+        elsewhere (``self.model``) is just whichever one *this* client
+        instance was constructed for. Returns ``[]`` if unreachable.
+        """
+        try:
+            with httpx.Client(timeout=5) as client:
+                resp = client.get(f"{self.base_url}/v1/models", headers=self._headers())
+            if resp.status_code == 200:
+                return [m.get("id", "") for m in resp.json().get("data", []) if m.get("id")]
+        except Exception:
+            pass
+        return []
+
     # ------------------------------------------------------------------
     # Text chat
     # ------------------------------------------------------------------
