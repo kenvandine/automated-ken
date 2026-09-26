@@ -20,6 +20,7 @@ powerful, self-managed lemonade-server instead.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import platform
@@ -112,6 +113,36 @@ def _find_release_asset(token: str = "") -> tuple[str, str] | None:
 
 def _install_dir_for_version(version: str) -> Path:
     return get_lemonade_data_dir() / "embeddable" / version
+
+
+def _ensure_max_loaded_models(config_dir: Path, count: int) -> None:
+    """Persist ``max_loaded_models`` in lemond's own ``config.json``.
+
+    lemond defaults to a single shared slot across *all* model types
+    (``max_loaded_models: 1``), so loading a second opinionated per-task
+    model (vision/text/coding) evicts whichever one was resident before
+    it — including one that was still mid-load, which turned our own
+    startup warm-up (see ``ensure_started``) into a self-inflicted
+    load/evict thrash that starved real requests (a coding task's own
+    chat call, or is_available()'s /v1/models probe, timing out while
+    lemond was busy swapping models). Our 3 opinionated models
+    comfortably fit in memory together on the target hardware (128GB
+    unified RAM), so raise the limit enough to keep all of them resident
+    at once instead.
+    """
+    config_path = config_dir / "config.json"
+    try:
+        data = json.loads(config_path.read_text()) if config_path.exists() else {}
+    except (OSError, ValueError) as exc:
+        logger.warning("Embedded Lemonade: failed to read %s: %s", config_path, exc)
+        data = {}
+    if data.get("max_loaded_models") == count:
+        return
+    data["max_loaded_models"] = count
+    try:
+        config_path.write_text(json.dumps(data, indent=2))
+    except OSError as exc:
+        logger.warning("Embedded Lemonade: failed to persist max_loaded_models in %s: %s", config_path, exc)
 
 
 def _download_and_extract(url: str, dest_dir: Path) -> bool:
@@ -218,6 +249,10 @@ class EmbeddedLemonadeManager:
             config_dir.mkdir(parents=True, exist_ok=True)
             log_path = data_dir / "lemond.log"
 
+            # Let all of our opinionated per-task models (vision, text,
+            # coding) stay resident at once — see _ensure_max_loaded_models.
+            _ensure_max_loaded_models(config_dir, len(set(TASK_MODELS.values())))
+
             env = dict(os.environ)
             env["LEMONADE_API_KEY"] = self.api_key
             # Shadow GNU tar with our bundled bsdtar (see snapcraft.yaml,
@@ -262,6 +297,10 @@ class EmbeddedLemonadeManager:
             # coding) in the background so the first real request for any
             # task type isn't a cold, multi-gigabyte pull, and so each is
             # loaded with its opinionated context size at least once.
+            # _ensure_max_loaded_models() above raised lemond's shared slot
+            # limit to fit all of them, so — unlike before — loading one no
+            # longer evicts another: all 3 stay resident together instead
+            # of being swapped in and out on every task-type switch.
             for task, model in TASK_MODELS.items():
                 self.ensure_model_pulled(model, ctx_size=TASK_CONTEXT_SIZES.get(task))
         return healthy

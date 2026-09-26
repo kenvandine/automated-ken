@@ -82,11 +82,21 @@ parts:
       - PATH: "${CRAFT_PART_INSTALL}/bin:/usr/bin:${PATH}"
     # version: git doesn't work here for the same reason as the
     # automated-ken server snap: snapcraft.yaml lives in a subdirectory
-    # of the top-level repo, which has no .git of its own.
+    # of the top-level repo, which has no .git of its own. Append the
+    # commit that was actually built instead, so a running runner's
+    # revision can be traced back to an exact commit (`.git-commit` is
+    # written by CI — see .github/workflows/build-runner.yml — into this
+    # source dir before invoking snapcraft, since by the time this script
+    # runs `source: .` has already been copied out of the full checkout).
     override-pull: |
       craftctl default
       version="$(grep -m1 '^version = ' pyproject.toml | sed -E 's/version = "(.*)"/\1/')"
-      craftctl set version="${version:-0.0.0}"
+      version="${version:-0.0.0}"
+      if [ -f .git-commit ]; then
+        commit="$(cat .git-commit)"
+        version="${version}+git${commit}"
+      fi
+      craftctl set version="${version}"
 
   command-chain:
     # Installs the PYTHONHOME/PYTHONPATH-setting wrapper referenced by

@@ -7,19 +7,17 @@ can see how much autonomous work the platform has done for them over time.
 
 from __future__ import annotations
 
-from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import func
 
 from snap_dashboard.auth import get_current_user
 from snap_dashboard.db.models import AgentRun, ModelUsage, Runner, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
+from snap_dashboard.web.templating import templates
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 _PROMOTED_TEST_STATUSES = ("passed", "promoted")
 _FAILED_TEST_STATUSES = ("failed", "error", "cancelled")

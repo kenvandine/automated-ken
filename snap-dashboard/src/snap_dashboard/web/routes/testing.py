@@ -5,14 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import TestRun
+from snap_dashboard.db.models import PromotionDismissal, Snap, TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.orchestrator import (
     find_snaps_needing_tests,
@@ -28,11 +26,11 @@ from snap_dashboard.testing.release_set import (
     member_state,
     promote_release_set,
 )
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +145,7 @@ async def testing_index(request: Request) -> HTMLResponse:
                 "promoted": r.promoted,
                 "promoted_at": r.promoted_at,
                 "error_msg": r.error_msg,
+                "failure_analysis": r.failure_analysis,
                 "repo": r.repo or uc.testing_repo,
                 "has_log": bool(r.log_output),
                 "review_decision": r.review_decision,
@@ -156,7 +155,18 @@ async def testing_index(request: Request) -> HTMLResponse:
         ]
 
         # One card per candidate release set (snap + version) with at least
-        # one passed, un-promoted architecture — promoted as a set.
+        # one passed, un-promoted architecture — promoted as a set. Only
+        # for snaps still tracked (TestRun rows outlive a removed Snap —
+        # see settings.settings_remove_snap — and this is keyed by the
+        # snap_name string, not a live FK, so it needs an explicit check)
+        # and not explicitly dismissed for this exact version.
+        tracked_snap_names = {
+            s.name for s in session.query(Snap.name).filter_by(user_id=user_id).all()
+        }
+        dismissed = {
+            (d.snap_name, d.version)
+            for d in session.query(PromotionDismissal).filter_by(user_id=user_id).all()
+        }
         pending_promotion = []
         seen: set[tuple[str, str]] = set()
         for r in runs_data:
@@ -164,6 +174,8 @@ async def testing_index(request: Request) -> HTMLResponse:
             if (
                 r["status"] != "passed" or r["promoted"] or r["from_channel"] != "candidate"
                 or not r["version"] or key in seen
+                or r["snap_name"] not in tracked_snap_names
+                or key in dismissed
             ):
                 continue
             seen.add(key)
@@ -264,6 +276,7 @@ async def trigger_test(
     architecture: str = Form(default="amd64"),
     version: str = Form(default=""),
     revision: str = Form(default="0"),
+    force: str = Form(default=""),
 ) -> JSONResponse | RedirectResponse:
     """Queue a YARF test run for *snap_name* on a remote runner.
 
@@ -273,6 +286,10 @@ async def trigger_test(
     row instead of reloading the whole page (which used to re-scan every
     snap and hit GitHub's API for each one — very slow). Falls back to a
     redirect for non-JS/no-Accept-header callers.
+
+    Normally refuses to queue a duplicate for a revision that already has
+    an active/finished run (``skip_if_exists``); ``force=true`` bypasses
+    that so the page's "re-run anyway?" confirm can actually do something.
     """
     user = get_current_user(request)
     if user is None:
@@ -288,6 +305,7 @@ async def trigger_test(
         architecture=architecture,
         triggered_by="manual",
         user_id=user_id,
+        skip_if_exists=force != "true",
     )
     if not ok:
         logger.error("Failed to trigger test for %s: %s", snap_name, err)
@@ -308,6 +326,7 @@ async def trigger_test_group(
     version: str = Form(default=""),
     architecture: list[str] = Form(default=[]),
     revision: list[str] = Form(default=[]),
+    force: str = Form(default=""),
 ) -> JSONResponse:
     """Queue one YARF test run per architecture for a "needs testing" row.
 
@@ -317,6 +336,9 @@ async def trigger_test_group(
     requiring a separate click per arch. ``architecture``/``revision`` are
     parallel lists (same order, one hidden input pair per arch — see
     testing.html) so each run gets its own recorded revision.
+
+    ``force=true`` bypasses the "already tested this revision" dedup guard
+    (``skip_if_exists``) — see the JS "re-run anyway?" confirm below.
     """
     user = get_current_user(request)
     if user is None:
@@ -332,6 +354,7 @@ async def trigger_test_group(
             architecture=arch,
             triggered_by="manual",
             user_id=user_id,
+            skip_if_exists=force != "true",
         )
         if not ok:
             logger.error("Failed to trigger test for %s (%s): %s", snap_name, arch, err)
@@ -553,6 +576,7 @@ def view_run(run_id: int, request: Request) -> HTMLResponse:
             "status": run_orm.status,
             "promoted": run_orm.promoted,
             "error_msg": run_orm.error_msg,
+            "failure_analysis": run_orm.failure_analysis,
             "started_at": run_orm.started_at,
             "finished_at": run_orm.finished_at,
             "repo": run_orm.repo,
@@ -641,6 +665,10 @@ def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
                 "review_decision": run_orm.review_decision,
                 "review_confidence": run_orm.review_confidence,
                 "review_reasoning": run_orm.review_reasoning,
+                "error_msg": run_orm.error_msg,
+                "failure_analysis": run_orm.failure_analysis,
+                "started_at": run_orm.started_at,
+                "finished_at": run_orm.finished_at,
             }
             if run_orm
             else None
@@ -675,6 +703,10 @@ def view_pr(snap_name: str, pr_number: int, request: Request) -> HTMLResponse:
             "review_decision": None,
             "review_confidence": None,
             "review_reasoning": None,
+            "error_msg": None,
+            "failure_analysis": None,
+            "started_at": None,
+            "finished_at": None,
         }
 
     review_context: dict = {}
@@ -763,6 +795,37 @@ def promote_set(
         skipped=blocked if override else None,
     )
     return RedirectResponse(url=return_to, status_code=303)
+
+
+@router.post("/testing/dismiss-promotion")
+def dismiss_promotion(
+    request: Request,
+    snap_name: str = Form(...),
+    version: str = Form(...),
+) -> RedirectResponse:
+    """Hide a Pending Promotion card for this exact (snap, version) build.
+
+    Purely a per-user "not now" — it doesn't touch the underlying
+    TestRuns, so the release set can still be promoted manually via its
+    run-detail page, and a later candidate *version* for the same snap
+    will show its own card as usual (see PromotionDismissal docstring).
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    user_id = user["id"]
+
+    with get_session() as session:
+        existing = (
+            session.query(PromotionDismissal)
+            .filter_by(user_id=user_id, snap_name=snap_name, version=version)
+            .first()
+        )
+        if existing is None:
+            session.add(
+                PromotionDismissal(user_id=user_id, snap_name=snap_name, version=version)
+            )
+    return RedirectResponse(url="/testing", status_code=303)
 
 
 @router.post("/testing/promote/{snap_name}", response_model=None)

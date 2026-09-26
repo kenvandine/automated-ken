@@ -8,7 +8,6 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
 
 from snap_dashboard.config import get_config, save_config
@@ -17,7 +16,6 @@ from snap_dashboard.db.session import init_db
 logger = logging.getLogger(__name__)
 
 _STATIC_DIR = Path(__file__).parent / "static"
-_TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 class _RevalidatingStaticFiles(StaticFiles):
@@ -61,8 +59,10 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret)
 # Mount static files
 app.mount("/static", _RevalidatingStaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-# Jinja2 templates (shared across routes)
-templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+# Shared Jinja2 template environment (see templating.py — every route
+# module imports this same instance rather than making its own, so
+# globals like `app_version()` registered on it are visible everywhere).
+from snap_dashboard.web.templating import templates  # noqa: E402,F401
 
 
 @app.on_event("startup")

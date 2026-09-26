@@ -17,6 +17,17 @@ logger = logging.getLogger(__name__)
 
 _MAX_WORKERS = 4
 
+# The root logger defaults to WARNING, and nothing in this app calls
+# ``logging.basicConfig``/configures a "root" logger via uvicorn's dictConfig
+# (see cli.py) — so every ``logger.info(...)`` call agents make (their own
+# progress messages, plus INFO-level library logging like httpx request
+# lines) was silently dropped before it could reach any handler, including
+# the per-run capture handler ``agents/base.py`` attaches for each agent run.
+# Raising it to INFO here (once, at import time) is what makes full agent
+# run logs actually capturable — see BaseAgent.run()/_ThreadLogCapture.
+if logging.getLogger().level > logging.INFO:
+    logging.getLogger().setLevel(logging.INFO)
+
 
 class ActivityTracker:
     """Thread-safe in-memory log of live agent activity.

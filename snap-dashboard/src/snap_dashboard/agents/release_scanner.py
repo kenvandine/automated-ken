@@ -11,7 +11,7 @@ from snap_dashboard.db.models import Snap, UpstreamRelease
 from snap_dashboard.db.session import get_session, retry_on_db_lock
 from snap_dashboard.snapcraft.fetcher import fetch_snapcraft_yaml
 from snap_dashboard.snapcraft.parser import parse_snapcraft_yaml
-from snap_dashboard.snapcraft.upstream import get_latest_version, is_newer
+from snap_dashboard.snapcraft.upstream import get_latest_version
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,12 @@ class ReleaseScannerAgent(BaseAgent):
 
     agent_type = "release_scanner"
 
-    def __init__(self, user_id: int | None = None) -> None:
+    def __init__(self, user_id: int | None = None, snap_id: int | None = None) -> None:
         super().__init__(user_id=user_id)
+        # When set, scan only this one snap (e.g. a manual "Check for
+        # updates" click from the snap detail page) instead of the whole
+        # portfolio.
+        self.snap_id = snap_id
 
     def _run(self) -> str:
         uc = get_user_config(self.user_id) if self.user_id else None
@@ -42,6 +46,8 @@ class ReleaseScannerAgent(BaseAgent):
             q = session.query(Snap)
             if self.user_id:
                 q = q.filter_by(user_id=self.user_id)
+            if self.snap_id:
+                q = q.filter_by(id=self.snap_id)
             snaps = [
                 {
                     "id": s.id,
@@ -60,7 +66,7 @@ class ReleaseScannerAgent(BaseAgent):
 
         workers = min(_SCAN_WORKERS, total) if total else 1
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="release-scan") as pool:
-            futures = {pool.submit(self._scan_snap, snap, token): snap for snap in snaps}
+            futures = {pool.submit(self._scan_snap, snap, token, uc): snap for snap in snaps}
             for future in as_completed(futures):
                 snap = futures[future]
                 completed += 1
@@ -77,7 +83,7 @@ class ReleaseScannerAgent(BaseAgent):
 
         return f"scanned {total} snaps ({workers} parallel workers), found {found} new upstream release(s)"
 
-    def _scan_snap(self, snap: dict, token: str) -> int:
+    def _scan_snap(self, snap: dict, token: str, uc) -> int:
         """Scan one snap; return number of new releases discovered."""
         yaml_text = fetch_snapcraft_yaml(snap["packaging_repo"], token)
         if not yaml_text:
@@ -92,20 +98,22 @@ class ReleaseScannerAgent(BaseAgent):
             # source-commit based parts can't be version-bumped via a tag
             if part.source_commit and not part.source_tag:
                 continue
+            # get_latest_version() already decides "is this newer" (primarily
+            # via a local model — see snapcraft/upstream.py) and returns None
+            # when there's nothing to bump to, so there's no separate
+            # is_newer() gate here anymore.
             info = get_latest_version(
                 source=part.source,
                 source_type=part.source_type,
                 current_version=part.current_version,
                 token=token,
+                user_config=uc,
             )
             if not info:
                 continue
 
             latest = info.latest_version
             current = part.current_version
-
-            if not is_newer(latest, current):
-                continue
 
             release_id = self._record_release_if_new(snap, part, current, latest, info)
             if release_id is None:

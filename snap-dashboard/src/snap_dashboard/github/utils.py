@@ -52,3 +52,20 @@ def parse_owner_repo(repo: str) -> tuple[str, str] | None:
     if not owner or not name:
         return None
     return owner, name
+
+
+def is_owned_by(repo: str, login: str) -> bool:
+    """Return True if *repo* (a GitHub URL or ``owner/repo`` string) is
+    owned by the GitHub account *login*.
+
+    Used to guard packaging-repo agents (version bumps, fleet
+    normalization, secrets sync) from acting on a ``packaging_repo`` that
+    was misconfigured to point at a third-party upstream repo instead of
+    the user's own packaging wrapper repo — those agents push commits and
+    open PRs unattended, which should never happen against a repo the user
+    doesn't own.
+    """
+    owner_repo = parse_owner_repo(repo)
+    if not owner_repo or not login:
+        return False
+    return owner_repo[0].lower() == login.strip().lower()

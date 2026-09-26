@@ -4,7 +4,9 @@ A runner needs an always-on, always-unlocked graphical session to test
 GUI snaps non-interactively: autologin (so it comes back up ready after
 any reboot/power loss with nobody at the keyboard), no screen lock, no
 screen blanking/suspend (which would black out the very screen we need
-to screenshot), and the screenshot-capture GNOME Shell extension (see
+to screenshot), no notification banners or "unlock keyring" dialogs
+popping up over a running test and getting captured in its screenshot,
+and the screenshot-capture GNOME Shell extension (see
 ``docs/gnome-screenshot-extension/``) installed and loaded.
 
 Called from ``automated-ken-runner prepare-machine`` alongside
@@ -28,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 _EXTENSION_UUID = "automated-ken-screenshot@kenvandine.github.io"
 _GDM_CONFIG_CANDIDATES = [Path("/etc/gdm3/custom.conf"), Path("/etc/gdm/custom.conf")]
+_SYSTEM_AUTOSTART_DIR = Path("/etc/xdg/autostart")
 
 # gsettings knobs that would otherwise blank/lock/suspend the screen out
 # from under a running (or about-to-run) test. Applied unconditionally —
@@ -40,6 +43,44 @@ _SCREENSAVER_SETTINGS = [
     ("org.gnome.settings-daemon.plugins.power", "sleep-inactive-ac-type", "'nothing'"),
     ("org.gnome.settings-daemon.plugins.power", "sleep-inactive-battery-type", "'nothing'"),
     ("org.gnome.desktop.lockdown", "disable-lock-screen", "true"),
+]
+
+# gsettings knobs to stop GNOME's own banner/pop-up notifications (the
+# "Do Not Disturb" master switch and friends) from appearing on top of a
+# window mid-test and getting captured in a screenshot.
+_NOTIFICATION_SETTINGS = [
+    ("org.gnome.desktop.notifications", "show-banners", "false"),
+    ("org.gnome.desktop.notifications", "show-in-lock-screen", "false"),
+    # GNOME Software's own "updates available" nagging is a separate
+    # schema/banner from the generic notifications master switch above.
+    ("org.gnome.software", "download-updates", "false"),
+    ("org.gnome.software", "download-updates-notify", "false"),
+]
+
+# /etc/xdg/autostart/*.desktop entries that are known to pop dialogs/
+# banners over whatever's on screen on a stock Ubuntu GNOME desktop, none
+# of which a dedicated, unattended test runner needs:
+#  - gnome-keyring-{secrets,pkcs11}: the actual source of the "Unlock
+#    Keyring" dialog this was added for. GDM's PAM stack already tries to
+#    auto-unlock the login keyring on autologin (see
+#    /etc/pam.d/gdm-autologin's `pam_gnome_keyring.so` lines — already
+#    shipped by Ubuntu, nothing for us to add there), but that only works
+#    if the keyring's password happens to be blank; we have no safe way to
+#    force an *existing* keyring to a blank password without knowing its
+#    current one (and don't want to blindly delete a real one that might
+#    hold real secrets). Not autostarting the daemon components that
+#    prompt for unlock is the reliable, purely-additive fix instead: nothing
+#    ever asks to unlock a keyring, so nothing ever prompts. A test runner
+#    has no legitimate need for persisted secrets anyway.
+#  - update-notifier / ubuntu-advantage-notification: Ubuntu's own
+#    "updates available" / "Ubuntu Pro" nag dialogs.
+#  - org.gnome.Evolution-alarm-notify: calendar/reminder pop-ups.
+_NOISY_AUTOSTART_APPS = [
+    "gnome-keyring-secrets",
+    "gnome-keyring-pkcs11",
+    "update-notifier",
+    "ubuntu-advantage-notification",
+    "org.gnome.Evolution-alarm-notify",
 ]
 
 
@@ -194,6 +235,77 @@ def disable_screen_lock_and_blanking(echo: Callable[[str], None] | None = None) 
 
 
 # ---------------------------------------------------------------------------
+# Notification banners
+# ---------------------------------------------------------------------------
+
+
+def disable_notifications(echo: Callable[[str], None] | None = None) -> bool:
+    """Turn off GNOME/GNOME Software notification banners.
+
+    Same idempotent gsettings pattern as ``disable_screen_lock_and_blanking``
+    — a banner (update available, calendar reminder, etc.) popping up over
+    a test in progress gets captured in the screenshot just like the
+    keyring dialog does.
+    """
+    changed = False
+    for schema, key, value in _NOTIFICATION_SETTINGS:
+        current = subprocess.run(
+            ["gsettings", "get", schema, key], capture_output=True, timeout=15, check=False
+        ).stdout.decode(errors="replace").strip()
+        if current == value:
+            continue
+        result = subprocess.run(
+            ["gsettings", "set", schema, key, value],
+            capture_output=True, timeout=15, check=False,
+        )
+        if result.returncode == 0:
+            _say(echo, f"  set {schema} {key} -> {value}")
+            changed = True
+        else:
+            _say(echo, f"  FAILED to set {schema} {key}: {result.stderr.decode(errors='replace')}")
+    if not changed:
+        _say(echo, "  notification banners already disabled")
+    return changed
+
+
+# ---------------------------------------------------------------------------
+# Noisy autostart apps (keyring unlock prompt, update nags, ...)
+# ---------------------------------------------------------------------------
+
+
+def _user_autostart_dir() -> Path:
+    return Path.home() / ".config" / "autostart"
+
+
+def disable_noisy_autostart_apps(echo: Callable[[str], None] | None = None) -> bool:
+    """Stop known dialog/banner-producing apps from autostarting.
+
+    Uses the standard per-user XDG autostart override mechanism (a
+    ``~/.config/autostart/<id>.desktop`` with ``Hidden=true`` shadows the
+    system-wide ``/etc/xdg/autostart/<id>.desktop`` for this user only) —
+    purely additive, reversible (just delete the override file), and needs
+    no sudo. A system entry that doesn't exist on this machine is silently
+    skipped. See ``_NOISY_AUTOSTART_APPS`` for what and why.
+    """
+    changed = False
+    dest_dir = _user_autostart_dir()
+    for app_id in _NOISY_AUTOSTART_APPS:
+        system_entry = _SYSTEM_AUTOSTART_DIR / f"{app_id}.desktop"
+        if not system_entry.exists():
+            continue
+        dest = dest_dir / f"{app_id}.desktop"
+        if dest.exists() and "Hidden=true" in dest.read_text(errors="replace"):
+            continue
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest.write_text("[Desktop Entry]\nHidden=true\n")
+        _say(echo, f"  disabled autostart of {app_id}")
+        changed = True
+    if not changed:
+        _say(echo, "  noisy autostart apps already disabled")
+    return changed
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -209,4 +321,6 @@ def ensure_desktop_ready(echo: Callable[[str], None] | None = None) -> bool:
     extension_changed = install_screenshot_extension(echo)
     autologin_changed = enable_autologin(echo)
     disable_screen_lock_and_blanking(echo)
+    disable_notifications(echo)
+    disable_noisy_autostart_apps(echo)
     return extension_changed or autologin_changed

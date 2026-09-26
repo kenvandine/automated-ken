@@ -164,6 +164,14 @@ class Snap(Base):
     # being launched inside a terminal emulator instead — see
     # automated_ken_runner.runner._run_desktop_smoke_test.
     is_console_app = Column(Boolean, default=False, nullable=False)
+    # Services (e.g. daemons run via a systemd/dbus snap "daemon:" app,
+    # with no user-facing UI at all) have nothing to launch on a desktop
+    # or in a terminal and nothing to screenshot — so they get no smoke
+    # test whatsoever. See automated_ken_runner.runner._run_job, which
+    # skips straight from install to "passed" for these. Mutually
+    # exclusive with is_console_app in practice (the UI only lets one be
+    # set at a time), but this flag always wins if both are somehow set.
+    is_service = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=_now, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
 
@@ -300,6 +308,12 @@ class TestRun(Base):
     review_decision = Column(String(32), nullable=True)
     review_confidence = Column(Float, nullable=True)
     review_reasoning = Column(Text, nullable=True)
+    # LLM-inferred plain-English root cause for a failed/errored run,
+    # derived from log_output/error_msg — see agents/test_failure_analyzer.py.
+    # Purely informational today; a future agent could use this to attempt
+    # an automated fix PR. Only populated for dispatch_target=remote_runner
+    # (the only path with a real captured log to analyze).
+    failure_analysis = Column(Text, nullable=True)
     # Links sibling per-architecture runs of the same version bump together
     # (one TestRun per arch — see agents/pr_monitor.py:_trigger_yarf) so the
     # PR monitor / screenshot reviewer / stable promoter can wait for every
@@ -432,6 +446,10 @@ class Runner(Base):
     idle_seconds = Column(Integer, nullable=True)
     idle_threshold_seconds = Column(Integer, nullable=False, default=120)
     last_heartbeat_at = Column(DateTime, nullable=True)
+    # Best-effort client IP captured from each enroll/heartbeat request —
+    # purely informational (e.g. "ssh into the runner box"), not used for
+    # auth/access control.
+    ip_address = Column(String(64), nullable=True)
     current_test_run_id = Column(
         Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
     )
@@ -462,6 +480,11 @@ class AgentRun(Base):
     status = Column(String(32), nullable=False, default="running")
     result_summary = Column(Text, nullable=True)
     error_msg = Column(Text, nullable=True)
+    # Every log record emitted by this agent's thread while ``_run()`` was
+    # executing — see agents/base.py's ``_ThreadLogCapture`` handler. Lets
+    # the web UI show exactly what an agent did/saw for any given run,
+    # instead of just the one-line summary/error.
+    log_output = Column(Text, nullable=True)
     started_at = Column(DateTime, default=_now, nullable=False)
     finished_at = Column(DateTime, nullable=True)
 
@@ -518,11 +541,18 @@ class VersionBumpPR(Base):
     branch_name = Column(String(255), nullable=True)
     old_version = Column(String(128), nullable=True)
     new_version = Column(String(128), nullable=True)
-    # open | ci_pending | ci_passed | ci_failed | yarf_running | yarf_passed |
-    # yarf_failed | agent_approved | agent_rejected | needs_review | merged |
-    # closed | awaiting_release | candidate_testing | stable_promoted |
-    # stable_promoted_partial (manual override) — see agents/pr_monitor.py
+    # dispatched | open | ci_pending | ci_passed | ci_failed | yarf_running |
+    # yarf_passed | yarf_failed | agent_approved | agent_rejected |
+    # needs_review | merged | closed | awaiting_release | candidate_testing |
+    # stable_promoted | stable_promoted_partial (manual override)
+    # — see agents/pr_monitor.py. "dispatched" is the initial state when the
+    # version bump was delegated to an async coding backend (GitHub Copilot
+    # cloud agent) and no PR exists yet; pr_monitor.py polls it and advances
+    # to "open" once the agent's PR appears (or "closed" if it never does).
     status = Column(String(64), nullable=False, default="open")
+    # GitHub Copilot cloud agent's task id, set only while status=="dispatched"
+    # — see coding_backend.get_coding_dispatcher()/CopilotAgentClient.
+    external_task_id = Column(String(128), nullable=True)
     test_run_id = Column(
         Integer, ForeignKey("test_runs.id", ondelete="SET NULL"), nullable=True
     )
@@ -549,6 +579,39 @@ class VersionBumpPR(Base):
         )
 
 
+class PromotionDismissal(Base):
+    """A "not now" on a Testing page Pending Promotion card.
+
+    Keyed by ``(user_id, snap_name, version)`` rather than a run/set id
+    since a release set has no single row of its own — it's just every
+    ``TestRun`` sharing a ``(snap_name, version)`` (see
+    ``testing/release_set.py``). Scoped to keep matching the *current*
+    candidate version only: once a snap ships a newer candidate version,
+    its card reappears, since a dismissal was about "not this build" not
+    "never tell me about this snap again".
+    """
+
+    __tablename__ = "promotion_dismissals"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "snap_name", "version", name="uq_promotion_dismissal"
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    snap_name = Column(String(255), nullable=False)
+    version = Column(String(128), nullable=False)
+    dismissed_at = Column(DateTime, default=_now, nullable=False)
+
+    user = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<PromotionDismissal snap={self.snap_name!r} version={self.version!r}>"
+
+
 class StaleBuildTrigger(Base):
     """Records a workflow_dispatch trigger sent for a snap that hasn't published in N days."""
 
@@ -563,6 +626,9 @@ class StaleBuildTrigger(Base):
     # triggered | skipped (workflow missing) | failed
     status = Column(String(32), nullable=False, default="triggered")
     error_msg = Column(Text, nullable=True)
+    # Which workflow file was actually dispatched (or None if never determined
+    # — e.g. status="skipped"). See agents/stale_build_scanner._infer_build_workflow.
+    workflow_file = Column(String(255), nullable=True)
     triggered_at = Column(DateTime, default=_now, nullable=False)
 
     snap = relationship("Snap", back_populates="stale_build_triggers")
@@ -664,6 +730,11 @@ class CopilotTask(Base):
     # GitHub's own agent-task id, e.g. for GET /agents/repos/{o}/{r}/tasks/{id}.
     external_task_id = Column(String(128), nullable=True)
     prompt = Column(Text, nullable=True)
+    # Branch start_task() was dispatched against — needed to retry the exact
+    # same task later (see web/routes/copilot_tasks.py's Retry action).
+    # Usually "main", except ci_fix which retries on the PR's own head
+    # branch (see agents/pr_monitor.py).
+    base_ref = Column(String(255), nullable=True)
     # queued | in_progress | completed | failed | idle | waiting_for_user |
     # timed_out | cancelled | dispatch_failed (our own sentinel if the POST itself failed)
     status = Column(String(32), nullable=False, default="queued")

@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}Agent Run Logs — Automated Ken{% endblock %}
+
+{% block content %}
+
+<a href="/agents" class="back-link">&larr; Back to Agent Fleet</a>
+
+<div class="page-title-row">
+  <div>
+    <h2 class="page-heading">Agent Run Logs</h2>
+    <p class="text-muted">Every background agent execution — {{ total }} run{{ "s" if total != 1 else "" }} total. Open any run to see exactly what it did.</p>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:16px;">
+  <form method="get" action="/agents/runs" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+    <div>
+      <label class="text-muted small" style="display:block;margin-bottom:4px;">Agent</label>
+      <select name="agent_type" class="p-form-control">
+        <option value="">All agents</option>
+        {% for t in agent_types %}
+        <option value="{{ t }}" {% if t == selected_agent_type %}selected{% endif %}>{{ t | replace('_', ' ') }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div>
+      <label class="text-muted small" style="display:block;margin-bottom:4px;">Status</label>
+      <select name="status" class="p-form-control">
+        <option value="">All statuses</option>
+        {% for s in ("running", "done", "error") %}
+        <option value="{{ s }}" {% if s == selected_status %}selected{% endif %}>{{ s | capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button type="submit" class="p-button--positive">Filter</button>
+    {% if selected_agent_type or selected_status %}
+    <a href="/agents/runs" class="p-button">Clear</a>
+    {% endif %}
+  </form>
+</div>
+
+<div class="card">
+  {% if not runs %}
+  <div class="empty-state">
+    <p>No agent runs match this filter yet.</p>
+  </div>
+  {% else %}
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>Agent</th>
+          <th>Snap</th>
+          <th>Status</th>
+          <th>Result</th>
+          <th>Started</th>
+          <th>Duration</th>
+          <th>Log</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in runs %}
+        <tr>
+          <td><span class="agent-type-badge agent-{{ r.agent_type }}">{{ r.agent_type | replace('_', ' ') }}</span></td>
+          <td class="muted">{{ r.snap_name or '—' }}</td>
+          <td>
+            {% if r.status == 'done' %}
+            <span class="p-status-label p-status-label--positive">done</span>
+            {% elif r.status == 'error' %}
+            <span class="p-status-label p-status-label--negative">error</span>
+            {% else %}
+            <span class="p-status-label p-status-label--caution">{{ r.status }}</span>
+            {% endif %}
+          </td>
+          <td class="muted small" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.summary or '—' }}</td>
+          <td class="muted small">{{ r.started_at }}</td>
+          <td class="muted small">{{ (r.duration_s ~ 's') if r.duration_s is not none else '…' }}</td>
+          <td>
+            {% if r.has_log %}
+            <a href="/agents/runs/{{ r.id }}/log" target="_blank" rel="noopener" class="p-button is-small">View Log</a>
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if total_pages > 1 %}
+  <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:16px;">
+    {% set qs = "&agent_type=" ~ selected_agent_type ~ "&status=" ~ selected_status %}
+    {% if page > 1 %}
+    <a class="p-button is-small" href="/agents/runs?page={{ page - 1 }}{{ qs }}">&larr; Prev</a>
+    {% endif %}
+    <span class="text-muted small">Page {{ page }} of {{ total_pages }}</span>
+    {% if page < total_pages %}
+    <a class="p-button is-small" href="/agents/runs?page={{ page + 1 }}{{ qs }}">Next &rarr;</a>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% endblock %}

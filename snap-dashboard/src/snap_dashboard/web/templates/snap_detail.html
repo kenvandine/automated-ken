@@ -4,6 +4,39 @@
 
 {% block content %}
 
+{% set notice = request.query_params.get('notice') %}
+{% set page_error = request.query_params.get('error') %}
+{% if notice %}
+<div class="p-notification--positive detail-section" style="padding:8px 12px; border-radius:4px;">
+  {% if notice == 'test_queued' %}Test run queued — see it in the Test Run History below.
+  {% elif notice == 'scan_started' %}Checking for a newer upstream version — a version-bump PR will open automatically if one is found.
+  {% elif notice == 'rebuild_started' %}Rebuild triggered — see it on the <a href="/agents" class="link-inline">Agents</a> page.
+  {% else %}{{ notice }}{% endif %}
+</div>
+{% endif %}
+{% if page_error %}
+<div class="p-notification--negative detail-section" style="padding:8px 12px; border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+  <span>
+  {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for updates or triggering a rebuild.
+  {% elif page_error == 'trigger_failed' %}Failed to queue the test run — check that a runner is enrolled and online.
+  {% else %}{{ page_error }}{% endif %}
+  </span>
+  {% set retry_channel = request.query_params.get('retry_channel') %}
+  {% if 'use Re-run' in page_error and retry_channel %}
+  <form method="post" action="/snap/{{ snap.name }}/trigger-test" style="margin:0;"
+        hx-post="/snap/{{ snap.name }}/trigger-test" hx-target="#page-content" hx-select="#page-content"
+        hx-swap="innerHTML" hx-disabled-elt="find button">
+    <input type="hidden" name="from_channel" value="{{ retry_channel }}">
+    <input type="hidden" name="architecture" value="{{ request.query_params.get('retry_arch', '') }}">
+    <input type="hidden" name="version" value="{{ request.query_params.get('retry_version', '') }}">
+    <input type="hidden" name="revision" value="{{ request.query_params.get('retry_revision', '') }}">
+    <input type="hidden" name="force" value="true">
+    <button type="submit" class="p-button is-small">↺ Re-run anyway</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="page-title-row">
   <div>
     <a href="/" class="back-link">← Dashboard</a>
@@ -27,13 +60,63 @@
       Upstream repo
     </a>
     {% endif %}
-    <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
+    {% if snap.packaging_repo %}
+    <form method="post" action="/snap/{{ snap.name }}/check-updates" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/check-updates" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button is-small" title="Scan the packaging repo for a newer upstream version and open a version-bump PR if found">Check for updates</button>
+    </form>
+    <form method="post" action="/snap/{{ snap.name }}/rebuild" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/rebuild" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild — the dashboard inspects the packaging repo's GitHub Actions workflows and figures out which one builds/publishes the snap">Rebuild Now</button>
+    </form>
+    {% endif %}
+    <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/refresh" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button is-small">Refresh</button>
     </form>
   </div>
 </div>
 
-<!-- Channel Map -->
+{% if rebuild_triggers %}
+<div class="card detail-section">
+  <h3 class="section-label">Recent Rebuild Attempts</h3>
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Status</th>
+          <th>Workflow</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in rebuild_triggers %}
+        <tr>
+          <td class="muted small">{{ t.triggered_at.strftime('%Y-%m-%d %H:%M') if t.triggered_at else '—' }}</td>
+          <td>
+            {% if t.status == 'triggered' %}
+            <span class="p-status-label p-status-label--positive">Triggered</span>
+            {% elif t.status == 'skipped' %}
+            <span class="p-status-label p-status-label--caution">Skipped</span>
+            {% else %}
+            <span class="p-status-label p-status-label--negative">Failed</span>
+            {% endif %}
+          </td>
+          <td class="muted small">{{ t.workflow_file or '—' }}</td>
+          <td class="muted small">{{ t.error_msg or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+
 <div class="card detail-section">
   <h3 class="section-label">Channel Map</h3>
   {% if arch_map %}
@@ -67,6 +150,17 @@
             <span class="p-status-label">{{ ver or '?' }}</span>
             {% endif %}
             <div class="channel-rev">r{{ info.revision }}</div>
+            {% if ch != 'stable' %}
+            <form method="post" action="/snap/{{ snap.name }}/trigger-test" style="margin-top:4px;"
+                  hx-post="/snap/{{ snap.name }}/trigger-test" hx-target="#page-content" hx-select="#page-content"
+                  hx-swap="innerHTML" hx-disabled-elt="find button">
+              <input type="hidden" name="from_channel" value="{{ ch }}">
+              <input type="hidden" name="architecture" value="{{ arch }}">
+              <input type="hidden" name="version" value="{{ ver or '' }}">
+              <input type="hidden" name="revision" value="{{ info.revision or '' }}">
+              <button type="submit" class="p-button--link" style="font-size:11px;" title="Queue a YARF smoke test for {{ arch }}/{{ ch }} on a remote runner">Run test</button>
+            </form>
+            {% endif %}
             {% else %}
             <span class="p-status-label">—</span>
             {% endif %}
@@ -80,7 +174,9 @@
   {% else %}
   <div class="empty-state small-empty">
     <p>No channel data collected yet.
-      <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline">
+      <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
+            hx-post="/snap/{{ snap.name }}/refresh" hx-target="#page-content" hx-select="#page-content"
+            hx-swap="innerHTML" hx-disabled-elt="find button">
         <button type="submit" class="p-button--link">Run collection</button>
       </form>
     </p>
@@ -158,6 +254,81 @@
   {% endif %}
 </div>
 
+<!-- Test Run History -->
+<div class="card detail-section">
+  <h3 class="section-label">Test Run History</h3>
+
+  {% if test_runs %}
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>Arch</th>
+          <th>Channel</th>
+          <th>Version</th>
+          <th>Status</th>
+          <th>PR</th>
+          <th>Triggered by</th>
+          <th>Started</th>
+          <th>Finished</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for run in test_runs %}
+        <tr>
+          <td class="muted small">{{ run.architecture or 'amd64' }}</td>
+          <td><span class="p-status-label">{{ run.from_channel }}</span></td>
+          <td class="muted small">{{ run.version or '—' }}</td>
+          <td>
+            {% if run.status == 'passed' and run.review_decision == 'reject' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative" title="AI review rejected this">rejected</a>
+            {% elif run.status == 'passed' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
+            {% if run.review_decision == 'needs_review' %}
+            <span class="muted small" title="AI review needs manual attention" style="margin-left:4px;">⚠</span>
+            {% endif %}
+            {% elif run.status == 'promoted' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">promoted</a>
+            {% elif run.status == 'failed' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg or '' }}">failed</a>
+            {% elif run.status == 'error' %}
+            <span class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg }}">error</span>
+            {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
+            <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
+            {% else %}
+            <span class="muted small">{{ run.status }}</span>
+            {% endif %}
+            {% if run.has_log %}
+            <a href="/testing/runs/{{ run.id }}/log" target="_blank" rel="noopener" class="muted small" style="margin-left:4px;" title="View runner debug log">log</a>
+            {% endif %}
+          </td>
+          <td>
+            {% if run.pr_number %}
+            <a href="/testing/pr/{{ snap.name }}/{{ run.pr_number }}" class="link-inline small">#{{ run.pr_number }}</a>
+            {% else %}
+            <span class="muted small">—</span>
+            {% endif %}
+          </td>
+          <td class="muted small">{{ run.triggered_by or '—' }}</td>
+          <td class="muted small">
+            {% if run.started_at %}{{ run.started_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+          </td>
+          <td class="muted small">
+            {% if run.finished_at %}{{ run.finished_at.strftime('%Y-%m-%d %H:%M') }}{% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small" style="margin-top:8px;">Showing the {{ test_runs|length }} most recent runs. See the <a href="/testing" class="link-inline">Testing</a> page for the full queue.</p>
+  {% else %}
+  <div class="empty-state small-empty">
+    <p>No test runs recorded yet for this snap.</p>
+  </div>
+  {% endif %}
+</div>
+
 <!-- Edit form (collapsible) -->
 <div class="detail-section">
   <details class="collapsible">
@@ -209,6 +380,7 @@
           <label class="form-label checkbox-label">
             <input
               type="checkbox"
+              id="is_console_app"
               name="is_console_app"
               value="true"
               {% if snap.is_console_app %}checked{% endif %}
@@ -223,6 +395,25 @@
             it inside a terminal window instead and screenshot that.
           </span>
         </div>
+        <div class="form-row">
+          <label class="form-label checkbox-label">
+            <input
+              type="checkbox"
+              id="is_service"
+              name="is_service"
+              value="true"
+              {% if snap.is_service %}checked{% endif %}
+              style="margin-right: 6px;"
+            >
+            Service (no UI)
+          </label>
+          <span class="form-hint">
+            For daemons with no user-facing UI at all — nothing to launch on a
+            desktop or in a terminal, and nothing to screenshot. Check this and the
+            runner skips the smoke test entirely: it still installs the snap to
+            confirm the package itself is good, then reports the run as passed.
+          </span>
+        </div>
         <div class="form-actions">
           <button type="submit" class="p-button--positive">Save Changes</button>
         </div>
@@ -233,6 +424,19 @@
 </div>
 
 <script>
+// Console app / Service are mutually exclusive — a snap can't be both.
+(function () {
+  const consoleBox = document.getElementById('is_console_app');
+  const serviceBox = document.getElementById('is_service');
+  if (!consoleBox || !serviceBox) return;
+  consoleBox.addEventListener('change', function () {
+    if (this.checked) serviceBox.checked = false;
+  });
+  serviceBox.addEventListener('change', function () {
+    if (this.checked) consoleBox.checked = false;
+  });
+})();
+
 // Filter tabs for issues
 document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
   const tab = e.target.closest('.filter-tab');

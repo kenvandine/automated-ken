@@ -30,10 +30,11 @@ _REQUIRED_SNAPS: list[str] = []
 _OTHER_REQUIRED_TOOLS = {
     "snap": "Required to install/refresh the snaps under test.",
     "loginctl": "Used for idle/lock detection (part of systemd, should always be present).",
-    "xterm": (
+    "ptyxis": (
         "Used to launch 'console app' snaps (Snap.is_console_app) inside a "
-        "terminal window for the smoke test screenshot. Install with "
-        "'sudo apt install xterm'."
+        "terminal window for the smoke test screenshot. It's the default "
+        "terminal on stock Ubuntu GNOME desktops; if missing, install with "
+        "'sudo apt install ptyxis'."
     ),
 }
 

@@ -8,10 +8,16 @@ from datetime import datetime, timezone
 import httpx
 
 from snap_dashboard.agents.base import BaseAgent
-from snap_dashboard.agents.coding_backend import get_coding_dispatcher, task_result_fields
+from snap_dashboard.agents.coding_backend import (
+    extract_pr_number,
+    extract_pr_url,
+    get_coding_dispatcher,
+    task_result_fields,
+)
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
+from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.utils import parse_owner_repo
 
 logger = logging.getLogger(__name__)
@@ -89,6 +95,7 @@ class PRMonitorAgent(BaseAgent):
                     "bot_pr_number": p.bot_pr_number,
                     "bot_pr_url": p.bot_pr_url or "",
                     "branch_name": p.branch_name or "",
+                    "external_task_id": p.external_task_id or "",
                     "test_run_id": p.test_run_id,
                     "new_version": p.new_version or "",
                     "old_version": p.old_version or "",
@@ -116,6 +123,16 @@ class PRMonitorAgent(BaseAgent):
 
         status = pr["status"]
         pkg_repo = pr["packaging_repo"]
+
+        if status == "dispatched":
+            # No PR exists yet — the version bump was delegated to an async
+            # coding backend (GitHub Copilot cloud agent) at "dispatched"
+            # time and pr_number/pkg_repo alone can't drive the rest of the
+            # state machine below, so this has to be handled before the
+            # pr_number guard.
+            bot_token = (uc.bot_github_token if uc else "") or token
+            return self._check_dispatched(pr, bot_token)
+
         pr_number = pr["bot_pr_number"]
 
         if not pkg_repo or not pr_number:
@@ -155,6 +172,65 @@ class PRMonitorAgent(BaseAgent):
     # ------------------------------------------------------------------
     # State transitions
     # ------------------------------------------------------------------
+
+    def _check_dispatched(self, pr: dict, bot_token: str) -> bool:
+        """dispatched → open once the async coding-agent task produces a PR.
+
+        Only the GitHub Copilot cloud agent backend leaves a bump in
+        "dispatched" — the local Lemonade coding backend resolves
+        synchronously in version_bumper.py and never sets this status. If
+        the task ends in a non-completed terminal state (failed/cancelled/
+        timed_out) with no PR, there's nothing left to poll, so it's marked
+        "closed" (dead end — the next scan will offer to bump again once
+        the corresponding UpstreamRelease's ``acted_on`` safeguard allows it).
+        """
+        owner_repo = parse_owner_repo(pr["packaging_repo"]) if pr["packaging_repo"] else None
+        external_task_id = pr.get("external_task_id")
+        if not owner_repo or not external_task_id or not bot_token:
+            return False
+        owner, repo = owner_repo
+
+        remote = CopilotAgentClient(bot_token).get_task(owner, repo, external_task_id)
+        if not remote:
+            return False
+        state = remote.get("state")
+
+        with get_session() as session:
+            bump = session.query(VersionBumpPR).filter_by(id=pr["id"]).first()
+            if not bump:
+                return False
+            if state == "completed":
+                pr_url = extract_pr_url(remote)
+                pr_number = extract_pr_number(remote)
+                if pr_url and pr_number:
+                    bump.bot_pr_url = pr_url
+                    bump.bot_pr_number = pr_number
+                    bump.status = "open"
+                    try:
+                        with httpx.Client(timeout=10) as client:
+                            resp = client.get(
+                                f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}",
+                                headers=_gh_headers(bot_token),
+                            )
+                        if resp.status_code == 200:
+                            bump.branch_name = resp.json().get("head", {}).get("ref") or bump.branch_name
+                    except Exception:
+                        pass
+                    logger.info(
+                        "pr_monitor: coding-agent task for %s/%s completed — PR opened: %s",
+                        owner, repo, pr_url,
+                    )
+                    return True
+                bump.status = "closed"
+                return True
+            if state in ("failed", "cancelled", "timed_out"):
+                bump.status = "closed"
+                logger.warning(
+                    "pr_monitor: coding-agent version-bump task for %s/%s ended in %s with no PR",
+                    owner, repo, state,
+                )
+                return True
+        return False
 
     def _check_pr_closed(self, pr: dict, owner: str, repo: str, token: str) -> bool:
         """Detect PRs closed or merged on GitHub and sync the DB status.
@@ -276,7 +352,8 @@ class PRMonitorAgent(BaseAgent):
                     owner_repo=owner_repo,
                     prompt=prompt,
                     issue_number=pr["bot_pr_number"],
-                    **task_result_fields(task),
+                    base_ref=head_branch or "main",
+                    **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                 )
             )
         if task:

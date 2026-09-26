@@ -1389,6 +1389,7 @@ footer a:hover {
   flex-wrap: wrap;
 }
 .fleet-actions { display: flex; gap: 8px; }
+.fleet-actions form { display: flex; margin: 0; }
 
 /* ---- Lemonade hero widget -------------------------------- */
 .lemonade-hero {
@@ -1400,6 +1401,7 @@ footer a:hover {
   border-radius: 12px;
   padding: 10px 16px;
 }
+.lemonade-hero .p-button.is-small { margin: 0 0 0 4px; }
 .lemonade-label {
   font-size: 11px;
   font-weight: 700;
@@ -1503,6 +1505,10 @@ footer a:hover {
 }
 
 /* ---- Agent cards grid ------------------------------------ */
+.agent-group-label {
+  margin-top: 24px;
+}
+
 .agent-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
@@ -1691,6 +1697,10 @@ footer a:hover {
 .agent-version_bumper   { background: rgba(var(--green-rgb), 0.12);  color: var(--green); }
 .agent-pr_monitor       { background: rgba(var(--amber-rgb), 0.12);  color: var(--amber); }
 .agent-screenshot_reviewer { background: rgba(var(--blue-rgb), 0.15); color: var(--blue); }
+.agent-upstream_maintainer { background: rgba(var(--green-rgb), 0.12); color: var(--green); }
+.agent-repo_normalizer  { background: rgba(var(--amber-rgb), 0.12); color: var(--amber); }
+.agent-test_run_auto_promoter { background: rgba(var(--blue-rgb), 0.15); color: var(--blue); }
+.agent-test_failure_analyzer { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-hover); }
 
 /* ---- Version bump rows ----------------------------------- */
 .bump-list {
@@ -2083,4 +2093,34 @@ footer a:hover {
   .docs-feature-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Isolated (htmx-swapped) form actions — dim the swap target briefly while
+   its request is in flight instead of a full page reload/flash. See
+   base.html's #page-content and per-template hx-post attributes. */
+#page-content.htmx-request,
+#page-content .htmx-request {
+  opacity: 0.6;
+  transition: opacity 0.15s ease-in-out;
+}
+
+/* Runner rename (runners.html) — small inline pencil trigger + form. */
+.rename-trigger {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 0 0 4px;
+  opacity: 0.6;
+}
+
+.rename-trigger:hover {
+  opacity: 1;
+}
+
+.rename-input {
+  font-size: 12px;
+  padding: 2px 6px;
+  margin-right: 4px;
+  width: 140px;
 }

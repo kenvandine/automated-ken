@@ -44,6 +44,7 @@ class ScreenshotReviewerAgent(BaseAgent):
                 return f"no VersionBumpPR with id={self.version_bump_pr_id}"
             snap_id = bump.snap_id
             snap_name = bump.snap.name if bump.snap else str(snap_id)
+            is_service = bool(bump.snap.is_service) if bump.snap else False
             old_version = bump.old_version or ""
             new_version = bump.new_version or ""
             test_run_id = self.test_run_id or bump.test_run_id
@@ -92,7 +93,7 @@ class ScreenshotReviewerAgent(BaseAgent):
                 decision_dict = _aggregate_decisions(decisions)
 
         if decision_dict is None:
-            decision_dict = self._heuristic_decision(yarf_status, new_screenshots)
+            decision_dict = self._heuristic_decision(yarf_status, new_screenshots, is_service)
 
         decision = decision_dict["decision"]
         confidence = decision_dict["confidence"]
@@ -202,8 +203,25 @@ class ScreenshotReviewerAgent(BaseAgent):
             new_version=new_version,
         )
 
-    def _heuristic_decision(self, yarf_status: str, screenshots: list[ScreenshotAsset]) -> dict:
+    def _heuristic_decision(
+        self, yarf_status: str, screenshots: list[ScreenshotAsset], is_service: bool = False
+    ) -> dict:
         """Rule-based fallback when LLM is unavailable."""
+        if is_service:
+            if yarf_status == "yarf_passed":
+                return {
+                    "decision": "approve",
+                    "confidence": 1.0,
+                    "reasoning": (
+                        "Service snap with no UI to test — approved automatically "
+                        "since the smoke test is install-only."
+                    ),
+                }
+            return {
+                "decision": "reject",
+                "confidence": 0.9,
+                "reasoning": "Install-only smoke test failed for this service snap.",
+            }
         if yarf_status == "yarf_passed" and screenshots:
             return {
                 "decision": "needs_review",

@@ -58,6 +58,9 @@ class _FakeBotClient:
     def file_exists(self, owner, repo, path):
         return f"{owner}/{repo}" in self.existing
 
+    def get_default_branch(self, owner, repo):
+        return "main"
+
 
 def _seed(session_local, packaging_repo="kenvandine/my-snap", testing_repo="kenvandine/automated-ken-tests"):
     session = session_local()
@@ -208,6 +211,41 @@ def test_normalize_repo_also_dispatches_suite_cleanup(isolated_session, monkeypa
     session.close()
 
 
+def test_normalize_repo_retries_after_previous_failure(isolated_session, monkeypatch) -> None:
+    """A dispatch_failed row (e.g. no Copilot license at the time) must NOT
+    permanently block future campaign runs from retrying the same repo."""
+    user_id, snap_id = _seed(isolated_session)
+    monkeypatch.setattr(rn_module, "list_suite_files", lambda *a, **k: None)
+    session = isolated_session()
+    session.add(
+        CopilotTask(
+            user_id=user_id, snap_id=snap_id, kind="fleet_normalize",
+            owner_repo="kenvandine/my-snap", status="dispatch_failed",
+            error_msg="No Copilot license on this GitHub account",
+        )
+    )
+    session.commit()
+    session.close()
+
+    bot_client = _FakeBotClient()
+    dispatcher = _FakeDispatcher()
+    agent = RepoNormalizerAgent(user_id=user_id)
+    did = agent._normalize_repo(
+        bot_client, dispatcher, snap_id, "my-snap", "kenvandine/my-snap",
+        "kenvandine/automated-ken-tests", "tok",
+    )
+
+    assert did is True
+    assert len(dispatcher.calls) == 1
+
+    session = isolated_session()
+    tasks = session.query(CopilotTask).filter_by(kind="fleet_normalize").order_by(CopilotTask.id).all()
+    assert len(tasks) == 2
+    assert tasks[0].status == "dispatch_failed"
+    assert tasks[1].status == "queued"
+    session.close()
+
+
 def test_run_disabled_returns_early(isolated_session, monkeypatch) -> None:
     user_id, _ = _seed(isolated_session)
     session = isolated_session()
@@ -219,3 +257,21 @@ def test_run_disabled_returns_early(isolated_session, monkeypatch) -> None:
     monkeypatch.setattr(rn_module, "get_user_config", lambda uid: uc)
     agent = RepoNormalizerAgent(user_id=user_id)
     assert agent._run() == "disabled"
+
+
+def test_run_skips_packaging_repo_not_owned_by_user(isolated_session, monkeypatch) -> None:
+    """A packaging_repo misconfigured to point at a third-party repo must
+    never get an automatic normalization PR opened against it."""
+    user_id, _ = _seed(isolated_session, packaging_repo="https://github.com/avojak/warble")
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    session.close()
+
+    monkeypatch.setattr(rn_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(rn_module, "get_coding_dispatcher", lambda uc: _FakeDispatcher())
+    monkeypatch.setattr(rn_module, "BotGitHubClient", lambda *a, **k: _FakeBotClient())
+
+    agent = RepoNormalizerAgent(user_id=user_id)
+    result = agent._run()
+
+    assert "no owned packaging repos found" in result

@@ -39,6 +39,31 @@ class CopilotAgentClient:
 
     def __init__(self, token: str) -> None:
         self.token = token
+        # Set once a call hits the "copilot_plan_required" 403 below — that's
+        # an account-wide condition (no Copilot license), not a per-repo one,
+        # so once we've seen it there's no point burning an HTTP round-trip
+        # (and a duplicate 403 log line) on every remaining repo/PR/issue in
+        # whatever loop is driving this same client instance for the rest of
+        # this agent run (see agents/repo_normalizer.py, agents/pr_monitor.py,
+        # agents/upstream_maintainer.py — each creates one CopilotAgentClient
+        # via get_coding_dispatcher() and reuses it across many start_task()
+        # calls per run).
+        self._plan_required = False
+        # Best-effort human-readable reason the most recent start_task() call
+        # failed — surfaced on the CopilotTask row (error_msg) so a
+        # dispatch_failed task shows *why* instead of a bare status label
+        # with nothing to act on (see web/routes/copilot_tasks.py's Retry).
+        self._last_error: str | None = None
+
+    @property
+    def plan_required(self) -> bool:
+        """True once a call has hit GitHub's ``copilot_plan_required`` 403 —
+        i.e. this account has no Copilot license (see ``start_task()``)."""
+        return self._plan_required
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
 
     def start_task(
         self,
@@ -50,6 +75,19 @@ class CopilotAgentClient:
         model: str | None = None,
     ) -> dict | None:
         """POST /agents/repos/{owner}/{repo}/tasks — returns the task dict or None."""
+        self._last_error = None
+        if self._plan_required:
+            logger.info(
+                "copilot start_task skipped for %s/%s: no Copilot license on this "
+                "account (already confirmed earlier this run)",
+                owner, repo,
+            )
+            self._last_error = (
+                "No Copilot license on this GitHub account — switch 'Coding Task "
+                "Backend' to 'Local Lemonade' in Settings, or add a Copilot license "
+                "to the bot account, then Retry."
+            )
+            return None
         payload: dict = {
             "prompt": prompt,
             "base_ref": base_ref,
@@ -80,13 +118,38 @@ class CopilotAgentClient:
                     estimated=True,
                 )
                 return resp.json()
+            if resp.status_code == 403:
+                try:
+                    code = resp.json().get("code")
+                except ValueError:
+                    code = None
+                if code == "copilot_plan_required":
+                    self._plan_required = True
+                    self._last_error = (
+                        "No Copilot license on this GitHub account (403 "
+                        "copilot_plan_required) — switch 'Coding Task Backend' to "
+                        "'Local Lemonade' in Settings, or add a Copilot license to "
+                        "the bot account, then Retry."
+                    )
+                    logger.warning(
+                        "copilot start_task failed %s/%s (403): this GitHub account has "
+                        "no Copilot license, so the cloud agent backend can't be used — "
+                        "skipping it for the rest of this run instead of retrying every "
+                        "remaining repo. Switch 'Coding Task Backend' to 'Local Lemonade' "
+                        "in Settings, or add a Copilot license to the bot account.",
+                        owner, repo,
+                    )
+                    return None
+            self._last_error = f"GitHub returned {resp.status_code}: {resp.text[:300]}"
             logger.warning(
                 "copilot start_task failed %s/%s (%s): %s",
                 owner, repo, resp.status_code, resp.text[:300],
             )
         except httpx.HTTPError as exc:
+            self._last_error = f"Network error dispatching to GitHub: {exc}"
             logger.warning("copilot start_task failed for %s/%s: %s", owner, repo, exc)
         return None
+
 
     def get_task(self, owner: str, repo: str, task_id: str) -> dict | None:
         """GET /agents/repos/{owner}/{repo}/tasks/{task_id} — returns the task dict or None."""

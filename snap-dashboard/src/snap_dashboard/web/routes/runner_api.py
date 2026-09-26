@@ -26,7 +26,7 @@ from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import Runner, Snap, TestRun, TestRunScreenshot
 from snap_dashboard.db.session import get_session
 from snap_dashboard.runners import generate_token, hash_token
-from snap_dashboard.testing.orchestrator import submit_test_run_reviewer
+from snap_dashboard.testing.orchestrator import submit_test_run_failure_analysis, submit_test_run_reviewer
 from snap_dashboard.testing.suite_zip import list_suite_files
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,21 @@ _MAX_LOG_CHARS = 500_000
 
 _NEXT_JOB_POLL_INTERVAL = 1.0
 _DEFAULT_NEXT_JOB_TIMEOUT = 25
+
+
+def _client_ip(request: Request) -> str | None:
+    """Best-effort caller IP, purely informational (e.g. "ssh in to debug").
+
+    Not trusted for auth — enrollment/heartbeat still require the bearer
+    secret regardless. Prefers X-Forwarded-For (set by uvicorn's
+    ProxyHeadersMiddleware, already enabled by default for
+    ``forwarded_allow_ips``) so a runner behind a reverse proxy still
+    reports its real address; falls back to the direct TCP peer.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else None
 
 
 def _runner_from_bearer(authorization: str | None) -> Runner | None:
@@ -112,6 +127,7 @@ async def enroll(request: Request) -> JSONResponse:
         runner.os_name = os_name
         runner.desktop_env = desktop_env
         runner.status = "idle"
+        runner.ip_address = _client_ip(request)
         session.flush()
         runner_id = runner.id
 
@@ -145,6 +161,7 @@ async def heartbeat(
         runner.status = "locked" if locked else status
         runner.idle_seconds = idle_seconds
         runner.last_heartbeat_at = datetime.now(timezone.utc)
+        runner.ip_address = _client_ip(request)
         # Self-heal runners enrolled before arch reporting existed (or
         # whose reported arch has since changed) without requiring a
         # manual re-enrollment — see automated_ken_runner.runner._maybe_heartbeat.
@@ -266,6 +283,7 @@ def _try_claim_job(runner_id: int) -> dict | None:
             "architecture": candidate.architecture or "amd64",
             "testing_repo": testing_repo,
             "is_console_app": bool(snap_row.is_console_app) if snap_row else False,
+            "is_service": bool(snap_row.is_service) if snap_row else False,
         }
 
 
@@ -348,6 +366,8 @@ async def update_job(
 
     if status == "passed":
         submit_test_run_reviewer(job_id)
+    elif status in ("failed", "error"):
+        submit_test_run_failure_analysis(job_id)
 
     return JSONResponse({"ok": True})
 

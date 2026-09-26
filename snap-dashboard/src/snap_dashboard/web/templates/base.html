@@ -31,6 +31,7 @@
           <li class="p-navigation__item"><a class="p-navigation__link" href="/version-bumps">Version Bumps</a></li>
           <li class="p-navigation__item"><a class="p-navigation__link" href="/copilot-tasks">Coding Tasks</a></li>
           <li class="p-navigation__item"><a class="p-navigation__link" href="/agents">Agents</a></li>
+          <li class="p-navigation__item"><a class="p-navigation__link" href="/agents/runs">Agent Logs</a></li>
           <li class="p-navigation__item"><a class="p-navigation__link" href="/stats">Stats</a></li>
           <li class="p-navigation__item"><a class="p-navigation__link" href="/settings">Settings</a></li>
           <li class="p-navigation__item"><a class="p-navigation__link" href="/docs">Help</a></li>
@@ -59,7 +60,12 @@
   </header>
 
   <div class="p-strip">
-    <div class="row">
+    <!-- Stable swap target for isolated (htmx) form actions across the app —
+         forms that shouldn't force a full browser page reload target/select
+         this same id, so the POST's normal redirect-to-GET response can be
+         re-rendered in place instead of navigating. See individual template
+         hx-post attributes. -->
+    <div class="row" id="page-content">
       {% block content %}{% endblock %}
     </div>
   </div>
@@ -68,7 +74,7 @@
 
   <footer class="p-strip is-shallow">
     <div class="row">
-      <p>automated-ken &middot; powered by <a href="https://snapcraft.io" target="_blank" rel="noopener">snapcraft.io</a></p>
+      <p>automated-ken {{ app_version() }} &middot; powered by <a href="https://snapcraft.io" target="_blank" rel="noopener">snapcraft.io</a></p>
     </div>
   </footer>
 </div>

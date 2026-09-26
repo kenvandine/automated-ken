@@ -18,7 +18,7 @@ Setup steps are in [`GETTING_STARTED.md`](../GETTING_STARTED.md#part-2-runner-ma
 For each job it:
 
 1. installs or refreshes the snap from the job's channel with `sudo snap install|refresh --channel=…`;
-2. launches the app, waits for it to render, and captures a screenshot (a smoke test) — console apps (`Snap.is_console_app`, set from the snap's dashboard page) are launched inside an `xterm` window instead of bare, since a text UI has nothing to screenshot when run headless;
+2. launches the app, waits for it to render, and captures a screenshot (a smoke test) — console apps (`Snap.is_console_app`, set from the snap's dashboard page) are launched inside a `ptyxis` window instead of bare, since a text UI has nothing to screenshot when run headless;
 3. checks the screenshot isn't blank, uploads it and the log, and reports `passed`/`failed`.
 
 There is no per-repo Robot/YARF suite support anymore — see
@@ -36,7 +36,7 @@ opt-in.
   ```bash
   echo "$USER ALL=(root) NOPASSWD: /usr/bin/snap" | sudo tee /etc/sudoers.d/automated-ken-runner
   ```
-- `xterm` (only needed if you mark any snap as a console app): `sudo apt install xterm`
+- `ptyxis` (only needed if you mark any snap as a console app) — it's the default terminal on stock Ubuntu GNOME desktops (24.04+) already; if missing: `sudo apt install ptyxis`
 - A machine dedicated to testing — preparation disables the screen lock
 
 ## Commands

@@ -12,7 +12,9 @@
   <div style="display:flex; gap:8px; flex-wrap:wrap;">
     <a href="/runners" class="p-button is-small">Runners</a>
     {% if config.testing_repo %}
-    <form method="post" action="/testing/sync" title="Pull results of runs dispatched on GitHub Actions in {{ config.testing_repo }}">
+    <form method="post" action="/testing/sync" title="Pull results of runs dispatched on GitHub Actions in {{ config.testing_repo }}"
+          hx-post="/testing/sync" hx-target="#page-content" hx-select="#page-content" hx-swap="innerHTML"
+          hx-disabled-elt="find button">
       <button type="submit" class="p-button is-small">Sync from GitHub</button>
     </form>
     {% endif %}
@@ -70,16 +72,17 @@
         </div>
         {% endfor %}
       </div>
+      <div style="margin-top: 8px; display:flex; flex-wrap:wrap; gap:6px;">
       {% if ready %}
       {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
-      <form method="post" action="/testing/promote-set/{{ rs.snap_name }}" style="margin-top: 8px;"
-            onsubmit="return confirm(
-              {% if blocked %}
-              'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-              {% else %}
-              'Promote {{ rs.snap_name }} {{ rs.version }} to stable for {{ ready | join(', ') }}?'
-              {% endif %}
-            )">
+      <form method="post" action="/testing/promote-set/{{ rs.snap_name }}"
+            hx-post="/testing/promote-set/{{ rs.snap_name }}" hx-target="#page-content" hx-select="#page-content"
+            hx-swap="innerHTML" hx-disabled-elt="find button"
+            hx-confirm="{% if blocked %}This will promote ONLY {{ ready | join(', ') }} to stable.
+
+The following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.
+
+This is an intentional override of the normal all-architectures gate. Continue?{% else %}Promote {{ rs.snap_name }} {{ rs.version }} to stable for {{ ready | join(', ') }}?{% endif %}">
         <input type="hidden" name="version" value="{{ rs.version }}">
         {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}
         <button type="submit" class="{% if blocked %}p-button{% else %}p-button--positive{% endif %} is-small">
@@ -87,6 +90,15 @@
         </button>
       </form>
       {% endif %}
+      <form method="post" action="/testing/dismiss-promotion"
+            hx-post="/testing/dismiss-promotion" hx-target="#page-content" hx-select="#page-content"
+            hx-swap="innerHTML" hx-disabled-elt="find button"
+            hx-confirm="Dismiss the {{ rs.version }} promotion card for {{ rs.snap_name }}? It'll come back if a newer candidate build shows up.">
+        <input type="hidden" name="snap_name" value="{{ rs.snap_name }}">
+        <input type="hidden" name="version" value="{{ rs.version }}">
+        <button type="submit" class="p-button is-small" title="Not ready to promote this build">✕ Dismiss</button>
+      </form>
+      </div>
     </div>
     {% endfor %}
   </div>
@@ -146,10 +158,12 @@
             {% if run %}
             {% if run.status == 'promoted' %}
             <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">promoted</a>
+            {% elif run.status == 'passed' and run.review_decision == 'reject' %}
+            <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative" title="AI review rejected this">rejected</a>
             {% elif run.status == 'passed' %}
             <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--positive">passed</a>
-            {% if run.review_decision == 'reject' %}
-            <span class="muted small" title="AI review flagged this" style="margin-left:4px;">⚠</span>
+            {% if run.review_decision == 'needs_review' %}
+            <span class="muted small" title="AI review needs manual attention" style="margin-left:4px;">⚠</span>
             {% endif %}
             {% elif run.status == 'failed' %}
             <a href="/testing/runs/{{ run.id }}" class="p-status-label p-status-label--negative">failed</a>
@@ -192,13 +206,13 @@
           {% set ready_names = item.promote_ready | join(', ') %}
           {% set blocked_names = item.promote_blocked | join(', ') %}
           <form method="post" action="/testing/promote-set/{{ item.snap.name }}" style="margin-top:6px;"
-                onsubmit="return confirm(
-                  {% if item.promote_blocked %}
-                  'This will promote ONLY {{ ready_names }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-                  {% else %}
-                  'Promote {{ item.snap.name }} {{ item.version }} to stable for {{ ready_names }}?'
-                  {% endif %}
-                )">
+                hx-post="/testing/promote-set/{{ item.snap.name }}" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button"
+                hx-confirm="{% if item.promote_blocked %}This will promote ONLY {{ ready_names }} to stable.
+
+The following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.
+
+This is an intentional override of the normal all-architectures gate. Continue?{% else %}Promote {{ item.snap.name }} {{ item.version }} to stable for {{ ready_names }}?{% endif %}">
             <input type="hidden" name="version" value="{{ item.version }}">
             {% if item.promote_blocked %}<input type="hidden" name="override" value="1">{% endif %}
             <button type="submit" class="{% if item.promote_blocked %}p-button{% else %}p-button--positive{% endif %} is-small"
@@ -283,11 +297,11 @@
             {% if run.status == 'passed' %}
             <span class="p-status-label p-status-label--positive">passed</span>
             {% elif run.status == 'failed' %}
-            <span class="p-status-label p-status-label--negative">failed</span>
+            <span class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg or '' }}">failed</span>
             {% elif run.status == 'promoted' %}
             <span class="p-status-label p-status-label--positive">promoted</span>
             {% elif run.status == 'error' %}
-            <span class="p-status-label p-status-label--negative" title="{{ run.error_msg }}">error</span>
+            <span class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg }}">error</span>
             {% elif run.status in ('pending', 'triggered', 'running') %}
             <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
 
@@ -317,9 +331,11 @@
           <td class="muted small">
             {{ run.triggered_by or '—' }}
             {% if run.status in ('pending', 'triggered', 'running') %}
-            <form method="post" action="/testing/runs/{{ run.id }}/fail" style="display:inline; margin-left:6px;">
+            <form method="post" action="/testing/runs/{{ run.id }}/fail" style="display:inline; margin-left:6px;"
+                  hx-post="/testing/runs/{{ run.id }}/fail" hx-target="#page-content" hx-select="#page-content"
+                  hx-swap="innerHTML" hx-disabled-elt="find button" hx-confirm="Mark run #{{ run.id }} as failed?">
               <button type="submit" class="p-button is-small" style="font-size:11px; padding:1px 6px; opacity:0.5;"
-                title="Mark as failed" onclick="return confirm('Mark run #{{ run.id }} as failed?')">✕</button>
+                title="Mark as failed">✕</button>
             </form>
             {% endif %}
           </td>
@@ -402,8 +418,14 @@
           }
           if (TERMINAL.has(run.status)) {
             el.classList.remove('js-run-status');
-            // Reload once a run finishes so pending-promotion & tables update
-            setTimeout(() => location.reload(), 2000);
+            // Refresh once a run finishes so pending-promotion & tables
+            // update — swapped in place via htmx instead of a full
+            // browser reload/navigation.
+            setTimeout(() => {
+              htmx.ajax('GET', location.pathname + location.search, {
+                target: '#page-content', select: '#page-content', swap: 'innerHTML',
+              });
+            }, 2000);
           } else {
             anyInFlight = true;
           }
@@ -475,7 +497,45 @@
         .then(data => {
           const failed = (data.results || []).filter(r => !r.ok);
           if (failed.length) {
-            alert('Failed to trigger test for: ' + failed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', '));
+            const dup = failed.filter(r => (r.error || '').includes('use Re-run'));
+            if (dup.length && confirm(
+              'Failed to trigger test for: '
+              + failed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', ')
+              + '\n\nRe-run anyway?'
+            )) {
+              const fd = new FormData(form);
+              fd.set('force', 'true');
+              button.disabled = true;
+              button.textContent = 'Queuing…';
+              fetch(form.action, { method: 'POST', headers: { 'Accept': 'application/json' }, body: fd })
+                .then(r => r.json())
+                .then(data2 => {
+                  const stillFailed = (data2.results || []).filter(r => !r.ok);
+                  if (stillFailed.length) {
+                    alert('Failed to trigger test for: ' + stillFailed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', '));
+                  }
+                  if (cell) {
+                    const lines2 = (data2.results || []).map(r => {
+                      if (!r.ok) return '<div><span class="muted small">' + r.architecture + ':</span> <span class="p-status-label p-status-label--negative">error</span></div>';
+                      return '<div><span class="muted small">' + r.architecture + ':</span> '
+                        + '<span class="p-status-label p-status-label--caution js-run-status" data-run-id="' + r.run_id + '">' + r.status + '</span></div>';
+                    });
+                    if (lines2.length) cell.innerHTML = lines2.join('');
+                  }
+                  button.disabled = false;
+                  button.textContent = originalLabel;
+                  poll();
+                })
+                .catch(() => {
+                  alert('Failed to trigger test — network error.');
+                  button.disabled = false;
+                  button.textContent = originalLabel;
+                });
+              return;
+            }
+            if (!dup.length) {
+              alert('Failed to trigger test for: ' + failed.map(r => r.architecture + ' (' + (r.error || 'unknown error') + ')').join(', '));
+            }
           }
           if (cell) {
             const lines = (data.results || []).map(r => {

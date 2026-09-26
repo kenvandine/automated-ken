@@ -29,11 +29,16 @@ import logging
 
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import CopilotTask, Snap
+from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.bot_client import BotGitHubClient
-from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher, task_result_fields
-from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.agents.coding_backend import (
+    RETRY_ELIGIBLE_STATUSES,
+    CodingDispatcher,
+    get_coding_dispatcher,
+    task_result_fields,
+)
+from snap_dashboard.github.utils import is_owned_by, parse_owner_repo
 from snap_dashboard.snapcraft.build_workflow_template import WORKFLOW_PATH, WORKFLOW_YAML
 from snap_dashboard.testing.suite_zip import list_suite_files
 
@@ -65,6 +70,8 @@ class RepoNormalizerAgent(BaseAgent):
         testing_repo = getattr(uc, "testing_repo", "") or ""
 
         with get_session() as session:
+            user = session.query(User).get(self.user_id)
+            login = (user.github_login or "") if user else ""
             snaps = [
                 (s.id, s.name, s.packaging_repo)
                 for s in session.query(Snap).filter_by(user_id=self.user_id).all()
@@ -74,7 +81,25 @@ class RepoNormalizerAgent(BaseAgent):
         if not snaps:
             return "no packaging repos found"
 
-        bot_client = BotGitHubClient(token)
+        owned_snaps = [s for s in snaps if is_owned_by(s[2], login)]
+        not_owned = len(snaps) - len(owned_snaps)
+        if not_owned:
+            logger.warning(
+                "repo_normalizer: skipping %d packaging_repo(s) not owned by "
+                "%s (likely misconfigured to point at a third-party repo): %s",
+                not_owned,
+                login or "(unknown user)",
+                ", ".join(s[2] for s in snaps if s not in owned_snaps),
+            )
+        snaps = owned_snaps
+        if not snaps:
+            return f"no owned packaging repos found ({not_owned} skipped as not owned)"
+
+        bot_client = BotGitHubClient(
+            token,
+            bot_login=getattr(uc, "bot_github_login", None),
+            read_token=getattr(uc, "github_token", "") or token,
+        )
         copilot = get_coding_dispatcher(uc)
         if not copilot:
             return "no coding backend configured/available"
@@ -91,7 +116,10 @@ class RepoNormalizerAgent(BaseAgent):
             else:
                 skipped += 1
 
-        return f"dispatched {dispatched} normalization task(s), {skipped} skipped/already-done"
+        return (
+            f"dispatched {dispatched} normalization task(s), {skipped} skipped/already-done"
+            + (f", {not_owned} skipped as not owned" if not_owned else "")
+        )
 
     def _normalize_repo(
         self,
@@ -110,19 +138,26 @@ class RepoNormalizerAgent(BaseAgent):
         owner_repo_str = f"{owner}/{repo}"
 
         # Idempotency: skip repos that already have an AGENTS.md, or that
-        # already have a fleet_normalize task in flight/done.
+        # have a fleet_normalize task already in flight or that succeeded.
+        # A previously *failed* attempt (dispatch_failed/failed/cancelled/
+        # timed_out) does NOT block a retry on the next scheduled run —
+        # otherwise one transient failure (e.g. no Copilot license) would
+        # permanently skip the repo forever.
         if bot_client.file_exists(owner, repo, "AGENTS.md"):
             return False
         with get_session() as session:
             existing = (
                 session.query(CopilotTask)
                 .filter(CopilotTask.kind == "fleet_normalize", CopilotTask.owner_repo == owner_repo_str)
+                .order_by(CopilotTask.id.desc())
                 .first()
             )
-            if existing:
+            if existing and existing.status not in RETRY_ELIGIBLE_STATUSES:
                 return False
 
         suite_block, moved_suite = self._build_suite_block(testing_repo, snap_name, token)
+
+        base_ref = bot_client.get_default_branch(owner, repo)
 
         prompt = (
             f"This repo packages the '{snap_name}' snap and is now maintained by "
@@ -162,7 +197,7 @@ class RepoNormalizerAgent(BaseAgent):
             + "\nOpen a single pull request with all of the above changes."
         )
 
-        task = copilot.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        task = copilot.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -171,11 +206,12 @@ class RepoNormalizerAgent(BaseAgent):
                     kind="fleet_normalize",
                     owner_repo=owner_repo_str,
                     prompt=prompt,
-                    **task_result_fields(task),
+                    base_ref=base_ref,
+                    **task_result_fields(task, fallback_error=getattr(copilot, "last_error", None)),
                 )
             )
         if task and moved_suite and testing_repo:
-            self._dispatch_suite_cleanup(copilot, snap_id, snap_name, testing_repo, packaging_repo)
+            self._dispatch_suite_cleanup(bot_client, copilot, snap_id, snap_name, testing_repo, packaging_repo)
         return bool(task)
 
     @staticmethod
@@ -206,7 +242,13 @@ class RepoNormalizerAgent(BaseAgent):
         return "\n\n".join(blocks), True
 
     def _dispatch_suite_cleanup(
-        self, copilot: CodingDispatcher, snap_id: int, snap_name: str, testing_repo: str, packaging_repo: str,
+        self,
+        bot_client: BotGitHubClient,
+        copilot: CodingDispatcher,
+        snap_id: int,
+        snap_name: str,
+        testing_repo: str,
+        packaging_repo: str,
     ) -> None:
         owner_repo = parse_owner_repo(testing_repo)
         if not owner_repo:
@@ -221,10 +263,13 @@ class RepoNormalizerAgent(BaseAgent):
                     CopilotTask.owner_repo == owner_repo_str,
                     CopilotTask.issue_number == snap_id,
                 )
+                .order_by(CopilotTask.id.desc())
                 .first()
             )
-            if existing:
+            if existing and existing.status not in RETRY_ELIGIBLE_STATUSES:
                 return
+
+        base_ref = bot_client.get_default_branch(owner, repo)
 
         prompt = (
             f"The '{snap_name}' YARF test suite under suites/{snap_name}/ has been "
@@ -232,7 +277,7 @@ class RepoNormalizerAgent(BaseAgent):
             "under tests/. Please remove suites/"
             f"{snap_name}/ from this repo and open a pull request for the removal."
         )
-        task = copilot.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        task = copilot.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -242,6 +287,7 @@ class RepoNormalizerAgent(BaseAgent):
                     owner_repo=owner_repo_str,
                     prompt=prompt,
                     issue_number=snap_id,  # repurposed here as a "which snap" dedupe key
-                    **task_result_fields(task),
+                    base_ref=base_ref,
+                    **task_result_fields(task, fallback_error=getattr(copilot, "last_error", None)),
                 )
             )

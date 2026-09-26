@@ -4,21 +4,19 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.auth import get_current_user
 from snap_dashboard.db.models import Runner, TestRun
 from snap_dashboard.db.session import get_session, retry_on_db_lock
 from snap_dashboard.runners import effective_status, generate_token, hash_token
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 _ENROLLMENT_TTL_MINUTES = 15
 
@@ -32,6 +30,7 @@ def _runner_dict(runner: Runner) -> dict:
         "os_name": runner.os_name or "",
         "desktop_env": runner.desktop_env or "",
         "idle_seconds": runner.idle_seconds,
+        "ip_address": runner.ip_address,
         "last_heartbeat_at": (
             runner.last_heartbeat_at.strftime("%H:%M:%S") if runner.last_heartbeat_at else None
         ),
@@ -139,6 +138,22 @@ async def new_runner(request: Request, name: str = Form(default="")) -> JSONResp
         "expires_in_minutes": _ENROLLMENT_TTL_MINUTES,
         "command": command,
     })
+
+
+@router.post("/runners/{runner_id}/rename")
+async def rename_runner(runner_id: int, request: Request, name: str = Form(...)) -> RedirectResponse:
+    """Change a runner's display name. Purely cosmetic — has no effect on
+    auth, enrollment, or job dispatch, which are all keyed by ``id``."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    name = name.strip()
+    if name:
+        with get_session() as session:
+            runner = session.query(Runner).filter_by(id=runner_id, user_id=user["id"]).first()
+            if runner:
+                runner.name = name
+    return RedirectResponse(url="/runners", status_code=303)
 
 
 @router.post("/runners/{runner_id}/revoke")

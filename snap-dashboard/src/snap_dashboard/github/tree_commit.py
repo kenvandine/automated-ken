@@ -6,13 +6,11 @@ file per commit, which is fine for a version bump (one file) but not for
 This module builds one commit with an arbitrary set of file writes/deletes
 using the lower-level git/trees + git/commits + git/refs endpoints.
 
-Not currently used by any agent — the fleet-normalization campaign
-(``agents/repo_normalizer.py``) now delegates that kind of multi-file work
-to GitHub Copilot cloud agent instead of committing files mechanically
-(Copilot can inspect the actual repo, decide *how* to remove a workflow, and
-write its own AGENTS.md, which this module can't do). Kept as reusable infra
-for any future *purely mechanical* multi-file commit that doesn't need a
-coding model's judgment.
+Used by the local Lemonade coding backend (``lemonade/coding_agent.py``) as
+its commit mechanism. The bot account is essentially never a collaborator
+on the repos it maintains, so writes go through the bot's own fork of the
+target repo (see ``github/fork_utils.py``) with the PR opened cross-repo —
+the same flow any external contributor uses.
 """
 
 from __future__ import annotations
@@ -20,6 +18,8 @@ from __future__ import annotations
 import logging
 
 import httpx
+
+from snap_dashboard.github.fork_utils import ensure_fork
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,22 @@ def _headers(token: str) -> dict[str, str]:
 class GitTreeClient:
     """Builds one multi-file commit + branch from a set of puts/deletes."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, bot_login: str | None = None, read_token: str | None = None) -> None:
         self.token = token
+        # Base state (branch ref, commit, tree) is read from the real
+        # ``owner/repo`` before writing — use the repo owner's own token
+        # for those reads when supplied, since the bot account may not
+        # even be a collaborator on the repo yet (writes below still use
+        # ``token`` so the commit/PR is attributed to the bot).
+        self.read_token = read_token or token
+        # The bot account committing on our behalf. When set (and not the
+        # repo's own owner), commits go into a fork under this account
+        # instead of directly into ``owner/repo`` — see commit_multi().
+        self.bot_login = bot_login
+        # Set by commit_multi() to whichever account the commit actually
+        # landed in, so create_pr() can build the right cross-repo head
+        # without callers having to track/pass it themselves.
+        self.push_owner: str | None = None
 
     def commit_multi(
         self,
@@ -53,6 +67,12 @@ class GitTreeClient:
         """Create (or fast-forward) ``branch`` with one commit containing all
         the given file writes/deletes, based on ``base_branch`` (default branch
         if unset). Returns the branch name on success, else None.
+
+        The base state (branch ref, commit, tree) is always read from the
+        real ``owner/repo`` so the commit is based on its actual latest
+        code. The commit itself is written into ``owner/repo`` directly
+        only if the bot account *is* ``owner``; otherwise it's written into
+        the bot's fork (created on demand) — see ``push_owner``.
         """
         put_files = put_files or {}
         delete_paths = delete_paths or []
@@ -62,27 +82,35 @@ class GitTreeClient:
         try:
             with httpx.Client(timeout=30) as client:
                 headers = _headers(self.token)
+                read_headers = _headers(self.read_token)
 
-                base = base_branch or self._default_branch(client, owner, repo, headers)
+                base = base_branch or self._default_branch(client, owner, repo, read_headers)
                 base_ref = client.get(
                     f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{base}",
-                    headers=headers,
+                    headers=read_headers,
                 )
                 base_ref.raise_for_status()
                 base_commit_sha = base_ref.json()["object"]["sha"]
 
                 base_commit = client.get(
                     f"{_GH_API}/repos/{owner}/{repo}/git/commits/{base_commit_sha}",
-                    headers=headers,
+                    headers=read_headers,
                 )
                 base_commit.raise_for_status()
                 base_tree_sha = base_commit.json()["tree"]["sha"]
+
+                push_owner = owner
+                if self.bot_login and self.bot_login.lower() != owner.lower():
+                    push_owner = self.bot_login
+                    if not ensure_fork(client, headers, owner, repo, push_owner):
+                        return None
+                self.push_owner = push_owner
 
                 tree_entries = []
                 for path, content in put_files.items():
                     blob_content = content.decode() if isinstance(content, bytes) else content
                     blob_resp = client.post(
-                        f"{_GH_API}/repos/{owner}/{repo}/git/blobs",
+                        f"{_GH_API}/repos/{push_owner}/{repo}/git/blobs",
                         json={"content": blob_content, "encoding": "utf-8"},
                         headers=headers,
                     )
@@ -99,7 +127,7 @@ class GitTreeClient:
                     tree_entries.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
 
                 tree_resp = client.post(
-                    f"{_GH_API}/repos/{owner}/{repo}/git/trees",
+                    f"{_GH_API}/repos/{push_owner}/{repo}/git/trees",
                     json={"base_tree": base_tree_sha, "tree": tree_entries},
                     headers=headers,
                 )
@@ -107,7 +135,7 @@ class GitTreeClient:
                 new_tree_sha = tree_resp.json()["sha"]
 
                 commit_resp = client.post(
-                    f"{_GH_API}/repos/{owner}/{repo}/git/commits",
+                    f"{_GH_API}/repos/{push_owner}/{repo}/git/commits",
                     json={"message": message, "tree": new_tree_sha, "parents": [base_commit_sha]},
                     headers=headers,
                 )
@@ -115,19 +143,19 @@ class GitTreeClient:
                 new_commit_sha = commit_resp.json()["sha"]
 
                 ref_check = client.get(
-                    f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{branch}",
+                    f"{_GH_API}/repos/{push_owner}/{repo}/git/ref/heads/{branch}",
                     headers=headers,
                 )
                 if ref_check.status_code == 200:
                     update_resp = client.patch(
-                        f"{_GH_API}/repos/{owner}/{repo}/git/refs/heads/{branch}",
+                        f"{_GH_API}/repos/{push_owner}/{repo}/git/refs/heads/{branch}",
                         json={"sha": new_commit_sha, "force": True},
                         headers=headers,
                     )
                     update_resp.raise_for_status()
                 else:
                     create_resp = client.post(
-                        f"{_GH_API}/repos/{owner}/{repo}/git/refs",
+                        f"{_GH_API}/repos/{push_owner}/{repo}/git/refs",
                         json={"ref": f"refs/heads/{branch}", "sha": new_commit_sha},
                         headers=headers,
                     )
@@ -144,10 +172,12 @@ class GitTreeClient:
         try:
             with httpx.Client(timeout=15) as client:
                 headers = _headers(self.token)
-                pr_base = base or self._default_branch(client, owner, repo, headers)
+                pr_base = base or self._default_branch(client, owner, repo, _headers(self.read_token))
+                head_owner = self.push_owner or owner
+                head_ref = f"{head_owner}:{head}" if head_owner.lower() != owner.lower() else head
                 resp = client.post(
                     f"{_GH_API}/repos/{owner}/{repo}/pulls",
-                    json={"title": title, "body": body, "head": head, "base": pr_base},
+                    json={"title": title, "body": body, "head": head_ref, "base": pr_base},
                     headers=headers,
                 )
             if resp.status_code in (200, 201):

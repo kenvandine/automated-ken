@@ -320,6 +320,7 @@ def trigger_remote_run(
     runner_id: int | None = None,
     priority: int = 0,
     user_id: int | None = None,
+    skip_if_exists: bool = False,
 ) -> tuple[bool, str, int | None]:
     """Queue a ``TestRun`` for a registered remote runner instead of GitHub Actions.
 
@@ -328,6 +329,14 @@ def trigger_remote_run(
     ``GET /api/runners/{id}/next-job`` poll claims it (see
     ``web/routes/runner_api.py``). If ``runner_id`` is None, any idle
     runner belonging to the same user may claim it.
+
+    With ``skip_if_exists`` (used by ad-hoc "test this" UI triggers, not
+    the explicit "Re-run" actions), refuse to queue a duplicate if a run
+    for the exact same snap/arch/channel/version/revision is already
+    active or already finished — otherwise the new pending row's status
+    shadows the older, real result in :func:`candidate_release_set`
+    (which just takes the highest-id run per architecture), making an
+    already-passed set look stuck pending for no reason.
 
     Returns a ``(success, error_message, db_run_id)`` tuple.
     """
@@ -338,6 +347,29 @@ def trigger_remote_run(
             runner = session.query(Runner).get(runner_id)
             if runner is None or runner.revoked_at is not None:
                 return False, f"Runner {runner_id} not found or revoked", None
+
+        if skip_if_exists:
+            existing = (
+                session.query(TestRun)
+                .filter_by(
+                    snap_name=snap_name,
+                    architecture=architecture,
+                    from_channel=from_channel,
+                    version=version,
+                    revision=revision,
+                    user_id=user_id,
+                )
+                .filter(TestRun.status.in_(["pending", "triggered", "running", "passed", "promoted"]))
+                .order_by(TestRun.id.desc())
+                .first()
+            )
+            if existing is not None:
+                return (
+                    False,
+                    f"a test for this revision is already {existing.status} (run #{existing.id}) — "
+                    "use Re-run if you want to test it again",
+                    existing.id,
+                )
 
         run = TestRun(
             snap_name=snap_name,
@@ -355,6 +387,7 @@ def trigger_remote_run(
         session.add(run)
         session.flush()
         return True, "", run.id
+
 
 
 def queue_yarf_tests_for_bump(
@@ -670,3 +703,26 @@ def submit_test_run_reviewer(test_run_id: int) -> None:
     from snap_dashboard.agents.test_run_auto_promoter import TestRunAutoPromoterAgent
 
     get_runner().submit(TestRunAutoPromoterAgent(test_run_id=test_run_id, user_id=user_id))
+
+
+def submit_test_run_failure_analysis(test_run_id: int) -> None:
+    """Queue an LLM root-cause analysis for a failed/errored test run.
+
+    Like the screenshot reviewer above, this always runs for any eligible
+    run and its result is always recorded/displayed — see
+    agents/test_failure_analyzer.py.
+    """
+    with get_session() as session:
+        run = session.query(TestRun).get(test_run_id)
+        if not run or run.status not in ("failed", "error"):
+            return
+        if not run.log_output and not run.error_msg:
+            return
+        user_id = run.user_id
+        if user_id is None:
+            return
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.test_failure_analyzer import TestFailureAnalyzerAgent
+
+    get_runner().submit(TestFailureAnalyzerAgent(test_run_id=test_run_id, user_id=user_id))

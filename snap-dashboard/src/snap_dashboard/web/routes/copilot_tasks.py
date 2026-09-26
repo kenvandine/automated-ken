@@ -10,23 +10,21 @@ their behalf, and refresh each task's live status/PR link from GitHub.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
-from snap_dashboard.agents.coding_backend import extract_pr_url
+from snap_dashboard.agents.coding_backend import RETRY_ELIGIBLE_STATUSES, extract_pr_url
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import CopilotTask
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 # States GitHub's Copilot cloud agent task API reports.
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out", "dispatch_failed"}
@@ -44,6 +42,7 @@ def _serialise(task: CopilotTask) -> dict:
         "created_at": task.created_at,
         "updated_at": task.updated_at,
         "is_terminal": (task.status or "") in _TERMINAL_STATUSES,
+        "can_retry": (task.status or "") in RETRY_ELIGIBLE_STATUSES and bool(task.prompt),
     }
 
 
@@ -149,5 +148,76 @@ async def refresh_all_copilot_tasks(request: Request) -> RedirectResponse:
                 task.pr_url = extract_pr_url(remote) or task.pr_url
                 if remote.get("error"):
                     task.error_msg = str(remote.get("error"))[:2000]
+
+    return RedirectResponse(url="/copilot-tasks", status_code=303)
+
+
+@router.post("/copilot-tasks/{task_id}/retry")
+async def retry_copilot_task(task_id: int, request: Request) -> RedirectResponse:
+    """Re-dispatch a failed task as a brand-new ``CopilotTask`` row.
+
+    Failed dispatches (dispatch_failed/failed/cancelled/timed_out) previously
+    had no way back — the dedup checks in agents/repo_normalizer.py and
+    agents/upstream_maintainer.py treated *any* existing row as "already
+    handled", so a transient failure (no Copilot license, a network blip)
+    would skip the repo/issue forever until manually deleted from the DB.
+    This inserts a fresh row (preserving the old one for history/audit)
+    using the same prompt/base_ref/kind originally dispatched.
+
+    The actual ``start_task()`` call can block for tens of seconds (the
+    local Lemonade model replying, or forking+polling a repo for the
+    fork-based PR flow — see ``github/fork_utils.py``), so it's dispatched
+    onto the background agent thread pool (``RetryCopilotTaskAgent``)
+    instead of being awaited inline here — this route only does two quick
+    DB reads/writes and returns immediately. Doing the blocking call inline
+    in this ``async def`` route previously froze the *entire* web UI (every
+    user's requests, not just this one) for as long as the dispatch took,
+    since FastAPI runs ``async def`` handlers on the single event-loop
+    thread.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        original = session.query(CopilotTask).filter_by(id=task_id, user_id=user_id).first()
+        if not original or not original.prompt or not original.owner_repo:
+            return RedirectResponse(url="/copilot-tasks", status_code=303)
+        owner_repo = original.owner_repo
+        prompt = original.prompt
+        base_ref = original.base_ref or "main"
+        kind = original.kind
+        snap_id = original.snap_id
+        issue_number = original.issue_number
+
+    owner_repo_parts = parse_owner_repo(owner_repo)
+    if not owner_repo_parts:
+        return RedirectResponse(url="/copilot-tasks", status_code=303)
+    owner, repo = owner_repo_parts
+
+    with get_session() as session:
+        new_task = CopilotTask(
+            user_id=user_id,
+            snap_id=snap_id,
+            kind=kind,
+            owner_repo=owner_repo,
+            prompt=prompt,
+            issue_number=issue_number,
+            base_ref=base_ref,
+            status="dispatching",
+        )
+        session.add(new_task)
+        session.flush()
+        new_task_id = new_task.id
+
+    from snap_dashboard.agents.copilot_retry import RetryCopilotTaskAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(
+        RetryCopilotTaskAgent(
+            user_id=user_id, task_id=new_task_id, owner=owner, repo=repo, prompt=prompt, base_ref=base_ref,
+        )
+    )
 
     return RedirectResponse(url="/copilot-tasks", status_code=303)

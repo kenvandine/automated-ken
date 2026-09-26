@@ -16,9 +16,21 @@
       {% if run.revision %}&nbsp;(rev {{ run.revision }}){% endif %}
       &nbsp;<span class="muted small">{{ run.architecture }}</span>
     </p>
+    <p class="text-muted small" style="margin-top: 2px;">
+      {% if run.started_at %}
+      Started {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+      {% endif %}
+      {% if run.finished_at %}
+      &nbsp;&middot;&nbsp;Finished {{ run.finished_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+      {% endif %}
+    </p>
   </div>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    {% if run.status == 'passed' %}
+    {% if run.status == 'passed' and run.review_decision == 'reject' %}
+    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Rejected by AI review</span>
+    {% elif run.status == 'passed' and run.review_decision == 'needs_review' %}
+    <span class="p-status-label p-status-label--caution" style="font-size:13px; padding: 4px 12px;">Needs review</span>
+    {% elif run.status == 'passed' %}
     <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
     {% elif run.status == 'failed' %}
     <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
@@ -37,7 +49,9 @@
   </div>
 </div>
 
-{% if run.error_msg and run.status != 'failed' %}
+{% include "_failure_analysis.html" %}
+
+{% if run.error_msg and run.status not in ('failed', 'error') %}
 <div class="card" style="border-left: 3px solid var(--accent); margin-bottom: 20px;">
   <p style="font-size: 13px; color: var(--text-muted); margin: 0;">{{ run.error_msg }}</p>
 </div>
@@ -72,13 +86,13 @@
   {% if ready %}
   {% set blocked_names = blocked | map(attribute='architecture') | join(', ') %}
   <form method="post" action="/testing/promote-set/{{ run.snap_name }}"
-        onsubmit="return confirm(
-          {% if blocked %}
-          'This will promote ONLY {{ ready | join(', ') }} to stable.\n\nThe following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.\n\nThis is an intentional override of the normal all-architectures gate. Continue?'
-          {% else %}
-          'Promote {{ run.snap_name }} {{ run.version }} to stable for {{ ready | join(', ') }}?'
-          {% endif %}
-        )">
+        hx-post="/testing/promote-set/{{ run.snap_name }}" hx-target="#page-content" hx-select="#page-content"
+        hx-swap="innerHTML" hx-disabled-elt="find button"
+        hx-confirm="{% if blocked %}This will promote ONLY {{ ready | join(', ') }} to stable.
+
+The following architecture(s) will be SKIPPED and NOT promoted: {{ blocked_names }}.
+
+This is an intentional override of the normal all-architectures gate. Continue?{% else %}Promote {{ run.snap_name }} {{ run.version }} to stable for {{ ready | join(', ') }}?{% endif %}">
     <input type="hidden" name="version" value="{{ run.version }}">
     <input type="hidden" name="return_to" value="/testing/runs/{{ run.id }}">
     {% if blocked %}<input type="hidden" name="override" value="1">{% endif %}

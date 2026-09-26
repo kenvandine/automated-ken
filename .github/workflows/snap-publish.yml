@@ -1,0 +1,38 @@
+name: Publish automated-ken snap (edge)
+
+# Builds and publishes the automated-ken (snap-dashboard) snap to the
+# edge channel on every push to main. The automated-ken-runner snap is
+# intentionally NOT published here yet — see build-runner.yml, which
+# only builds and uploads artifacts for it.
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record commit for snap versioning
+        run: echo "${GITHUB_SHA:0:7}" > snap-dashboard/.git-commit
+
+      - name: Build snap
+        id: build
+        uses: snapcore/action-build@v1
+        with:
+          path: snap-dashboard
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: automated-ken-snap
+          path: ${{ steps.build.outputs.snap }}
+
+      - name: Publish to edge channel
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_CREDENTIALS }}
+        with:
+          snap: ${{ steps.build.outputs.snap }}
+          release: edge

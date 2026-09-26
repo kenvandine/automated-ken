@@ -14,6 +14,8 @@ import re
 
 import httpx
 
+from snap_dashboard.github.fork_utils import ensure_fork
+
 logger = logging.getLogger(__name__)
 
 _GH_API = "https://api.github.com"
@@ -30,8 +32,45 @@ def _headers(token: str) -> dict[str, str]:
 class BotGitHubClient:
     """Creates version-bump branches and PRs using a bot GitHub account."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, bot_login: str | None = None, read_token: str | None = None) -> None:
         self.token = token
+        # Reads (GET) can use the repo owner's own token when supplied —
+        # it's reliably reads-anything-owned-by-that-account, whereas the
+        # bot account may not even be a collaborator on some repos yet.
+        # Writes (POST/PUT/PATCH) always go through ``token`` so commits/
+        # PRs are attributed to the bot account.
+        self.read_token = read_token or token
+        # See push_target() below — when set (and not the repo's own
+        # owner), writes go into a fork under this account instead of
+        # directly into ``owner/repo``, since the bot is essentially never
+        # a collaborator on the packaging repos it maintains.
+        self.bot_login = bot_login
+        self._push_owner_cache: dict[tuple[str, str], str] = {}
+
+    # ------------------------------------------------------------------
+    # Fork-aware push target
+    # ------------------------------------------------------------------
+
+    def push_target(self, owner: str, repo: str) -> str:
+        """Return the account to actually write branches/commits into for
+        ``owner/repo`` — ``owner`` itself if the bot account IS that owner
+        (or no bot account is configured), otherwise the bot's own fork of
+        the repo (created on demand). Writing directly to a repo the bot
+        isn't a collaborator on 404s on both the Contents API and the git
+        data API, so this is what makes the mechanical version-bump
+        fallback (and any other bot commit) actually able to push at all.
+        """
+        if not self.bot_login or self.bot_login.lower() == owner.lower():
+            return owner
+        key = (owner.lower(), repo.lower())
+        cached = self._push_owner_cache.get(key)
+        if cached:
+            return cached
+        with httpx.Client(timeout=30) as client:
+            if not ensure_fork(client, _headers(self.token), owner, repo, self.bot_login):
+                return owner  # best-effort fallback; write calls will fail the same as before
+        self._push_owner_cache[key] = self.bot_login
+        return self.bot_login
 
     # ------------------------------------------------------------------
     # Read
@@ -42,7 +81,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/contents/{path}"
         try:
             with httpx.Client(timeout=15) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             if resp.status_code != 200:
                 return None
             data = resp.json()
@@ -57,7 +96,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             if resp.status_code == 200:
                 return resp.json().get("default_branch", "main")
         except Exception:
@@ -69,7 +108,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{branch}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             if resp.status_code == 200:
                 return resp.json()["object"]["sha"]
         except Exception:
@@ -126,10 +165,19 @@ class BotGitHubClient:
         body: str,
         head: str,
         base: str,
+        head_owner: str | None = None,
     ) -> dict | None:
-        """Open a pull request; return the PR dict or None."""
+        """Open a pull request; return the PR dict or None.
+
+        ``head_owner`` is the account whose branch this PR pulls from —
+        pass the result of ``push_target(owner, repo)`` when the commit was
+        pushed to a fork rather than directly into ``owner/repo``, so the
+        PR is opened cross-repo (``head="head_owner:head"``) instead of
+        against a branch that doesn't exist in ``owner/repo`` at all.
+        """
         url = f"{_GH_API}/repos/{owner}/{repo}/pulls"
-        payload = {"title": title, "body": body, "head": head, "base": base}
+        head_ref = f"{head_owner}:{head}" if head_owner and head_owner.lower() != owner.lower() else head
+        payload = {"title": title, "body": body, "head": head_ref, "base": base}
         try:
             with httpx.Client(timeout=15) as client:
                 resp = client.post(url, json=payload, headers=_headers(self.token))
@@ -145,7 +193,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/contents/{path}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.head(url, headers=_headers(self.token))
+                resp = client.head(url, headers=_headers(self.read_token))
             return resp.status_code == 200
         except Exception:
             return False
@@ -213,7 +261,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/trees/{sha}"
         try:
             with httpx.Client(timeout=20) as client:
-                resp = client.get(url, params={"recursive": "1"}, headers=_headers(self.token))
+                resp = client.get(url, params={"recursive": "1"}, headers=_headers(self.read_token))
             if resp.status_code != 200:
                 return []
             data = resp.json()
@@ -226,10 +274,27 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{branch}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             return resp.status_code == 200
         except Exception:
             return False
+
+    def get_pr_head_branch(self, owner: str, repo: str, pr_number: int) -> str | None:
+        """Return a PR's head branch name, or None.
+
+        Used when a coding agent (see ``agents/coding_backend.py``) opens a
+        PR on its own auto-generated branch — we only learn the branch name
+        after the fact, purely for display purposes.
+        """
+        url = f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}"
+        try:
+            with httpx.Client(timeout=10) as client:
+                resp = client.get(url, headers=_headers(self.read_token))
+            if resp.status_code == 200:
+                return resp.json().get("head", {}).get("ref")
+        except Exception:
+            pass
+        return None
 
 
 # ---------------------------------------------------------------------------

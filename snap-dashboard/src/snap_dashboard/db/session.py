@@ -156,6 +156,31 @@ def _migrate() -> None:
         # same VersionBumpPR so all architectures can be gated and promoted
         # together. See agents/pr_monitor.py and testing/release_set.py.
         "ALTER TABLE test_runs ADD COLUMN version_bump_pr_id INTEGER REFERENCES version_bump_prs(id)",
+        # Which workflow file a manual/stale-scan rebuild actually dispatched
+        # — inferred per-repo (see agents/stale_build_scanner._infer_build_workflow)
+        # rather than always automated-snap-build.yml, so it's worth recording
+        # for visibility. See db/models.StaleBuildTrigger.
+        "ALTER TABLE stale_build_triggers ADD COLUMN workflow_file VARCHAR(255)",
+        # LLM-inferred root cause for a failed/errored test run — see
+        # agents/test_failure_analyzer.py.
+        "ALTER TABLE test_runs ADD COLUMN failure_analysis TEXT",
+        # Async coding-backend task id while a version bump is delegated and
+        # no PR exists yet (status=="dispatched") — see agents/version_bumper.py
+        # and agents/pr_monitor.py's dispatched-state polling.
+        "ALTER TABLE version_bump_prs ADD COLUMN external_task_id VARCHAR(128)",
+        # Best-effort client IP captured on enroll/heartbeat, shown on the
+        # runners page so it's easy to ssh into a specific machine — see
+        # web/routes/runner_api.py.
+        "ALTER TABLE runners ADD COLUMN ip_address VARCHAR(64)",
+        # Service snaps (daemon-only, no UI) skip the smoke test entirely
+        # — see Snap.is_service in db/models.py.
+        "ALTER TABLE snaps ADD COLUMN is_service BOOLEAN DEFAULT 0",
+        # Needed to replay a failed CopilotTask dispatch exactly (Retry) —
+        # see db/models.CopilotTask.base_ref.
+        "ALTER TABLE copilot_tasks ADD COLUMN base_ref VARCHAR(255)",
+        # Full captured log for every agent run — see agents/base.py's
+        # ``_ThreadLogCapture`` handler and db/models.AgentRun.log_output.
+        "ALTER TABLE agent_runs ADD COLUMN log_output TEXT",
     ]
     with engine.connect() as conn:
         for sql in migrations:

@@ -13,7 +13,9 @@
       model, see <a href="/settings">Settings</a> to configure the coding-task backend.
     </p>
   </div>
-  <form method="post" action="/copilot-tasks/refresh-all">
+  <form method="post" action="/copilot-tasks/refresh-all"
+        hx-post="/copilot-tasks/refresh-all" hx-target="#page-content" hx-select="#page-content"
+        hx-swap="innerHTML" hx-disabled-elt="find button">
     <button type="submit" class="p-button">Refresh All Statuses</button>
   </form>
 </div>
@@ -70,8 +72,17 @@
         <td class="text-muted small">{{ t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '' }}</td>
         <td>
           {% if not t.is_terminal %}
-          <form method="post" action="/copilot-tasks/{{ t.id }}/refresh">
+          <form method="post" action="/copilot-tasks/{{ t.id }}/refresh"
+                hx-post="/copilot-tasks/{{ t.id }}/refresh" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button">
             <button type="submit" class="p-button is-small">Refresh</button>
+          </form>
+          {% elif t.can_retry %}
+          <form method="post" action="/copilot-tasks/{{ t.id }}/retry"
+                hx-post="/copilot-tasks/{{ t.id }}/retry" hx-target="#page-content" hx-select="#page-content"
+                hx-swap="innerHTML" hx-disabled-elt="find button"
+                onsubmit="return confirm('Retry this task? It will re-dispatch the same prompt as a new task.');">
+            <button type="submit" class="p-button is-small">↺ Retry</button>
           </form>
           {% endif %}
         </td>

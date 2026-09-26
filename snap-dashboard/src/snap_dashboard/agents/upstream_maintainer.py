@@ -25,12 +25,18 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from snap_dashboard.agents.base import BaseAgent
-from snap_dashboard.agents.coding_backend import CodingDispatcher, get_coding_dispatcher, task_result_fields
+from snap_dashboard.agents.coding_backend import (
+    RETRY_ELIGIBLE_STATUSES,
+    CodingDispatcher,
+    get_coding_dispatcher,
+    task_result_fields,
+)
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.copilot_agent import CopilotAgentClient
-from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.github.bot_client import BotGitHubClient
+from snap_dashboard.github.utils import is_owned_by, parse_owner_repo
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +70,7 @@ class UpstreamMaintainerAgent(BaseAgent):
         token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "")
         if not token:
             return "no GitHub token configured"
+        read_token = getattr(uc, "github_token", "") or token
 
         with get_session() as session:
             user = session.query(User).get(self.user_id)
@@ -88,25 +95,22 @@ class UpstreamMaintainerAgent(BaseAgent):
                 continue
             owner, repo = owner_repo
             self._report(f"Maintaining {upstream_repo}", snap_name)
-            actions.append(self._maybe_dep_update(client, snap_id, owner, repo, token))
+            actions.append(self._maybe_dep_update(client, snap_id, owner, repo, token, read_token))
             actions.append(self._maybe_request_reviews(client, owner, repo, token))
-            actions.append(self._maybe_triage_issues(client, snap_id, owner, repo, token))
+            actions.append(self._maybe_triage_issues(client, snap_id, owner, repo, token, read_token))
 
         done = [a for a in actions if a]
         return f"checked {len(upstream_repos)} upstream repo(s), {len(done)} action(s) taken"
 
     @staticmethod
     def _owned_by(upstream_repo: str, login: str) -> bool:
-        owner_repo = parse_owner_repo(upstream_repo)
-        if not owner_repo or not login:
-            return False
-        return owner_repo[0].lower() == login
+        return is_owned_by(upstream_repo, login)
 
     # ------------------------------------------------------------------
     # Dependency updates
     # ------------------------------------------------------------------
 
-    def _maybe_dep_update(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str) -> bool:
+    def _maybe_dep_update(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str, read_token: str | None = None) -> bool:
         owner_repo = f"{owner}/{repo}"
         cutoff = datetime.now(timezone.utc) - timedelta(days=_DEP_UPDATE_COOLDOWN_DAYS)
         with get_session() as session:
@@ -129,7 +133,8 @@ class UpstreamMaintainerAgent(BaseAgent):
             "a pull request with the dependency bumps. Skip if everything is already "
             "up to date — don't open an empty PR."
         )
-        task = client.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        base_ref = BotGitHubClient(token, read_token=read_token or token).get_default_branch(owner, repo)
+        task = client.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -138,7 +143,8 @@ class UpstreamMaintainerAgent(BaseAgent):
                     kind="dep_update",
                     owner_repo=owner_repo,
                     prompt=prompt,
-                    **task_result_fields(task),
+                    base_ref=base_ref,
+                    **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                 )
             )
         return bool(task)
@@ -182,7 +188,7 @@ class UpstreamMaintainerAgent(BaseAgent):
     # Issue triage / auto-fix attempts
     # ------------------------------------------------------------------
 
-    def _maybe_triage_issues(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str) -> bool:
+    def _maybe_triage_issues(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str, read_token: str | None = None) -> bool:
         owner_repo = f"{owner}/{repo}"
         try:
             with httpx.Client(timeout=15) as http:
@@ -202,15 +208,28 @@ class UpstreamMaintainerAgent(BaseAgent):
             return False
 
         with get_session() as session:
-            already_dispatched = {
-                t.issue_number
-                for t in session.query(CopilotTask)
+            # Only issue numbers whose latest issue_fix attempt is still in
+            # flight or succeeded block a re-dispatch — a failed attempt
+            # (e.g. no Copilot license at the time) shouldn't skip the issue
+            # forever (see RETRY_ELIGIBLE_STATUSES).
+            latest_status_by_issue: dict[int, str] = {}
+            for t in (
+                session.query(CopilotTask)
                 .filter(CopilotTask.kind == "issue_fix", CopilotTask.owner_repo == owner_repo)
+                .order_by(CopilotTask.id.asc())
                 .all()
+            ):
+                if t.issue_number is not None:
+                    latest_status_by_issue[t.issue_number] = t.status or ""
+            already_dispatched = {
+                number
+                for number, status in latest_status_by_issue.items()
+                if status not in RETRY_ELIGIBLE_STATUSES
             }
 
         dispatched = 0
         acted = False
+        base_ref = BotGitHubClient(token, read_token=read_token or token).get_default_branch(owner, repo)
         for issue in issues:
             if dispatched >= _MAX_ISSUES_PER_RUN:
                 break
@@ -225,7 +244,7 @@ class UpstreamMaintainerAgent(BaseAgent):
                 "decision, or you're not confident in a safe fix, leave a comment "
                 "explaining what's needed instead of guessing."
             )
-            task = client.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+            task = client.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
             with get_session() as session:
                 session.add(
                     CopilotTask(
@@ -235,7 +254,8 @@ class UpstreamMaintainerAgent(BaseAgent):
                         owner_repo=owner_repo,
                         prompt=prompt,
                         issue_number=number,
-                        **task_result_fields(task),
+                        base_ref=base_ref,
+                        **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                     )
                 )
             dispatched += 1

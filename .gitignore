@@ -27,6 +27,11 @@ prime/
 stage/
 .snapcraft/
 
+# Commit stamp written by CI just before `snapcraft pack`, so the built
+# snap's version can be traced back to an exact commit (see snapcraft.yaml
+# override-pull and .github/workflows/snap-publish.yml / build-runner.yml)
+.git-commit
+
 # Editor
 .vscode/
 .idea/

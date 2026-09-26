@@ -5,20 +5,24 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    PlainTextResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import AgentRun, TestRun, UpstreamRelease, VersionBumpPR
 from snap_dashboard.db.session import get_session
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 
 # ---------------------------------------------------------------------------
@@ -98,7 +102,7 @@ def agent_status(request: Request) -> JSONResponse:
         standalone_yarf_running = 0
         standalone_under_review = 0
         standalone_approved = 0
-        standalone_merged = 0
+        standalone_released = 0
         for r in standalone_runs:
             if r.status in ("triggered", "running"):
                 standalone_yarf_running += 1
@@ -110,7 +114,11 @@ def agent_status(request: Request) -> JSONResponse:
                 else:
                     standalone_under_review += 1
             elif r.status == "promoted":
-                standalone_merged += 1
+                # release_set.py sets this once a release set has actually
+                # been promoted to stable — i.e. "released", not merely
+                # "merged" (there's no PR/merge step at all for standalone
+                # runs against manually-added snaps).
+                standalone_released += 1
 
         pipeline = {
             "new_releases": new_releases,
@@ -118,9 +126,15 @@ def agent_status(request: Request) -> JSONResponse:
             "yarf_running": _bump_count("yarf_running") + standalone_yarf_running,
             "under_review": _bump_count("yarf_passed", "yarf_failed", "needs_review") + standalone_under_review,
             "approved": _bump_count("agent_approved") + standalone_approved,
-            "merged": _bump_count(
-                "merged", "awaiting_release", "candidate_testing", "stable_promoted", "stable_promoted_partial"
-            ) + standalone_merged,
+            # "Merged" = the PR merged on GitHub but not yet published/
+            # released anywhere. "Released" = actually shipped — published
+            # to edge and promoted through candidate to stable. These used
+            # to be lumped into a single misleading "merged" bucket that
+            # also counted fully-stable-released snaps.
+            "merged": _bump_count("merged", "awaiting_release"),
+            "released": _bump_count(
+                "candidate_testing", "stable_promoted", "stable_promoted_partial"
+            ) + standalone_released,
         }
 
         # Recent agent run history (last 20)
@@ -143,6 +157,7 @@ def agent_status(request: Request) -> JSONResponse:
                     int((r.finished_at - r.started_at).total_seconds())
                     if r.finished_at and r.started_at else None
                 ),
+                "has_log": bool(r.log_output),
             }
             for r in recent_runs
         ]
@@ -152,6 +167,7 @@ def agent_status(request: Request) -> JSONResponse:
     lemonade_model = uc.lemonade_model or ""
     lemonade_backend = getattr(uc, "lemonade_backend", "") or "embedded"
     lemonade_available = False
+    lemonade_models: list[str] = []
     try:
         from snap_dashboard.lemonade.client import get_lemonade_client
         client = get_lemonade_client(uc)  # never blocks — reflects current state only
@@ -159,6 +175,8 @@ def agent_status(request: Request) -> JSONResponse:
             lemonade_url = client.base_url
             lemonade_model = client.model
             lemonade_available = client.is_available()
+            if lemonade_available:
+                lemonade_models = client.list_models()
     except Exception:
         pass
 
@@ -174,6 +192,7 @@ def agent_status(request: Request) -> JSONResponse:
             "available": lemonade_available,
             "url": lemonade_url,
             "model": lemonade_model,
+            "models": lemonade_models,
             "backend": lemonade_backend,
             "inferencing": any(
                 "Lemonade AI" in v.get("task", "") or "⚡" in v.get("task", "")
@@ -183,6 +202,98 @@ def agent_status(request: Request) -> JSONResponse:
         "schedules": schedules,
         "activity_seq": get_tracker().latest_seq(),
     })
+
+
+@router.get("/agents/runs", response_class=HTMLResponse)
+async def agent_runs_page(
+    request: Request,
+    agent_type: str = "",
+    status: str = "",
+    page: int = 1,
+) -> HTMLResponse:
+    """Full, filterable, paginated history of every agent run — the "find any
+    run's logs" page linked from the Agent Fleet dashboard's nav/header.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    page = max(1, page)
+    page_size = 50
+
+    with get_session() as session:
+        query = session.query(AgentRun).filter_by(user_id=user_id)
+        if agent_type:
+            query = query.filter(AgentRun.agent_type == agent_type)
+        if status:
+            query = query.filter(AgentRun.status == status)
+
+        total = query.count()
+        runs = (
+            query.order_by(AgentRun.started_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        agent_types = sorted(
+            t for (t,) in session.query(AgentRun.agent_type).filter_by(user_id=user_id).distinct().all()
+        )
+
+        rows = [
+            {
+                "id": r.id,
+                "agent_type": r.agent_type,
+                "snap_name": r.snap_name or "",
+                "status": r.status,
+                "summary": r.result_summary or r.error_msg or "",
+                "started_at": r.started_at.strftime("%Y-%m-%d %H:%M:%S") if r.started_at else "",
+                "duration_s": (
+                    int((r.finished_at - r.started_at).total_seconds())
+                    if r.finished_at and r.started_at else None
+                ),
+                "has_log": bool(r.log_output),
+            }
+            for r in runs
+        ]
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+
+    return templates.TemplateResponse(
+        request,
+        "agent_runs.html",
+        {
+            "current_user": user,
+            "runs": rows,
+            "agent_types": agent_types,
+            "selected_agent_type": agent_type,
+            "selected_status": status,
+            "page": page,
+            "total_pages": total_pages,
+            "total": total,
+        },
+    )
+
+
+@router.get("/agents/runs/{run_id}/log", response_class=PlainTextResponse)
+async def agent_run_log(run_id: int, request: Request) -> PlainTextResponse:
+    """Return the raw log captured for a single agent run.
+
+    Plain text — same convention as ``/testing/runs/{id}/log`` — so it's easy
+    to view in-browser, download, or curl without any JS/modal plumbing.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return PlainTextResponse("Not authenticated", status_code=401)
+
+    user_id = user["id"]
+    with get_session() as session:
+        run = session.query(AgentRun).filter_by(id=run_id, user_id=user_id).first()
+        if run is None:
+            return PlainTextResponse("Run not found", status_code=404)
+        log = run.log_output or "(no log captured for this run)"
+
+    return PlainTextResponse(log)
 
 
 @router.post("/agents/scan-now")
@@ -206,19 +317,12 @@ async def test_lemonade(request: Request) -> JSONResponse:
     try:
         import asyncio
 
-        import httpx
-
         from snap_dashboard.lemonade.client import get_lemonade_client
 
         def _probe():
             client = get_lemonade_client(uc, ensure_started=True)
             available = client.is_available() if client else False
-            models: list[str] = []
-            if client and available:
-                with httpx.Client(timeout=5) as hc:
-                    resp = hc.get(f"{client.base_url}/v1/models", headers=client._headers())
-                if resp.status_code == 200:
-                    models = [m.get("id", "") for m in resp.json().get("data", [])]
+            models = client.list_models() if client and available else []
             return client, available, models
 
         client, available, models = await asyncio.to_thread(_probe)

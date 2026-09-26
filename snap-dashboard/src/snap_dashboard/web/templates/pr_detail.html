@@ -15,9 +15,21 @@
       {{ run.version or '' }}
       {% if run.revision %}&nbsp;(rev {{ run.revision }}){% endif %}
     </p>
+    <p class="text-muted small" style="margin-top: 2px;">
+      {% if run.started_at %}
+      Started {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+      {% endif %}
+      {% if run.finished_at %}
+      &nbsp;&middot;&nbsp;Finished {{ run.finished_at.strftime('%Y-%m-%d %H:%M:%S') }} UTC
+      {% endif %}
+    </p>
   </div>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    {% if run.status == 'passed' %}
+    {% if run.status == 'passed' and run.review_decision == 'reject' %}
+    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Rejected by AI review</span>
+    {% elif run.status == 'passed' and run.review_decision == 'needs_review' %}
+    <span class="p-status-label p-status-label--caution" style="font-size:13px; padding: 4px 12px;">Needs review</span>
+    {% elif run.status == 'passed' %}
     <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
     {% elif run.status == 'failed' %}
     <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
@@ -47,6 +59,8 @@
   <pre style="white-space: pre-wrap; font-size: 12px; margin-top: 8px;">{{ error }}</pre>
 </div>
 {% endif %}
+
+{% include "_failure_analysis.html" %}
 
 <!-- ================================================================
      METADATA

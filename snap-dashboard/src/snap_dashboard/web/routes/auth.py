@@ -5,22 +5,20 @@ from __future__ import annotations
 import logging
 import secrets
 from datetime import datetime, timezone
-from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Request
 from sqlalchemy import func
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 
 from snap_dashboard.config import get_config
 from snap_dashboard.db.models import AllowlistedUser, User, UserConfig
 from snap_dashboard.db.session import get_session
+from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 _GH_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 _GH_TOKEN_URL = "https://github.com/login/oauth/access_token"

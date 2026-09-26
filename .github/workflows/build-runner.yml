@@ -1,0 +1,39 @@
+name: Build automated-ken-runner
+
+# Builds the automated-ken-runner snap for amd64 and arm64 on every
+# commit and uploads the resulting .snap files as workflow artifacts.
+# Publishing is intentionally NOT done yet.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runs-on: ubuntu-latest
+          - arch: arm64
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Record commit for snap versioning
+        run: echo "${GITHUB_SHA:0:7}" > automated-ken-runner/.git-commit
+
+      - name: Build snap
+        id: build
+        uses: snapcore/action-build@v1
+        with:
+          path: automated-ken-runner
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: automated-ken-runner-${{ matrix.arch }}
+          path: ${{ steps.build.outputs.snap }}

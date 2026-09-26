@@ -42,13 +42,17 @@ _APP_SETTLE_SECONDS = 15
 _APP_LAUNCH_TIMEOUT_SECONDS = 30
 # Terminal emulator used to run "console app" snaps (see Snap.is_console_app)
 # so their text UI actually renders on-screen for the screenshot instead of
-# running headless with nothing to capture. xterm is used rather than
-# gnome-terminal because it *is* the window process itself (killing it
-# reliably closes the window); gnome-terminal is a client of a persistent
-# gnome-terminal-server, so killing the launching process doesn't
-# necessarily close the window it opened. xterm runs fine under GNOME's
-# Wayland session via XWayland, which every stock Ubuntu GNOME desktop has.
-_CONSOLE_TERMINAL = "xterm"
+# running headless with nothing to capture. `ptyxis -- CMD` (rather than
+# `gnome-terminal -- CMD`) is used because it *is* the window process itself
+# — killing it reliably closes the window; gnome-terminal is a client of a
+# persistent gnome-terminal-server, so killing the launching process doesn't
+# necessarily close the window it opened. Using `--` (rather than `--tab`/
+# `--new-window`, which reuse an existing running instance) implies single-
+# instance/standalone mode, so this spawns its own dedicated window process
+# — confirmed it exits (and closes its window) as soon as that process is
+# killed, same as xterm. ptyxis is the default terminal on stock Ubuntu
+# GNOME desktops (24.04+), unlike xterm which usually isn't installed.
+_CONSOLE_TERMINAL = "ptyxis"
 
 
 def _desktop_env() -> str:
@@ -57,9 +61,51 @@ def _desktop_env() -> str:
     return os.environ.get("XDG_CURRENT_DESKTOP", "") or os.environ.get("DESKTOP_SESSION", "")
 
 
+# Variables this snap's own classic-confinement wrapper (see
+# snap/local/command-chain/python-env.sh) sets on *this* process so its
+# bundled interpreter can find its own stdlib/site-packages — classic
+# confinement means `snap run` does not sandbox/reset these the way it
+# would for a strictly-confined app, so they sit in our own
+# ``os.environ`` for the lifetime of the service. If forwarded unchanged
+# into a *different*, strictly-confined snap's ``snap run`` (e.g. the
+# app under test), PYTHONHOME/PYTHONPATH silently redirect that other
+# snap's bundled Python interpreter to search *our* prefix
+# (``$SNAP/usr`` for automated-ken-runner) instead of its own — this was
+# confirmed as the root cause of a target snap (infinity-arcade) crashing
+# with ``ModuleNotFoundError: No module named '_contextvars'`` (its own
+# interpreter fell back to loading stdlib .py files off a content-snap
+# path while PYTHONHOME pointed it at the runner's prefix, which has no
+# matching compiled extension there).
+_RUNNER_ENV_LEAK_KEYS = {"PYTHONHOME", "PYTHONPATH", "PYTHONUSERBASE", "PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE"}
+# Any SNAP*/LD_* variable in our own env describes *this* snap
+# (automated-ken-runner) — none of these are meaningful, and some are
+# actively misleading (e.g. a stale ``SNAP=/snap/automated-ken-runner/x``
+# or an ``LD_LIBRARY_PATH`` pointing at our own bundled libs) for a
+# wholly unrelated target snap being launched for testing.
+_RUNNER_ENV_LEAK_PREFIXES = ("SNAP", "LD_LIBRARY_PATH", "LD_PRELOAD")
+
+
+def _strip_own_snap_env(env: dict[str, str]) -> dict[str, str]:
+    """Drop this classic snap's own interpreter/confinement env vars.
+
+    Call this on any environment about to be handed to a *different*
+    snap's ``snap run`` (or similar) so our own classic-confinement
+    plumbing doesn't leak into and corrupt it. See ``_RUNNER_ENV_LEAK_KEYS``
+    / ``_RUNNER_ENV_LEAK_PREFIXES`` for what's stripped and why.
+    """
+    return {
+        key: value
+        for key, value in env.items()
+        if key not in _RUNNER_ENV_LEAK_KEYS
+        and not any(key.startswith(prefix) for prefix in _RUNNER_ENV_LEAK_PREFIXES)
+    }
+
+
 def _live_session_env() -> dict[str, str]:
     """This process's own env, patched with the *current* systemd --user
-    manager environment for graphical-session variables.
+    manager environment for graphical-session variables, with this
+    snap's own classic-confinement env vars stripped (see
+    ``_strip_own_snap_env``) so they don't leak into the snap under test.
 
     This service can be started (at boot, or by ``systemctl --user
     restart``) before the desktop session finishes importing DISPLAY/
@@ -71,7 +117,7 @@ def _live_session_env() -> dict[str, str]:
     "Vnc" platform (no VNC server running) on a real graphical runner,
     and would equally break ``snap run`` for the no-suite smoke test.
     """
-    env = dict(os.environ)
+    env = _strip_own_snap_env(dict(os.environ))
     try:
         result = subprocess.run(
             ["systemctl", "--user", "show-environment"],
@@ -214,10 +260,11 @@ class RunnerLoop:
         snap_name = job["snap_name"]
         channel = job.get("channel", "stable")
         is_console_app = bool(job.get("is_console_app", False))
+        is_service = bool(job.get("is_service", False))
         logger.info(
             "Claimed job %s: %s (%s, %s)%s",
             job_id, snap_name, channel, job.get("architecture", ""),
-            " [console app]" if is_console_app else "",
+            " [service]" if is_service else " [console app]" if is_console_app else "",
         )
         self._report_status(job_id, "running")
 
@@ -232,6 +279,18 @@ class RunnerLoop:
             try:
                 self._install_snap(snap_name, channel, _log)
                 self._check_cancelled()
+                if is_service:
+                    # Services (Snap.is_service) have no UI at all — nothing
+                    # to launch on a desktop or in a terminal, and nothing to
+                    # screenshot. The install above already confirms the
+                    # package itself is good, so that's the whole test.
+                    _log(
+                        "smoke test",
+                        "Skipped — this snap is marked as a service with no "
+                        "UI to test. Install succeeded, so this run passes.",
+                    )
+                    self._report_status(job_id, "passed", log="\n".join(log_lines))
+                    return
                 # Every snap gets the same generic smoke test now — no
                 # per-repo Robot/YARF suite support. yarf has no working
                 # platform against a real GNOME session anyway (see
@@ -269,7 +328,7 @@ class RunnerLoop:
             ["snap", "info", snap_name], capture_output=True, timeout=30, check=False
         )
         needs_classic = self._snap_needs_classic(
-            (info.stdout or b"").decode(errors="replace")
+            (info.stdout or b"").decode(errors="replace"), channel
         )
         installed = subprocess.run(
             ["snap", "list", snap_name], capture_output=True, timeout=15, check=False
@@ -286,20 +345,61 @@ class RunnerLoop:
         proc.check_returncode()
 
     @staticmethod
-    def _snap_needs_classic(snap_info_output: str) -> bool:
-        """Return True if ``snap info``'s output reports classic confinement.
+    def _snap_needs_classic(snap_info_output: str, channel: str) -> bool:
+        """Return True if ``snap info`` reports *channel* as classic confinement.
 
         Classic-confinement snaps (e.g. fresh-editor) refuse ``snap
         install``/``refresh`` without an explicit ``--classic`` flag —
         this reads that requirement straight from the store metadata
         every job already fetches, so no per-snap runner config is
         needed to know which ones need it.
+
+        Modern ``snap info`` has no single top-level ``confinement:``
+        field — confinement is only shown per line in the ``channels:``
+        block, as a trailing ``classic`` word after the size, e.g.::
+
+            channels:
+              latest/stable:    0.4.6 2026-08-06 (10) 10.5MB classic
+              latest/candidate: 0.5.1 2026-09-25 (14) 11.4MB classic
+
+        so this looks at the specific ``<track>/<channel>`` line being
+        installed (falling back to any channel line, then the
+        ``installed:`` line, if that exact one is a "^" placeholder
+        pointing at another channel or otherwise missing).
         """
-        for line in snap_info_output.splitlines():
-            key, sep, value = line.partition(":")
-            if sep and key.strip() == "confinement":
-                return value.strip() == "classic"
-        return False
+        channel_lines: list[str] = []
+        installed_line = ""
+        in_channels = False
+        for raw_line in snap_info_output.splitlines():
+            if raw_line.startswith("channels:"):
+                in_channels = True
+                continue
+            if raw_line.startswith("installed:"):
+                in_channels = False
+                installed_line = raw_line
+                continue
+            if in_channels:
+                if not raw_line.startswith((" ", "\t")):
+                    in_channels = False
+                    continue
+                stripped = raw_line.strip()
+                track_channel, sep, rest = stripped.partition(":")
+                if not sep:
+                    continue
+                risk = track_channel.rsplit("/", 1)[-1]
+                if "^" in rest:
+                    continue
+                if risk == channel:
+                    return "classic" in rest.split()
+                channel_lines.append(rest)
+
+        # Exact channel wasn't listed (e.g. it's a "^" alias for another
+        # channel) — any channel line reflects the snap's confinement
+        # just as well since it practically never varies by channel.
+        for rest in channel_lines:
+            return "classic" in rest.split()
+        return "classic" in installed_line.split()
+
 
     def _run_desktop_smoke_test(
         self, snap_name: str, is_console_app: bool, tmp_path: Path, log: Callable[[str, str], None]
@@ -330,7 +430,7 @@ class RunnerLoop:
                     f"install it with 'sudo apt install {_CONSOLE_TERMINAL}'",
                 )
                 return False, []
-            cmd = [_CONSOLE_TERMINAL, "-e", "snap", "run", snap_name]
+            cmd = [_CONSOLE_TERMINAL, "--", "snap", "run", snap_name]
         else:
             cmd = ["snap", "run", snap_name]
         # Logged unconditionally (not just on failure) — a launch that never
