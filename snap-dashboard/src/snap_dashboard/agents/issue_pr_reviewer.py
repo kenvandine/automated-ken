@@ -4,7 +4,7 @@ Triggered manually from the snap detail page's "Review Issues & PRs"
 button. Pulls every open issue and PR from the snap's packaging repo (and
 its upstream repo too, if it's a separate one), summarizes what needs
 attention in plain English, and stores the result (``IssueReviewReport``)
-so the page can show it plus a per-item "Address with Copilot" action —
+so the page can show it plus a per-item "Assign an agent" action —
 reusing the same ``issue_fix``-style dispatch ``UpstreamMaintainerAgent``
 uses for its own automatic issue triage, just user-initiated and covering
 PRs too (requesting a Copilot review) rather than only issues.
@@ -257,7 +257,7 @@ class IssuePrReviewAgent(BaseAgent):
 
 
 class AddressReviewItemAgent(BaseAgent):
-    """"Address with Copilot" action for a single item flagged by ``IssuePrReviewAgent``.
+    """"Assign an agent" action for a single item flagged by ``IssuePrReviewAgent``.
 
     An issue gets the same ``issue_fix`` treatment ``UpstreamMaintainerAgent``
     dispatches automatically for repos the user maintains upstream — an

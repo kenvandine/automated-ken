@@ -2,7 +2,7 @@
 
 Exercises the "Review Issues & PRs" summary flow (heuristic and LLM
 summarization paths, persistence to IssueReviewReport) and the per-item
-"Address with Copilot" dispatch (issue_fix vs. pr_review_request), all
+"Assign an agent" dispatch (issue_fix vs. pr_review_request), all
 against an isolated in-memory database with GitHub/Copilot network calls
 replaced by fakes.
 """

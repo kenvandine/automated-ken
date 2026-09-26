@@ -79,7 +79,7 @@ def test_renders_with_review_items_without_dict_items_shadowing_bug() -> None:
     }
     html = templates.env.get_template("snap_detail.html").render(_base_context(review_report))
     assert "Crash on launch" in html
-    assert "Address with Copilot" in html
+    assert "Assign an agent" in html
 
 
 def test_renders_with_no_review_report() -> None:
