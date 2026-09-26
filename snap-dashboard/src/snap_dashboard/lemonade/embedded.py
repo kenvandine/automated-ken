@@ -43,6 +43,12 @@ _RELEASES_API = "https://api.github.com/repos/lemonade-sdk/lemonade/releases/lat
 _HEALTH_TIMEOUT_SECONDS = 90
 _HEALTH_POLL_INTERVAL = 2
 _PULL_TIMEOUT_SECONDS = 1800  # multi-gigabyte model weights can take a while
+_RELOAD_TIMEOUT_SECONDS = 120
+# Restarting the subprocess is a heavy, disruptive last resort (drops every
+# in-flight request and re-triggers cold model loads) — this cooldown stops
+# a genuinely broken/unfixable install from thrashing (restart, fail again
+# in seconds, restart again, ...) once every request that touches Lemonade.
+_RESTART_COOLDOWN_SECONDS = 120
 
 # Kept for backward compatibility with anything importing the old single
 # default model name — opinionated defaults now vary per task, see
@@ -212,6 +218,8 @@ class EmbeddedLemonadeManager:
         self._start_attempted = False
         self._pulled_models: set[str] = set()
         self._pull_lock = threading.Lock()
+        self._restart_lock = threading.Lock()
+        self._last_restart_at: float = 0.0
 
     @staticmethod
     def _generate_and_persist_api_key() -> str:
@@ -361,6 +369,74 @@ class EmbeddedLemonadeManager:
                     )
         except httpx.HTTPError as exc:
             logger.info("Embedded Lemonade: background model pull for %s did not complete: %s", model, exc)
+
+    def reload_model(self, model: str, ctx_size: int | None = None) -> bool:
+        """Ask lemond to (re)load ``model`` — a lighter first-resort fix.
+
+        Called by ``LemonadeClient`` (see ``lemonade/client.py``'s
+        ``_post_chat_completion``) when repeated requests against an
+        already-running server keep failing: a stuck/corrupted model
+        session can often be recovered by asking the server to reload it,
+        without the disruption of a full process restart. Synchronous and
+        bounded (``_RELOAD_TIMEOUT_SECONDS``) since this only ever runs as
+        one step of an already-failing request's own recovery, not on the
+        hot path. Returns ``False`` (without raising) if the server isn't
+        even reachable — that's the ``restart()`` escalation's job.
+        """
+        if not model or not self.is_running():
+            return False
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        try:
+            with httpx.Client(timeout=_RELOAD_TIMEOUT_SECONDS) as client:
+                resp = client.post(
+                    f"{self.base_url}/v1/load",
+                    json={"model_name": model, "ctx_size": ctx_size, "save_options": True}
+                    if ctx_size
+                    else {"model_name": model},
+                    headers=headers,
+                )
+            healthy = resp.status_code == 200
+        except httpx.HTTPError as exc:
+            logger.warning("Embedded Lemonade: reload_model(%s) failed: %s", model, exc)
+            return False
+        if healthy:
+            logger.info("Embedded Lemonade: reloaded model %s", model)
+        else:
+            logger.warning(
+                "Embedded Lemonade: reload_model(%s) got HTTP %s: %s",
+                model, resp.status_code, resp.text[:200],
+            )
+        return healthy
+
+    def restart(self, reason: str = "") -> bool:
+        """Forcibly kill and relaunch the lemond subprocess — last resort.
+
+        Guarded by ``_RESTART_COOLDOWN_SECONDS`` so a genuinely broken
+        install (e.g. a corrupted backend/model cache) can't be thrashed —
+        restarted, fail again within seconds, restarted again — by every
+        request that happens to hit Lemonade while it's down. If the
+        cooldown is active this just reports current health without
+        touching the process.
+        """
+        with self._restart_lock:
+            now = time.monotonic()
+            if now - self._last_restart_at < _RESTART_COOLDOWN_SECONDS:
+                logger.info(
+                    "Embedded Lemonade: restart requested (%s) but skipped — "
+                    "restarted %.0fs ago (cooldown %ds)",
+                    reason or "no reason given", now - self._last_restart_at, _RESTART_COOLDOWN_SECONDS,
+                )
+                return self.is_running()
+            self._last_restart_at = now
+            logger.warning("Embedded Lemonade: restarting lemond (%s)", reason or "no reason given")
+            self.stop()
+            # The new process starts with nothing loaded — forget what we
+            # thought was pulled so ensure_started()'s warm-up re-issues a
+            # fresh /v1/load for every opinionated per-task model instead
+            # of assuming they're still resident.
+            with self._pull_lock:
+                self._pulled_models.clear()
+            return self.ensure_started()
 
     def stop(self) -> None:
         with self._lock:

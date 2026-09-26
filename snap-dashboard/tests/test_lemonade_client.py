@@ -110,6 +110,52 @@ class BackendSelectionTests(unittest.TestCase):
             TASK_MODELS[TASK_CODING], ctx_size=TASK_CONTEXT_SIZES[TASK_CODING]
         )
 
+    def test_ensure_started_wires_up_self_heal_callbacks(self) -> None:
+        # Background-agent-safe path (ensure_started=True): the returned
+        # client should be able to ask the manager to reload the model or
+        # restart lemond itself if requests keep failing.
+        with patch("snap_dashboard.lemonade.embedded.get_embedded_manager") as get_mgr:
+            manager = SimpleNamespace(
+                base_url="http://127.0.0.1:13411",
+                api_key="secret",
+                ensure_started=lambda: True,
+                ensure_model_pulled=lambda model, ctx_size=None: None,
+                reload_model=lambda model, ctx_size=None: True,
+                restart=lambda reason="": True,
+            )
+            get_mgr.return_value = manager
+            with (
+                patch.object(manager, "reload_model", return_value=True) as reload_model,
+                patch.object(manager, "restart", return_value=True) as restart,
+            ):
+                client = get_lemonade_client(_uc(), ensure_started=True, task=TASK_CODING)
+                names = [name for name, _fn in client.heal_callbacks]
+                self.assertEqual(names, ["reload_model", "restart_lemond"])
+                # Each callback actually delegates to the manager's own method.
+                for _name, fn in client.heal_callbacks:
+                    fn()
+            reload_model.assert_called_once_with(TASK_MODELS[TASK_CODING], ctx_size=TASK_CONTEXT_SIZES[TASK_CODING])
+            restart.assert_called_once()
+
+    def test_request_handling_path_has_no_self_heal_callbacks(self) -> None:
+        # ensure_started=False (the request-handling-safe default) must not
+        # wire up heal callbacks, since restart() can block for a while --
+        # unsafe on a request thread.
+        with patch("snap_dashboard.lemonade.embedded.get_embedded_manager") as get_mgr:
+            manager = SimpleNamespace(base_url="http://127.0.0.1:13411", api_key="secret")
+            get_mgr.return_value = manager
+            client = get_lemonade_client(_uc(), ensure_started=False, task=TASK_CODING)
+        self.assertEqual(client.heal_callbacks, [])
+
+    def test_system_backend_has_no_self_heal_callbacks(self) -> None:
+        # We don't own a self-managed lemonade-server's lifecycle.
+        uc = _uc(
+            lemonade_backend="system",
+            lemonade_server_url="http://gpu-box:8000",
+        )
+        client = get_lemonade_client(uc, ensure_started=True, task=TASK_CODING)
+        self.assertEqual(client.heal_callbacks, [])
+
 
 if __name__ == "__main__":
     unittest.main()

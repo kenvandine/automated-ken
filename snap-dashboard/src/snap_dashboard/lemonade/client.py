@@ -12,7 +12,7 @@ import base64
 import json
 import logging
 import time
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -52,11 +52,26 @@ class LemonadeClient:
     """Thin client for lemonade-server's OpenAI-compatible API."""
 
     def __init__(
-        self, base_url: str = _DEFAULT_URL, model: str = _DEFAULT_MODEL, api_key: str = ""
+        self,
+        base_url: str = _DEFAULT_URL,
+        model: str = _DEFAULT_MODEL,
+        api_key: str = "",
+        heal_callbacks: list[tuple[str, Callable[[], bool]]] | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model or _DEFAULT_MODEL
         self.api_key = api_key
+        # Escalating self-healing actions tried, in order, only after a
+        # request has already exhausted its normal retries — e.g. for the
+        # embedded backend: (1) ask lemond to reload this model, (2) if
+        # that doesn't help, kill and relaunch the lemond process itself.
+        # Each is a ``(name_for_logging, fn() -> bool)`` pair; ``fn``'s
+        # return value is only used for logging (we always re-attempt the
+        # request afterwards regardless), since even a reported failure
+        # there might still have left things in a working state.
+        # None/empty for the "system" (user-managed) backend, since we
+        # don't own that process's lifecycle.
+        self.heal_callbacks = heal_callbacks or []
 
     def _headers(self) -> dict[str, str]:
         if self.api_key:
@@ -99,16 +114,19 @@ class LemonadeClient:
     # Shared /v1/chat/completions POST with cold-load-aware retries
     # ------------------------------------------------------------------
 
-    def _post_chat_completion(
+    def _attempt_cycle(
         self, payload: dict, *, timeout: float, task: str
-    ) -> httpx.Response | None:
-        """POST to /v1/chat/completions, retrying transient/cold-load failures.
+    ) -> tuple[httpx.Response | None, int | None, str, Exception | None, bool]:
+        """Run one bounded (``_MAX_ATTEMPTS``) retry cycle against /v1/chat/completions.
 
-        Returns the successful ``Response`` (status 200), or ``None`` after
-        exhausting retries — always logged with enough detail (attempt
-        number, elapsed time, model, status/exception) to tell a genuine
-        outage apart from "the model was still loading" without needing to
-        reproduce the failure.
+        Returns ``(response_or_None, last_status, last_body, last_exc, worth_healing)``
+        — the middle three are only meaningful when the response is
+        ``None``, for the caller's own "giving up" logging. ``worth_healing``
+        is False for an immediate non-retryable client error (400/401/...),
+        since restarting/reloading Lemonade can't fix a malformed request or
+        a real permission problem — only True once actual retries against a
+        reachable-but-flaky server were exhausted, or the server couldn't be
+        reached at all (both plausibly fixable by self-healing).
         """
         last_status: int | None = None
         last_body: str = ""
@@ -137,7 +155,7 @@ class LemonadeClient:
                         "lemonade %s: succeeded in %.1fs on attempt %d/%d (model=%s)",
                         task, elapsed, attempt, _MAX_ATTEMPTS, self.model,
                     )
-                    return resp
+                    return resp, None, "", None, False
                 last_status = resp.status_code
                 last_body = resp.text[:300]
                 if resp.status_code not in _RETRYABLE_STATUS_CODES:
@@ -145,7 +163,7 @@ class LemonadeClient:
                         "lemonade %s: HTTP %s (non-retryable) after %.1fs (model=%s): %s",
                         task, resp.status_code, elapsed, self.model, last_body,
                     )
-                    return None
+                    return None, last_status, last_body, None, False
                 logger.info(
                     "lemonade %s: HTTP %s on attempt %d/%d (model=%s, %.1fs) — likely "
                     "still cold-loading/pulling the model, retrying: %s",
@@ -154,15 +172,67 @@ class LemonadeClient:
             if attempt < _MAX_ATTEMPTS:
                 time.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
 
+        return None, last_status, last_body, last_exc, True
+
+    def _post_chat_completion(
+        self, payload: dict, *, timeout: float, task: str
+    ) -> httpx.Response | None:
+        """POST to /v1/chat/completions, retrying transient/cold-load failures.
+
+        Runs one bounded retry cycle (``_attempt_cycle``); if every attempt
+        in it fails, escalates through ``self.heal_callbacks`` in order
+        (e.g. for the embedded backend: reload the model, then — as a last
+        resort — restart the lemond process itself), running one more full
+        retry cycle after each healing action. This is what lets an agent's
+        single ``chat()``/``vision_*()`` call transparently "self-heal and
+        retry" instead of the caller (or the runner) needing its own
+        job-level retry logic. Returns ``None`` (always logged) only once
+        every heal stage has also failed to fix things.
+        """
+        resp, last_status, last_body, last_exc, worth_healing = self._attempt_cycle(
+            payload, timeout=timeout, task=task
+        )
+        if resp is not None:
+            return resp
+
+        if not worth_healing:
+            # A non-retryable client error (bad request, auth, ...) — no
+            # amount of reloading/restarting Lemonade fixes that.
+            return None
+
+        for heal_name, heal_fn in self.heal_callbacks:
+            logger.warning(
+                "lemonade %s: exhausted %d attempts (model=%s) — attempting self-heal step '%s'",
+                task, _MAX_ATTEMPTS, self.model, heal_name,
+            )
+            try:
+                healed = bool(heal_fn())
+            except Exception as exc:  # a broken heal step must not crash the caller
+                logger.warning("lemonade %s: self-heal step '%s' raised: %s", task, heal_name, exc)
+                healed = False
+            logger.info(
+                "lemonade %s: self-heal step '%s' reported %s — retrying request",
+                task, heal_name, "healthy" if healed else "still unhealthy",
+            )
+            resp, last_status, last_body, last_exc, worth_healing = self._attempt_cycle(
+                payload, timeout=timeout, task=task
+            )
+            if resp is not None:
+                logger.info("lemonade %s: succeeded after self-heal step '%s'", task, heal_name)
+                return resp
+            if not worth_healing:
+                break
+
         if last_status is not None:
             logger.warning(
-                "lemonade %s: giving up after %d attempts (model=%s), last status %s: %s",
-                task, _MAX_ATTEMPTS, self.model, last_status, last_body,
+                "lemonade %s: giving up after %d attempts and %d self-heal step(s) "
+                "(model=%s), last status %s: %s",
+                task, _MAX_ATTEMPTS, len(self.heal_callbacks), self.model, last_status, last_body,
             )
         else:
             logger.warning(
-                "lemonade %s: giving up after %d attempts (model=%s): %s",
-                task, _MAX_ATTEMPTS, self.model, last_exc,
+                "lemonade %s: giving up after %d attempts and %d self-heal step(s) (model=%s): %s",
+                task, _MAX_ATTEMPTS, len(self.heal_callbacks), self.model, last_exc,
             )
         return None
 
@@ -488,6 +558,11 @@ def get_lemonade_client(
     while (binary download) — and kick off a background pull+load of the
     selected model (sized with its opinionated context window, see
     ``lemonade.models.TASK_CONTEXT_SIZES``) if it hasn't been fetched yet.
+    It also wires up self-healing (reload the model, then restart lemond
+    as a last resort) for the returned client — also gated on
+    ``ensure_started`` since ``EmbeddedLemonadeManager.restart()`` blocks
+    for up to ``_HEALTH_TIMEOUT_SECONDS`` and must not run on a request
+    thread.
     """
     from snap_dashboard.lemonade.models import default_context_for, default_model_for
 
@@ -499,6 +574,9 @@ def get_lemonade_client(
         url = getattr(user_config, "lemonade_server_url", "") or ""
         if url:
             api_key = getattr(user_config, "lemonade_api_key", "") or ""
+            # We don't own the lifecycle of a self-managed server, so no
+            # self-heal callbacks — restarting/reloading someone else's
+            # process isn't ours to do.
             return LemonadeClient(base_url=url, model=task_model, api_key=api_key)
         # "system" selected but no URL configured yet — nothing to talk to.
         logger.warning(
@@ -509,11 +587,18 @@ def get_lemonade_client(
     from snap_dashboard.lemonade.embedded import get_embedded_manager
 
     manager = get_embedded_manager()
+    heal_callbacks: list[tuple[str, Callable[[], bool]]] = []
     if ensure_started:
         manager.ensure_started()
-        manager.ensure_model_pulled(task_model, ctx_size=default_context_for(task))
+        ctx_size = default_context_for(task)
+        manager.ensure_model_pulled(task_model, ctx_size=ctx_size)
+        heal_callbacks = [
+            ("reload_model", lambda: manager.reload_model(task_model, ctx_size=ctx_size)),
+            ("restart_lemond", lambda: manager.restart(reason=f"task={task} model={task_model}")),
+        ]
     return LemonadeClient(
         base_url=manager.base_url,
         model=task_model,
         api_key=manager.api_key,
+        heal_callbacks=heal_callbacks,
     )

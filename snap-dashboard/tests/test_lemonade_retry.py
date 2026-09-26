@@ -120,3 +120,121 @@ def test_json_decode_error_treated_as_parse_failure_not_retried():
     assert result is None
     assert scripted.calls == 1
     sleep.assert_not_called()
+
+
+# ----------------------------------------------------------------------
+# Self-healing escalation: once a full retry cycle is exhausted, heal_
+# callbacks (e.g. reload the model, then restart lemond) run in order,
+# each followed by one more full retry cycle, before finally giving up.
+# ----------------------------------------------------------------------
+
+
+def _client_with_heals(heal_callbacks) -> LemonadeClient:
+    client = LemonadeClient(base_url="http://localhost:13305", model="test-model")
+    client.heal_callbacks = heal_callbacks
+    return client
+
+
+def test_succeeds_after_first_heal_step():
+    # Exhausts the initial cycle (all 503s), then the request succeeds
+    # right after the first heal step runs.
+    scripted = _ScriptedClient(
+        [_FakeResp({}, status_code=503)] * _MAX_ATTEMPTS + [_reply_resp("recovered")]
+    )
+    reload_calls = []
+    restart_calls = []
+    client = _client_with_heals(
+        [
+            ("reload_model", lambda: (reload_calls.append(1), True)[1]),
+            ("restart_lemond", lambda: (restart_calls.append(1), True)[1]),
+        ]
+    )
+    with (
+        patch("httpx.Client", return_value=scripted),
+        patch("snap_dashboard.lemonade.client.record_model_usage"),
+        patch("snap_dashboard.lemonade.client.time.sleep"),
+    ):
+        result = client.chat("hi")
+    assert result == "recovered"
+    assert len(reload_calls) == 1
+    assert len(restart_calls) == 0  # never needed to escalate further
+
+
+def test_escalates_to_second_heal_step_if_first_does_not_fix_it():
+    # First cycle exhausted, heal step 1 (reload) runs but the retried
+    # cycle still fails, heal step 2 (restart) runs and then it succeeds.
+    scripted = _ScriptedClient(
+        [_FakeResp({}, status_code=503)] * _MAX_ATTEMPTS  # initial cycle
+        + [_FakeResp({}, status_code=503)] * _MAX_ATTEMPTS  # after reload
+        + [_reply_resp("recovered after restart")]  # after restart
+    )
+    calls = []
+    client = _client_with_heals(
+        [
+            ("reload_model", lambda: (calls.append("reload"), True)[1]),
+            ("restart_lemond", lambda: (calls.append("restart"), True)[1]),
+        ]
+    )
+    with (
+        patch("httpx.Client", return_value=scripted),
+        patch("snap_dashboard.lemonade.client.record_model_usage"),
+        patch("snap_dashboard.lemonade.client.time.sleep"),
+    ):
+        result = client.chat("hi")
+    assert result == "recovered after restart"
+    assert calls == ["reload", "restart"]
+
+
+def test_gives_up_after_all_heal_steps_exhausted():
+    scripted = _ScriptedClient([_FakeResp({}, status_code=503)] * (_MAX_ATTEMPTS * 3))
+    calls = []
+    client = _client_with_heals(
+        [
+            ("reload_model", lambda: (calls.append("reload"), False)[1]),
+            ("restart_lemond", lambda: (calls.append("restart"), False)[1]),
+        ]
+    )
+    with (
+        patch("httpx.Client", return_value=scripted),
+        patch("snap_dashboard.lemonade.client.time.sleep"),
+    ):
+        result = client.chat("hi")
+    assert result is None
+    assert calls == ["reload", "restart"]
+    assert scripted.calls == _MAX_ATTEMPTS * 3
+
+
+def test_non_retryable_status_skips_self_heal_entirely():
+    # A 400 is a real client-side error -- no amount of reloading/
+    # restarting lemond fixes a malformed request, so heal steps must
+    # never even be attempted.
+    scripted = _ScriptedClient([_FakeResp({}, status_code=400)])
+    calls = []
+    client = _client_with_heals([("reload_model", lambda: (calls.append("reload"), True)[1])])
+    with (
+        patch("httpx.Client", return_value=scripted),
+        patch("snap_dashboard.lemonade.client.time.sleep"),
+    ):
+        result = client.chat("hi")
+    assert result is None
+    assert calls == []
+    assert scripted.calls == 1
+
+
+def test_heal_step_exception_does_not_crash_the_caller():
+    scripted = _ScriptedClient(
+        [_FakeResp({}, status_code=503)] * _MAX_ATTEMPTS + [_reply_resp("still ok")]
+    )
+
+    def _broken_heal():
+        raise RuntimeError("manager exploded")
+
+    client = _client_with_heals([("reload_model", _broken_heal)])
+    with (
+        patch("httpx.Client", return_value=scripted),
+        patch("snap_dashboard.lemonade.client.record_model_usage"),
+        patch("snap_dashboard.lemonade.client.time.sleep"),
+    ):
+        result = client.chat("hi")
+    assert result == "still ok"  # heal step raising still allows the retry to proceed
+
