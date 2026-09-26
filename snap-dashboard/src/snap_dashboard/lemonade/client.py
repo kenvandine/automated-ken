@@ -278,6 +278,7 @@ class LemonadeClient:
         temperature: float = 0.2,
         max_tokens: int | None = None,
         timeout: float | None = None,
+        enable_thinking: bool = False,
     ) -> str | None:
         """Send a text-only chat request; return the assistant reply or None.
 
@@ -286,6 +287,16 @@ class LemonadeClient:
         coding backend (agents/coding_backend.py -> lemonade/coding_agent.py)
         asks for whole-file rewrites, which can be a lot longer than a PR
         description and can take longer to generate on CPU/iGPU.
+
+        ``enable_thinking`` defaults to False: our opinionated models (see
+        ``lemonade.models``) are Qwen3 reasoning models, which — unless
+        told otherwise via ``chat_template_kwargs.enable_thinking`` — emit
+        a hidden `<think>...</think>` block *before* the real answer. Every
+        caller here wants a bounded, structured final answer (a summary, a
+        JSON decision, PR text), not a transcript of the model's reasoning,
+        and a "small" ``max_tokens`` budget (as most of these calls use) can
+        get entirely consumed by that hidden reasoning, leaving ``content``
+        empty — see ``_extract_reply()``.
         """
         messages: list[dict[str, Any]] = []
         if system:
@@ -296,6 +307,7 @@ class LemonadeClient:
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
+            "chat_template_kwargs": {"enable_thinking": enable_thinking},
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
@@ -304,9 +316,11 @@ class LemonadeClient:
             return None
         try:
             resp_json = resp.json()
-            reply = resp_json["choices"][0]["message"]["content"]
+            reply = _extract_reply(resp_json, task="chat", model=self.model)
         except Exception as exc:
             logger.warning("lemonade chat: failed to parse response (model=%s): %s", self.model, exc)
+            return None
+        if reply is None:
             return None
         self._record_usage("chat", resp_json, prompt_text=f"{system}\n{prompt}", reply_text=reply)
         return reply
@@ -366,15 +380,18 @@ class LemonadeClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0.1,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         resp = self._post_chat_completion(payload, timeout=_TIMEOUT, task="vision_compare")
         if resp is None:
             return None
         try:
             resp_json = resp.json()
-            content = resp_json["choices"][0]["message"]["content"]
+            content = _extract_reply(resp_json, task="vision_compare", model=self.model)
         except Exception as exc:
             logger.warning("lemonade vision_compare: failed to parse response (model=%s): %s", self.model, exc)
+            return None
+        if content is None:
             return None
         self._record_usage(
             "vision_compare",
@@ -447,15 +464,18 @@ class LemonadeClient:
             "model": self.model,
             "messages": messages,
             "temperature": 0.1,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
         resp = self._post_chat_completion(payload, timeout=_TIMEOUT, task="vision_inspect")
         if resp is None:
             return None
         try:
             resp_json = resp.json()
-            content = resp_json["choices"][0]["message"]["content"]
+            content = _extract_reply(resp_json, task="vision_inspect", model=self.model)
         except Exception as exc:
             logger.warning("lemonade vision_inspect: failed to parse response (model=%s): %s", self.model, exc)
+            return None
+        if content is None:
             return None
         self._record_usage(
             "vision_inspect",
@@ -505,6 +525,38 @@ class LemonadeClient:
             return json.loads(result[start:end])
         except Exception:
             return None
+
+
+def _extract_reply(resp_json: dict, *, task: str, model: str) -> str | None:
+    """Pull the assistant's final answer out of a chat-completions response.
+
+    Reasoning models (our opinionated Qwen3 defaults — see
+    ``lemonade.models``) can return the OpenAI-compat message split across
+    two fields: ``content`` (the final answer) and ``reasoning_content``
+    (the hidden `<think>...</think>` chain-of-thought). Normally
+    ``enable_thinking: False`` (see ``LemonadeClient.chat()``) avoids this
+    entirely, but if a caller/model ignores that, or a small ``max_tokens``
+    budget still gets entirely consumed by reasoning before any final
+    answer token, ``content`` can come back empty even on a 200 response.
+    Falling back to ``reasoning_content`` in that case (loudly logged)
+    beats treating a real, non-empty model response as if the model never
+    replied at all.
+    """
+    message = resp_json["choices"][0]["message"]
+    content = (message.get("content") or "").strip()
+    if content:
+        return content
+    reasoning = (message.get("reasoning_content") or "").strip()
+    if reasoning:
+        logger.warning(
+            "lemonade %s: 'content' was empty but 'reasoning_content' was not "
+            "(model=%s) — likely thinking-mode output ate the max_tokens budget "
+            "before any final answer; using the reasoning text as a best-effort reply.",
+            task, model,
+        )
+        return reasoning
+    logger.warning("lemonade %s: response had no content or reasoning_content (model=%s)", task, model)
+    return None
 
 
 def _parse_vision_response(content: str) -> dict | None:
