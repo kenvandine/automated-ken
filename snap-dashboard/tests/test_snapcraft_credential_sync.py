@@ -16,6 +16,7 @@ import pytest
 
 from snap_dashboard.agents import snapcraft_credential_sync as scs_module
 from snap_dashboard.agents.snapcraft_credential_sync import SnapcraftCredentialSyncAgent
+from snap_dashboard.db.models import Snap, User
 
 
 def _uc(**kwargs) -> SimpleNamespace:
@@ -36,12 +37,12 @@ def capture_token(monkeypatch):
     return calls
 
 
-def _run_agent(monkeypatch, uc, repos=("https://github.com/kenvandine/some-snap",)):
+def _run_agent(monkeypatch, uc, repos=("https://github.com/kenvandine/some-snap",), login="kenvandine"):
     monkeypatch.setattr(scs_module, "get_user_config", lambda user_id: uc)
     monkeypatch.setattr(
         scs_module,
         "get_session",
-        lambda: _FakeSessionCtx(repos),
+        lambda: _FakeSessionCtx(repos, login),
     )
     agent = SnapcraftCredentialSyncAgent(user_id=1)
     return agent._run()
@@ -58,20 +59,32 @@ class _FakeQuery:
         return [SimpleNamespace(packaging_repo=r) for r in self._repos]
 
 
+class _FakeUserQuery:
+    def __init__(self, login):
+        self._login = login
+
+    def get(self, user_id):
+        return SimpleNamespace(github_login=self._login) if self._login else None
+
+
 class _FakeSession:
-    def __init__(self, repos):
+    def __init__(self, repos, login):
         self._repos = repos
+        self._login = login
 
     def query(self, model):
+        if model is User:
+            return _FakeUserQuery(self._login)
         return _FakeQuery(self._repos)
 
 
 class _FakeSessionCtx:
-    def __init__(self, repos):
+    def __init__(self, repos, login):
         self._repos = repos
+        self._login = login
 
     def __enter__(self):
-        return _FakeSession(self._repos)
+        return _FakeSession(self._repos, self._login)
 
     def __exit__(self, *exc):
         return False
@@ -94,3 +107,24 @@ def test_no_token_configured_is_skipped(monkeypatch, capture_token):
     result = _run_agent(monkeypatch, uc)
     assert result == "no GitHub token configured"
     assert capture_token == []
+
+
+def test_skips_repos_not_owned_by_user(monkeypatch, capture_token):
+    uc = _uc(github_token="owner-pat", bot_github_token="")
+    result = _run_agent(
+        monkeypatch,
+        uc,
+        repos=("https://github.com/kenvandine/owned-snap", "https://github.com/avojak/warble"),
+        login="kenvandine",
+    )
+    assert capture_token[0]["repos"] == ["https://github.com/kenvandine/owned-snap"]
+    assert "skipped as not owned" in result
+
+
+def test_all_repos_not_owned_skips_sync_entirely(monkeypatch, capture_token):
+    uc = _uc(github_token="owner-pat", bot_github_token="")
+    result = _run_agent(
+        monkeypatch, uc, repos=("https://github.com/avojak/warble",), login="kenvandine"
+    )
+    assert capture_token == []
+    assert "no owned packaging repos found" in result

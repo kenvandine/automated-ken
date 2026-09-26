@@ -36,7 +36,7 @@ from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.bot_client import BotGitHubClient
-from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.github.utils import is_owned_by, parse_owner_repo
 
 logger = logging.getLogger(__name__)
 
@@ -104,10 +104,7 @@ class UpstreamMaintainerAgent(BaseAgent):
 
     @staticmethod
     def _owned_by(upstream_repo: str, login: str) -> bool:
-        owner_repo = parse_owner_repo(upstream_repo)
-        if not owner_repo or not login:
-            return False
-        return owner_repo[0].lower() == login
+        return is_owned_by(upstream_repo, login)
 
     # ------------------------------------------------------------------
     # Dependency updates

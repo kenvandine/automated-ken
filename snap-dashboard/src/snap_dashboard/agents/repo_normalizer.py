@@ -29,7 +29,7 @@ import logging
 
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import CopilotTask, Snap
+from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.bot_client import BotGitHubClient
 from snap_dashboard.agents.coding_backend import (
@@ -38,7 +38,7 @@ from snap_dashboard.agents.coding_backend import (
     get_coding_dispatcher,
     task_result_fields,
 )
-from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.github.utils import is_owned_by, parse_owner_repo
 from snap_dashboard.snapcraft.build_workflow_template import WORKFLOW_PATH, WORKFLOW_YAML
 from snap_dashboard.testing.suite_zip import list_suite_files
 
@@ -70,6 +70,8 @@ class RepoNormalizerAgent(BaseAgent):
         testing_repo = getattr(uc, "testing_repo", "") or ""
 
         with get_session() as session:
+            user = session.query(User).get(self.user_id)
+            login = (user.github_login or "") if user else ""
             snaps = [
                 (s.id, s.name, s.packaging_repo)
                 for s in session.query(Snap).filter_by(user_id=self.user_id).all()
@@ -78,6 +80,20 @@ class RepoNormalizerAgent(BaseAgent):
 
         if not snaps:
             return "no packaging repos found"
+
+        owned_snaps = [s for s in snaps if is_owned_by(s[2], login)]
+        not_owned = len(snaps) - len(owned_snaps)
+        if not_owned:
+            logger.warning(
+                "repo_normalizer: skipping %d packaging_repo(s) not owned by "
+                "%s (likely misconfigured to point at a third-party repo): %s",
+                not_owned,
+                login or "(unknown user)",
+                ", ".join(s[2] for s in snaps if s not in owned_snaps),
+            )
+        snaps = owned_snaps
+        if not snaps:
+            return f"no owned packaging repos found ({not_owned} skipped as not owned)"
 
         bot_client = BotGitHubClient(
             token,
@@ -100,7 +116,10 @@ class RepoNormalizerAgent(BaseAgent):
             else:
                 skipped += 1
 
-        return f"dispatched {dispatched} normalization task(s), {skipped} skipped/already-done"
+        return (
+            f"dispatched {dispatched} normalization task(s), {skipped} skipped/already-done"
+            + (f", {not_owned} skipped as not owned" if not_owned else "")
+        )
 
     def _normalize_repo(
         self,

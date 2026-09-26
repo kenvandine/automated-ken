@@ -31,14 +31,14 @@ from snap_dashboard.agents.coding_backend import (
     task_result_fields,
 )
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import UpstreamRelease, VersionBumpPR
+from snap_dashboard.db.models import UpstreamRelease, User, VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.bot_client import (
     BotGitHubClient,
     find_snapcraft_yaml,
     patch_snapcraft_yaml,
 )
-from snap_dashboard.github.utils import parse_owner_repo
+from snap_dashboard.github.utils import is_owned_by, parse_owner_repo
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +89,19 @@ class VersionBumperAgent(BaseAgent):
         if not owner_repo:
             return f"skipped {self.snap_name}: cannot parse packaging_repo URL"
         owner, repo = owner_repo
+
+        login = ""
+        if self.user_id:
+            with get_session() as session:
+                user = session.query(User).get(self.user_id)
+                login = (user.github_login or "") if user else ""
+        if not is_owned_by(self.packaging_repo, login):
+            return (
+                f"skipped {self.snap_name}: packaging_repo {owner}/{repo} is not "
+                f"owned by {login or '(unknown user)'} — refusing to auto-bump a "
+                "repo you don't own (check Settings for a misconfigured "
+                "packaging_repo pointing at a third-party/upstream repo)"
+            )
 
         bot_client = BotGitHubClient(
             bot_token,

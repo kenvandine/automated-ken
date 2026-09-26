@@ -13,9 +13,10 @@ import logging
 
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.auth import get_user_config
-from snap_dashboard.db.models import Snap
+from snap_dashboard.db.models import Snap, User
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.secrets_sync import sync_snapcraft_credentials
+from snap_dashboard.github.utils import is_owned_by
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,8 @@ class SnapcraftCredentialSyncAgent(BaseAgent):
             return "no GitHub token configured"
 
         with get_session() as session:
+            user = session.query(User).get(self.user_id)
+            login = (user.github_login or "") if user else ""
             repos = sorted(
                 {
                     s.packaging_repo
@@ -59,6 +62,21 @@ class SnapcraftCredentialSyncAgent(BaseAgent):
         if not repos:
             return "no packaging repos found"
 
+        owned_repos = [r for r in repos if is_owned_by(r, login)]
+        not_owned = [r for r in repos if r not in owned_repos]
+        if not_owned:
+            logger.warning(
+                "snapcraft_credential_sync: skipping %d packaging_repo(s) not "
+                "owned by %s (secrets can only be set on a repo you actually "
+                "own/admin): %s",
+                len(not_owned),
+                login or "(unknown user)",
+                ", ".join(not_owned),
+            )
+        repos = owned_repos
+        if not repos:
+            return f"no owned packaging repos found ({len(not_owned)} skipped as not owned)"
+
         self._report(f"Syncing Snapcraft credential to {len(repos)} repos")
         results = sync_snapcraft_credentials(repos, credential, token)
         ok_count = sum(1 for r in results if r["ok"])
@@ -68,4 +86,6 @@ class SnapcraftCredentialSyncAgent(BaseAgent):
             summary += f"; failed: {', '.join(failed[:10])}"
             if len(failed) > 10:
                 summary += f" (+{len(failed) - 10} more)"
+        if not_owned:
+            summary += f"; {len(not_owned)} skipped as not owned"
         return summary

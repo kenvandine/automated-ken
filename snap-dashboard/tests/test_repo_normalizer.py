@@ -257,3 +257,21 @@ def test_run_disabled_returns_early(isolated_session, monkeypatch) -> None:
     monkeypatch.setattr(rn_module, "get_user_config", lambda uid: uc)
     agent = RepoNormalizerAgent(user_id=user_id)
     assert agent._run() == "disabled"
+
+
+def test_run_skips_packaging_repo_not_owned_by_user(isolated_session, monkeypatch) -> None:
+    """A packaging_repo misconfigured to point at a third-party repo must
+    never get an automatic normalization PR opened against it."""
+    user_id, _ = _seed(isolated_session, packaging_repo="https://github.com/avojak/warble")
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    session.close()
+
+    monkeypatch.setattr(rn_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(rn_module, "get_coding_dispatcher", lambda uc: _FakeDispatcher())
+    monkeypatch.setattr(rn_module, "BotGitHubClient", lambda *a, **k: _FakeBotClient())
+
+    agent = RepoNormalizerAgent(user_id=user_id)
+    result = agent._run()
+
+    assert "no owned packaging repos found" in result

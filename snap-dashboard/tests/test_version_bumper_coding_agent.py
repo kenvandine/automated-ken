@@ -20,7 +20,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from snap_dashboard.agents import version_bumper as vb
-from snap_dashboard.db.models import Base, Snap, UpstreamRelease, VersionBumpPR
+from snap_dashboard.db.models import Base, Snap, UpstreamRelease, User, VersionBumpPR
 
 
 @pytest.fixture
@@ -46,8 +46,9 @@ def isolated_session(monkeypatch):
 
 
 def _seed(session_local) -> int:
-    """Insert a Snap + UpstreamRelease, return the release id."""
+    """Insert a User + Snap + UpstreamRelease, return the release id."""
     with session_local() as session:
+        session.add(User(id=1, github_login="kenvandine", github_id=1))
         snap = Snap(name="godot-4", packaging_repo="https://github.com/kenvandine/godot-snap")
         session.add(snap)
         session.flush()
@@ -93,7 +94,7 @@ def _patch_common(monkeypatch, bot_token="bot-token", found=("snap/snapcraft.yam
 
     monkeypatch.setattr(vb, "get_user_config", lambda uid: _UC())
     monkeypatch.setattr(vb, "find_snapcraft_yaml", lambda client, owner, repo: found)
-    monkeypatch.setattr(vb.BotGitHubClient, "__new__", lambda cls, *a, **k: _FakeBotClient())
+    monkeypatch.setattr(vb, "BotGitHubClient", lambda *a, **k: _FakeBotClient())
 
 
 def test_coding_agent_async_task_leaves_bump_dispatched(isolated_session, monkeypatch):
@@ -194,3 +195,38 @@ def test_open_pr_already_exists_skips(isolated_session, monkeypatch):
 
     assert "open version bump PR already exists" in result
     assert called is False
+
+
+def test_refuses_to_bump_a_repo_not_owned_by_the_user(isolated_session, monkeypatch):
+    """packaging_repo pointing at a third-party repo (misconfiguration) must
+    never get an automatic version-bump PR opened against it."""
+    with isolated_session() as session:
+        session.add(User(id=1, github_login="kenvandine", github_id=1))
+        snap = Snap(name="warble", packaging_repo="https://github.com/avojak/warble")
+        session.add(snap)
+        session.flush()
+        release = UpstreamRelease(
+            snap_id=snap.id, part_name="warble", latest_version="1.1", current_version="1.0",
+        )
+        session.add(release)
+        session.commit()
+        release_id = release.id
+
+    _patch_common(monkeypatch)
+    called = False
+
+    def _dispatcher(uc):
+        nonlocal called
+        called = True
+        return object()
+
+    monkeypatch.setattr(vb, "get_coding_dispatcher", _dispatcher)
+
+    result = _agent(
+        release_id, snap_name="warble", packaging_repo="https://github.com/avojak/warble"
+    )._run()
+
+    assert "not owned by kenvandine" in result
+    assert called is False
+    with isolated_session() as session:
+        assert session.query(VersionBumpPR).count() == 0
