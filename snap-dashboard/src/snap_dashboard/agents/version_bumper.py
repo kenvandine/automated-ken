@@ -90,7 +90,7 @@ class VersionBumperAgent(BaseAgent):
             return f"skipped {self.snap_name}: cannot parse packaging_repo URL"
         owner, repo = owner_repo
 
-        bot_client = BotGitHubClient(bot_token)
+        bot_client = BotGitHubClient(bot_token, bot_login=(getattr(uc, "bot_github_login", None) if uc else None))
         found = find_snapcraft_yaml(bot_client, owner, repo)
         if not found:
             return f"skipped {self.snap_name}: snapcraft.yaml not found in {owner}/{repo}"
@@ -229,11 +229,17 @@ class VersionBumperAgent(BaseAgent):
         if not base_sha:
             return f"failed {self.snap_name}: cannot get SHA for branch {default_branch}"
 
+        # Write into the bot's own fork unless it's already the repo's
+        # owner — the bot account is essentially never a collaborator on
+        # the packaging repos it maintains, so writing directly into
+        # owner/repo 404s. See BotGitHubClient.push_target().
+        push_owner = client.push_target(owner, repo)
+
         safe_version = self.new_version.replace("/", "-")
         branch_name = f"version-bump/{self.snap_name}/{safe_version}"
-        if client.branch_exists(owner, repo, branch_name):
+        if client.branch_exists(push_owner, repo, branch_name):
             return f"skipped {self.snap_name}: branch {branch_name} already exists"
-        if not client.create_branch(owner, repo, branch_name, base_sha):
+        if not client.create_branch(push_owner, repo, branch_name, base_sha):
             return f"failed {self.snap_name}: could not create branch {branch_name}"
 
         commit_msg = (
@@ -241,12 +247,13 @@ class VersionBumperAgent(BaseAgent):
             f"Automated version bump from {self.old_version} to {self.new_version}.\n"
             f"Upstream: {self.release_url}"
         )
-        if not client.update_file(owner, repo, yaml_path, patched, yaml_sha, branch_name, commit_msg):
+        if not client.update_file(push_owner, repo, yaml_path, patched, yaml_sha, branch_name, commit_msg):
             return f"failed {self.snap_name}: could not push updated {yaml_path}"
 
         title, body = self._build_pr_text(uc)
         pr = client.create_pr(
             owner=owner, repo=repo, title=title, body=body, head=branch_name, base=default_branch,
+            head_owner=push_owner,
         )
         if not pr:
             return f"failed {self.snap_name}: PR creation failed"

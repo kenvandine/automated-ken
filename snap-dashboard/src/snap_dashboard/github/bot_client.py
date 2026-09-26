@@ -14,6 +14,8 @@ import re
 
 import httpx
 
+from snap_dashboard.github.fork_utils import ensure_fork
+
 logger = logging.getLogger(__name__)
 
 _GH_API = "https://api.github.com"
@@ -30,8 +32,39 @@ def _headers(token: str) -> dict[str, str]:
 class BotGitHubClient:
     """Creates version-bump branches and PRs using a bot GitHub account."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, bot_login: str | None = None) -> None:
         self.token = token
+        # See push_target() below — when set (and not the repo's own
+        # owner), writes go into a fork under this account instead of
+        # directly into ``owner/repo``, since the bot is essentially never
+        # a collaborator on the packaging repos it maintains.
+        self.bot_login = bot_login
+        self._push_owner_cache: dict[tuple[str, str], str] = {}
+
+    # ------------------------------------------------------------------
+    # Fork-aware push target
+    # ------------------------------------------------------------------
+
+    def push_target(self, owner: str, repo: str) -> str:
+        """Return the account to actually write branches/commits into for
+        ``owner/repo`` — ``owner`` itself if the bot account IS that owner
+        (or no bot account is configured), otherwise the bot's own fork of
+        the repo (created on demand). Writing directly to a repo the bot
+        isn't a collaborator on 404s on both the Contents API and the git
+        data API, so this is what makes the mechanical version-bump
+        fallback (and any other bot commit) actually able to push at all.
+        """
+        if not self.bot_login or self.bot_login.lower() == owner.lower():
+            return owner
+        key = (owner.lower(), repo.lower())
+        cached = self._push_owner_cache.get(key)
+        if cached:
+            return cached
+        with httpx.Client(timeout=30) as client:
+            if not ensure_fork(client, _headers(self.token), owner, repo, self.bot_login):
+                return owner  # best-effort fallback; write calls will fail the same as before
+        self._push_owner_cache[key] = self.bot_login
+        return self.bot_login
 
     # ------------------------------------------------------------------
     # Read
@@ -126,10 +159,19 @@ class BotGitHubClient:
         body: str,
         head: str,
         base: str,
+        head_owner: str | None = None,
     ) -> dict | None:
-        """Open a pull request; return the PR dict or None."""
+        """Open a pull request; return the PR dict or None.
+
+        ``head_owner`` is the account whose branch this PR pulls from —
+        pass the result of ``push_target(owner, repo)`` when the commit was
+        pushed to a fork rather than directly into ``owner/repo``, so the
+        PR is opened cross-repo (``head="head_owner:head"``) instead of
+        against a branch that doesn't exist in ``owner/repo`` at all.
+        """
         url = f"{_GH_API}/repos/{owner}/{repo}/pulls"
-        payload = {"title": title, "body": body, "head": head, "base": base}
+        head_ref = f"{head_owner}:{head}" if head_owner and head_owner.lower() != owner.lower() else head
+        payload = {"title": title, "body": body, "head": head_ref, "base": base}
         try:
             with httpx.Client(timeout=15) as client:
                 resp = client.post(url, json=payload, headers=_headers(self.token))

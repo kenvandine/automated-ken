@@ -61,8 +61,8 @@ class LocalLemonadeCodingDispatcher:
     def __init__(self, user_config, token: str) -> None:
         self._uc = user_config
         self.token = token
-        self._bot = BotGitHubClient(token)
-        self._tree = GitTreeClient(token)
+        self._bot = BotGitHubClient(token, bot_login=getattr(user_config, "bot_github_login", None))
+        self._tree = GitTreeClient(token, bot_login=getattr(user_config, "bot_github_login", None))
 
     def start_task(
         self,
