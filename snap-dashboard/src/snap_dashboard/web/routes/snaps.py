@@ -503,8 +503,16 @@ async def snap_edit(
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
             return RedirectResponse(url="/", status_code=303)
-        snap.packaging_repo = packaging_repo.strip() or None
-        snap.upstream_repo = upstream_repo.strip() or None
+        new_packaging_repo = packaging_repo.strip() or None
+        new_upstream_repo = upstream_repo.strip() or None
+        # Once the user has explicitly set a repo URL here, stop letting the
+        # collector auto-correct it from Store metadata on every run (that
+        # was silently reverting manual edits back to whatever the Store
+        # listing links to, e.g. an upstream/third-party repo).
+        if new_packaging_repo != snap.packaging_repo or new_upstream_repo != snap.upstream_repo:
+            snap.manually_added = True
+        snap.packaging_repo = new_packaging_repo
+        snap.upstream_repo = new_upstream_repo
         snap.notes = notes.strip() or None
         snap.is_service = is_service == "true"
         # A snap can't be both a console app and a service — service wins
