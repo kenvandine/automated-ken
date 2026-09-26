@@ -5,9 +5,12 @@ a dead end: the "Refresh" button only shows for non-terminal tasks, and
 error_msg was never populated for dispatch failures, so a failed row had no
 error text and no way to act on it. This exercises the new
 POST /copilot-tasks/{id}/retry route end to end: it should insert a brand
-new CopilotTask row (preserving the original for history) using the same
-prompt/base_ref/kind, and populate error_msg on failure via the
-dispatcher's ``last_error``.
+new "dispatching" CopilotTask row immediately (preserving the original for
+history) and hand the actual (potentially slow) dispatch off to a
+background agent (``RetryCopilotTaskAgent``) instead of blocking the
+request — see that module's docstring for why: doing the blocking
+``start_task()`` call inline inside this ``async def`` route previously
+froze the entire web UI for every user for as long as the dispatch took.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from snap_dashboard.agents import copilot_retry as retry_module
 from snap_dashboard.db.models import Base, CopilotTask, User
 from snap_dashboard.web.routes import copilot_tasks as routes_module
 
@@ -42,11 +46,30 @@ def isolated_session(monkeypatch):
             session.close()
 
     monkeypatch.setattr(routes_module, "get_session", _fake_get_session)
+    monkeypatch.setattr(retry_module, "get_session", _fake_get_session)
     return session_local
 
 
 class _FakeRequest:
     pass
+
+
+class _FakeRunner:
+    """Runs a submitted agent's ``_run()`` synchronously, in-process.
+
+    The real ``AgentRunner`` submits to a background thread pool — fine in
+    production, but tests want the retry's effects to be visible
+    immediately without needing to wire up threads/polling. This bypasses
+    ``BaseAgent.run()``'s AgentRun bookkeeping/log-capture wrapper (covered
+    separately by ``test_agent_run_logs.py``) and just calls ``_run()``.
+    """
+
+    def __init__(self) -> None:
+        self.submitted = []
+
+    def submit(self, agent) -> None:
+        self.submitted.append(agent)
+        agent._run()
 
 
 class _FakeDispatcher:
@@ -84,17 +107,25 @@ def _seed_failed_task(session_local, **overrides) -> tuple[int, int]:
     return user_id, task_id
 
 
+def _patch_runner(monkeypatch) -> _FakeRunner:
+    runner = _FakeRunner()
+    monkeypatch.setattr("snap_dashboard.agents.runner.get_runner", lambda: runner)
+    return runner
+
+
 @pytest.mark.anyio
 async def test_retry_creates_new_task_and_preserves_original(isolated_session, monkeypatch):
     user_id, task_id = _seed_failed_task(isolated_session)
 
     monkeypatch.setattr(routes_module, "get_current_user", lambda request: {"id": user_id})
-    monkeypatch.setattr(routes_module, "get_user_config", lambda uid: SimpleNamespace())
+    monkeypatch.setattr(retry_module, "get_user_config", lambda uid: SimpleNamespace())
     dispatcher = _FakeDispatcher(task={"id": "task-99"})
-    monkeypatch.setattr(routes_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    monkeypatch.setattr(retry_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    runner = _patch_runner(monkeypatch)
 
     resp = await routes_module.retry_copilot_task(task_id, _FakeRequest())
     assert resp.status_code == 303
+    assert len(runner.submitted) == 1
 
     assert dispatcher.calls == [("kenvandine", "my-snap", "do the thing", "main")]
 
@@ -115,9 +146,10 @@ async def test_retry_populates_error_msg_on_repeat_failure(isolated_session, mon
     user_id, task_id = _seed_failed_task(isolated_session)
 
     monkeypatch.setattr(routes_module, "get_current_user", lambda request: {"id": user_id})
-    monkeypatch.setattr(routes_module, "get_user_config", lambda uid: SimpleNamespace())
+    monkeypatch.setattr(retry_module, "get_user_config", lambda uid: SimpleNamespace())
     dispatcher = _FakeDispatcher(task=None, last_error="still no Copilot license")
-    monkeypatch.setattr(routes_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    monkeypatch.setattr(retry_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    _patch_runner(monkeypatch)
 
     await routes_module.retry_copilot_task(task_id, _FakeRequest())
 
@@ -135,11 +167,13 @@ async def test_retry_no_op_when_prompt_missing(isolated_session, monkeypatch):
 
     monkeypatch.setattr(routes_module, "get_current_user", lambda request: {"id": user_id})
     dispatcher = _FakeDispatcher(task={"id": "task-1"})
-    monkeypatch.setattr(routes_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    monkeypatch.setattr(retry_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    runner = _patch_runner(monkeypatch)
 
     await routes_module.retry_copilot_task(task_id, _FakeRequest())
 
     assert dispatcher.calls == []
+    assert runner.submitted == []
     session = isolated_session()
     tasks = session.query(CopilotTask).filter_by(kind="fleet_normalize").all()
     assert len(tasks) == 1  # nothing new inserted

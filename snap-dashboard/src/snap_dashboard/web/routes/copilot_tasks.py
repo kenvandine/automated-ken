@@ -14,12 +14,7 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from snap_dashboard.agents.coding_backend import (
-    RETRY_ELIGIBLE_STATUSES,
-    extract_pr_url,
-    get_coding_dispatcher,
-    task_result_fields,
-)
+from snap_dashboard.agents.coding_backend import RETRY_ELIGIBLE_STATUSES, extract_pr_url
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import CopilotTask
 from snap_dashboard.db.session import get_session
@@ -168,6 +163,17 @@ async def retry_copilot_task(task_id: int, request: Request) -> RedirectResponse
     would skip the repo/issue forever until manually deleted from the DB.
     This inserts a fresh row (preserving the old one for history/audit)
     using the same prompt/base_ref/kind originally dispatched.
+
+    The actual ``start_task()`` call can block for tens of seconds (the
+    local Lemonade model replying, or forking+polling a repo for the
+    fork-based PR flow — see ``github/fork_utils.py``), so it's dispatched
+    onto the background agent thread pool (``RetryCopilotTaskAgent``)
+    instead of being awaited inline here — this route only does two quick
+    DB reads/writes and returns immediately. Doing the blocking call inline
+    in this ``async def`` route previously froze the *entire* web UI (every
+    user's requests, not just this one) for as long as the dispatch took,
+    since FastAPI runs ``async def`` handlers on the single event-loop
+    thread.
     """
     user = get_current_user(request)
     if user is None:
@@ -190,24 +196,28 @@ async def retry_copilot_task(task_id: int, request: Request) -> RedirectResponse
         return RedirectResponse(url="/copilot-tasks", status_code=303)
     owner, repo = owner_repo_parts
 
-    uc = get_user_config(user_id)
-    dispatcher = get_coding_dispatcher(uc)
-    if dispatcher is None:
-        return RedirectResponse(url="/copilot-tasks", status_code=303)
-
-    task = dispatcher.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
     with get_session() as session:
-        session.add(
-            CopilotTask(
-                user_id=user_id,
-                snap_id=snap_id,
-                kind=kind,
-                owner_repo=owner_repo,
-                prompt=prompt,
-                issue_number=issue_number,
-                base_ref=base_ref,
-                **task_result_fields(task, fallback_error=getattr(dispatcher, "last_error", None)),
-            )
+        new_task = CopilotTask(
+            user_id=user_id,
+            snap_id=snap_id,
+            kind=kind,
+            owner_repo=owner_repo,
+            prompt=prompt,
+            issue_number=issue_number,
+            base_ref=base_ref,
+            status="dispatching",
         )
+        session.add(new_task)
+        session.flush()
+        new_task_id = new_task.id
+
+    from snap_dashboard.agents.copilot_retry import RetryCopilotTaskAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(
+        RetryCopilotTaskAgent(
+            user_id=user_id, task_id=new_task_id, owner=owner, repo=repo, prompt=prompt, base_ref=base_ref,
+        )
+    )
 
     return RedirectResponse(url="/copilot-tasks", status_code=303)
