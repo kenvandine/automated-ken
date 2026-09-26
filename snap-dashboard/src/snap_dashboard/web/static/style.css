@@ -2124,3 +2124,16 @@ footer a:hover {
   margin-right: 4px;
   width: 140px;
 }
+
+/* snap_detail.html's action-result banners (p-notification--positive/
+   --negative) previously set an inline padding that dropped Vanilla's
+   default padding-left:3rem — that padding-left exists specifically to
+   leave room for the notification's background-image checkmark/warning
+   icon (positioned at 1rem 1.16rem), so removing it made the icon overlap
+   the first word of the message. Keep the compact padding these banners
+   want everywhere except the left edge, which needs to stay wide enough
+   for the icon. */
+.snap-detail-notice.p-notification--positive,
+.snap-detail-notice.p-notification--negative {
+  padding: 8px 12px 8px 3rem;
+}

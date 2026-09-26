@@ -7,7 +7,7 @@
 {% set notice = request.query_params.get('notice') %}
 {% set page_error = request.query_params.get('error') %}
 {% if notice %}
-<div class="p-notification--positive detail-section" style="padding:8px 12px; border-radius:4px;">
+<div class="p-notification--positive detail-section snap-detail-notice" style="border-radius:4px;">
   {% if notice == 'test_queued' %}Test run queued — see it in the Test Run History below.
   {% elif notice == 'scan_started' %}Checking for a newer upstream version — a version-bump PR will open automatically if one is found.
   {% elif notice == 'rebuild_started' %}Rebuild triggered — see it on the <a href="/agents" class="link-inline">Agents</a> page.
@@ -19,7 +19,7 @@
 </div>
 {% endif %}
 {% if page_error %}
-<div class="p-notification--negative detail-section" style="padding:8px 12px; border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+<div class="p-notification--negative detail-section snap-detail-notice" style="border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
   <span>
   {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for updates or triggering a rebuild.
   {% elif page_error == 'not_same_repo' %}Stack updates need the packaging repo and upstream repo to be the same GitHub repo.
@@ -216,7 +216,7 @@
   <p class="text-muted small">Last reviewed: {{ review_report.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
   {% endif %}
   {% if review_report.error_msg %}
-  <p class="p-notification--negative" style="padding:6px 10px; border-radius:4px;">{{ review_report.error_msg }}</p>
+  <p class="p-notification--negative snap-detail-notice" style="border-radius:4px;">{{ review_report.error_msg }}</p>
   {% elif review_report.summary %}
   <pre style="white-space:pre-wrap; font-family:inherit; margin:0 0 12px 0;">{{ review_report.summary }}</pre>
   {% endif %}
