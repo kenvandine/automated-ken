@@ -346,7 +346,7 @@ def _infer_build_workflow(
         f"{listing}\n\n"
         'Respond with ONLY a JSON object: {"workflow_file": "<filename>"}'
     )
-    reply = client.chat(prompt, temperature=0.1)
+    reply = client.chat(prompt, temperature=0.1, json_mode=True)
     if not reply:
         return _heuristic_pick_workflow(candidates), "model call failed — used heuristic"
     try:

@@ -135,7 +135,7 @@ def choose_latest_version(
         'Respond with ONLY a JSON object: {"is_newer": true|false, "tag": '
         '"<the exact tag string from the list above, or empty if not newer>"}'
     )
-    reply = client.chat(prompt, temperature=0.1)
+    reply = client.chat(prompt, temperature=0.1, json_mode=True)
     if not reply:
         return _heuristic_choose(candidates, current_version)
     try:

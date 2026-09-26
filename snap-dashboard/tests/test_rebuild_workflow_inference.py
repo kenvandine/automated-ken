@@ -158,7 +158,7 @@ def test_multiple_candidates_uses_model_choice(isolated_session, monkeypatch):
         def is_available(self):
             return True
 
-        def chat(self, prompt, temperature=0.1):
+        def chat(self, prompt, temperature=0.1, **kwargs):
             return '{"workflow_file": "release.yaml"}'
 
     import snap_dashboard.lemonade.client as lemonade_client_module

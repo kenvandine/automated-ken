@@ -279,6 +279,7 @@ class LemonadeClient:
         max_tokens: int | None = None,
         timeout: float | None = None,
         enable_thinking: bool = False,
+        json_mode: bool = False,
     ) -> str | None:
         """Send a text-only chat request; return the assistant reply or None.
 
@@ -297,6 +298,17 @@ class LemonadeClient:
         and a "small" ``max_tokens`` budget (as most of these calls use) can
         get entirely consumed by that hidden reasoning, leaving ``content``
         empty — see ``_extract_reply()``.
+
+        ``json_mode`` sends ``response_format: {"type": "json_object"}``
+        for callers whose prompt asks for a JSON object back (e.g. the
+        local coding backend's file-write plan, or ``generate_pr_description``).
+        Without this, the model is free-generating text that merely *looks*
+        like JSON, and it can — and in practice does — forget to escape
+        quotes/newlines/backslashes inside string values (e.g. raw source
+        file content), producing a response that *looks* right but fails
+        ``json.loads``. Grammar-constrained JSON-object decoding guarantees
+        syntactically valid JSON regardless of what's embedded in the
+        strings.
         """
         messages: list[dict[str, Any]] = []
         if system:
@@ -311,6 +323,8 @@ class LemonadeClient:
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
         resp = self._post_chat_completion(payload, timeout=timeout or _TIMEOUT, task="chat")
         if resp is None:
             return None
@@ -381,6 +395,7 @@ class LemonadeClient:
             "messages": messages,
             "temperature": 0.1,
             "chat_template_kwargs": {"enable_thinking": False},
+            "response_format": {"type": "json_object"},
         }
         resp = self._post_chat_completion(payload, timeout=_TIMEOUT, task="vision_compare")
         if resp is None:
@@ -465,6 +480,7 @@ class LemonadeClient:
             "messages": messages,
             "temperature": 0.1,
             "chat_template_kwargs": {"enable_thinking": False},
+            "response_format": {"type": "json_object"},
         }
         resp = self._post_chat_completion(payload, timeout=_TIMEOUT, task="vision_inspect")
         if resp is None:
@@ -516,7 +532,7 @@ class LemonadeClient:
             '{"title": "chore: update <part> to <version>", '
             '"body": "markdown PR description with changelog highlights"}'
         )
-        result = self.chat(prompt, temperature=0.3)
+        result = self.chat(prompt, temperature=0.3, json_mode=True)
         if result is None:
             return None
         try:

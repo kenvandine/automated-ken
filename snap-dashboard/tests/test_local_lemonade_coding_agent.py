@@ -23,10 +23,10 @@ class _FakeLemonadeClient:
     def is_available(self) -> bool:
         return True
 
-    def chat(self, prompt, system="", temperature=0.2, max_tokens=None, timeout=None):
+    def chat(self, prompt, system="", temperature=0.2, max_tokens=None, timeout=None, **kwargs):
         self.calls.append(
             {"prompt": prompt, "system": system, "temperature": temperature,
-             "max_tokens": max_tokens, "timeout": timeout}
+             "max_tokens": max_tokens, "timeout": timeout, **kwargs}
         )
         return self.reply
 
@@ -106,6 +106,9 @@ def test_start_task_happy_path_opens_pr(monkeypatch) -> None:
     # Coding calls get generous timeout/max_tokens overrides for reliability.
     assert fake_client.calls[0]["max_tokens"] == ca_module._CODING_MAX_TOKENS
     assert fake_client.calls[0]["timeout"] == ca_module._CODING_TIMEOUT_SECONDS
+    # Grammar-constrained JSON mode avoids unescaped quotes/newlines in raw
+    # file content breaking json.loads() on the model's plan.
+    assert fake_client.calls[0]["json_mode"] is True
 
 
 def test_start_task_without_pull_request_skips_pr_open(monkeypatch) -> None:

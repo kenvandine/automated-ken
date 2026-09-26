@@ -126,6 +126,7 @@ def test_vision_compare_disables_thinking():
         result = _client().vision_compare(b"a", b"b", "snap", "1.0", "2.0")
     assert result == {"decision": "approve", "confidence": 1, "reasoning": ""}
     assert fake.last_payload["chat_template_kwargs"] == {"enable_thinking": False}
+    assert fake.last_payload["response_format"] == {"type": "json_object"}
 
 
 def test_vision_inspect_disables_thinking():
@@ -138,4 +139,36 @@ def test_vision_inspect_disables_thinking():
     ):
         result = _client().vision_inspect(b"a", "snap", "1.0")
     assert result == {"decision": "approve", "confidence": 0.35, "reasoning": ""}
+    assert fake.last_payload["response_format"] == {"type": "json_object"}
+
+
+def test_chat_json_mode_off_by_default():
+    fake = _OneShotClient(
+        _FakeResp({"choices": [{"message": {"content": "hello"}}], "usage": {}})
+    )
+    with (
+        patch("httpx.Client", return_value=fake),
+        patch("snap_dashboard.lemonade.client.record_model_usage"),
+    ):
+        _client().chat("hi")
+    assert "response_format" not in fake.last_payload
+
+
+def test_chat_json_mode_sends_json_object_response_format():
+    """Grammar-constrained JSON-object decoding guarantees syntactically
+    valid JSON regardless of what's embedded in string values (e.g. raw
+    source file content with quotes/newlines/backslashes) — see the local
+    coding backend's file-write plan and generate_pr_description(), both
+    of which ask the model for a JSON object back.
+    """
+    fake = _OneShotClient(
+        _FakeResp({"choices": [{"message": {"content": '{"ok": true}'}}], "usage": {}})
+    )
+    with (
+        patch("httpx.Client", return_value=fake),
+        patch("snap_dashboard.lemonade.client.record_model_usage"),
+    ):
+        result = _client().chat("hi", json_mode=True)
+    assert result == '{"ok": true}'
+    assert fake.last_payload["response_format"] == {"type": "json_object"}
     assert fake.last_payload["chat_template_kwargs"] == {"enable_thinking": False}

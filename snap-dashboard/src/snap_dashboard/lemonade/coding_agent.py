@@ -165,6 +165,7 @@ class LocalLemonadeCodingDispatcher:
         reply = client.chat(
             user_msg, system=system, temperature=0.1,
             max_tokens=_CODING_MAX_TOKENS, timeout=_CODING_TIMEOUT_SECONDS,
+            json_mode=True,
         )
         if not reply:
             return None
