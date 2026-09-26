@@ -90,7 +90,11 @@ class VersionBumperAgent(BaseAgent):
             return f"skipped {self.snap_name}: cannot parse packaging_repo URL"
         owner, repo = owner_repo
 
-        bot_client = BotGitHubClient(bot_token, bot_login=(getattr(uc, "bot_github_login", None) if uc else None))
+        bot_client = BotGitHubClient(
+            bot_token,
+            bot_login=(getattr(uc, "bot_github_login", None) if uc else None),
+            read_token=(getattr(uc, "github_token", "") if uc else "") or bot_token,
+        )
         found = find_snapcraft_yaml(bot_client, owner, repo)
         if not found:
             return f"skipped {self.snap_name}: snapcraft.yaml not found in {owner}/{repo}"

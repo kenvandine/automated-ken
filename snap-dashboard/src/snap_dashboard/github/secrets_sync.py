@@ -73,6 +73,19 @@ def _get_repo_public_key(owner: str, repo: str, token: str) -> tuple[str, str] |
     try:
         with httpx.Client(timeout=15) as client:
             resp = client.get(url, headers=_headers(token))
+        if resp.status_code == 403:
+            logger.warning(
+                "get public key for %s/%s failed: 403 Forbidden — managing "
+                "Actions secrets requires admin access to this exact repo "
+                "(forking never helps here, since secrets don't propagate "
+                "across forks). Make sure the token used for secrets sync "
+                "is the repo owner's own Personal Access Token, not a "
+                "separate bot account's token, and that it has the 'repo' "
+                "scope.",
+                owner,
+                repo,
+            )
+            return None
         if resp.status_code != 200:
             logger.warning(
                 "get public key for %s/%s failed: %s", owner, repo, resp.status_code

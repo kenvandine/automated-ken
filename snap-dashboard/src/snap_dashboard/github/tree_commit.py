@@ -37,8 +37,14 @@ def _headers(token: str) -> dict[str, str]:
 class GitTreeClient:
     """Builds one multi-file commit + branch from a set of puts/deletes."""
 
-    def __init__(self, token: str, bot_login: str | None = None) -> None:
+    def __init__(self, token: str, bot_login: str | None = None, read_token: str | None = None) -> None:
         self.token = token
+        # Base state (branch ref, commit, tree) is read from the real
+        # ``owner/repo`` before writing — use the repo owner's own token
+        # for those reads when supplied, since the bot account may not
+        # even be a collaborator on the repo yet (writes below still use
+        # ``token`` so the commit/PR is attributed to the bot).
+        self.read_token = read_token or token
         # The bot account committing on our behalf. When set (and not the
         # repo's own owner), commits go into a fork under this account
         # instead of directly into ``owner/repo`` — see commit_multi().
@@ -76,18 +82,19 @@ class GitTreeClient:
         try:
             with httpx.Client(timeout=30) as client:
                 headers = _headers(self.token)
+                read_headers = _headers(self.read_token)
 
-                base = base_branch or self._default_branch(client, owner, repo, headers)
+                base = base_branch or self._default_branch(client, owner, repo, read_headers)
                 base_ref = client.get(
                     f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{base}",
-                    headers=headers,
+                    headers=read_headers,
                 )
                 base_ref.raise_for_status()
                 base_commit_sha = base_ref.json()["object"]["sha"]
 
                 base_commit = client.get(
                     f"{_GH_API}/repos/{owner}/{repo}/git/commits/{base_commit_sha}",
-                    headers=headers,
+                    headers=read_headers,
                 )
                 base_commit.raise_for_status()
                 base_tree_sha = base_commit.json()["tree"]["sha"]
@@ -165,7 +172,7 @@ class GitTreeClient:
         try:
             with httpx.Client(timeout=15) as client:
                 headers = _headers(self.token)
-                pr_base = base or self._default_branch(client, owner, repo, headers)
+                pr_base = base or self._default_branch(client, owner, repo, _headers(self.read_token))
                 head_owner = self.push_owner or owner
                 head_ref = f"{head_owner}:{head}" if head_owner.lower() != owner.lower() else head
                 resp = client.post(

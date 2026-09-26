@@ -37,7 +37,13 @@ class SnapcraftCredentialSyncAgent(BaseAgent):
         credential = getattr(uc, "snapcraft_macaroon", "") or ""
         if not credential:
             return "no Snapcraft Store credential configured"
-        token = getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or ""
+        # Managing a repo's Actions secrets requires admin-level access to
+        # that *exact* repo (forking doesn't help — secrets never propagate
+        # across a fork). These are all Ken's own packaging repos, so his
+        # personal token (which has owner/admin rights on them) must be used
+        # here, not the separate bot account's token, which typically only
+        # has read/write collaborator access and will 403 on the secrets API.
+        token = getattr(uc, "github_token", "") or getattr(uc, "bot_github_token", "") or ""
         if not token:
             return "no GitHub token configured"
 

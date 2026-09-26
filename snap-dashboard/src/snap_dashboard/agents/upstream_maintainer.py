@@ -70,6 +70,7 @@ class UpstreamMaintainerAgent(BaseAgent):
         token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "")
         if not token:
             return "no GitHub token configured"
+        read_token = getattr(uc, "github_token", "") or token
 
         with get_session() as session:
             user = session.query(User).get(self.user_id)
@@ -94,9 +95,9 @@ class UpstreamMaintainerAgent(BaseAgent):
                 continue
             owner, repo = owner_repo
             self._report(f"Maintaining {upstream_repo}", snap_name)
-            actions.append(self._maybe_dep_update(client, snap_id, owner, repo, token))
+            actions.append(self._maybe_dep_update(client, snap_id, owner, repo, token, read_token))
             actions.append(self._maybe_request_reviews(client, owner, repo, token))
-            actions.append(self._maybe_triage_issues(client, snap_id, owner, repo, token))
+            actions.append(self._maybe_triage_issues(client, snap_id, owner, repo, token, read_token))
 
         done = [a for a in actions if a]
         return f"checked {len(upstream_repos)} upstream repo(s), {len(done)} action(s) taken"
@@ -112,7 +113,7 @@ class UpstreamMaintainerAgent(BaseAgent):
     # Dependency updates
     # ------------------------------------------------------------------
 
-    def _maybe_dep_update(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str) -> bool:
+    def _maybe_dep_update(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str, read_token: str | None = None) -> bool:
         owner_repo = f"{owner}/{repo}"
         cutoff = datetime.now(timezone.utc) - timedelta(days=_DEP_UPDATE_COOLDOWN_DAYS)
         with get_session() as session:
@@ -135,7 +136,7 @@ class UpstreamMaintainerAgent(BaseAgent):
             "a pull request with the dependency bumps. Skip if everything is already "
             "up to date — don't open an empty PR."
         )
-        base_ref = BotGitHubClient(token).get_default_branch(owner, repo)
+        base_ref = BotGitHubClient(token, read_token=read_token or token).get_default_branch(owner, repo)
         task = client.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(
@@ -190,7 +191,7 @@ class UpstreamMaintainerAgent(BaseAgent):
     # Issue triage / auto-fix attempts
     # ------------------------------------------------------------------
 
-    def _maybe_triage_issues(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str) -> bool:
+    def _maybe_triage_issues(self, client: CodingDispatcher, snap_id: int, owner: str, repo: str, token: str, read_token: str | None = None) -> bool:
         owner_repo = f"{owner}/{repo}"
         try:
             with httpx.Client(timeout=15) as http:
@@ -231,7 +232,7 @@ class UpstreamMaintainerAgent(BaseAgent):
 
         dispatched = 0
         acted = False
-        base_ref = BotGitHubClient(token).get_default_branch(owner, repo)
+        base_ref = BotGitHubClient(token, read_token=read_token or token).get_default_branch(owner, repo)
         for issue in issues:
             if dispatched >= _MAX_ISSUES_PER_RUN:
                 break

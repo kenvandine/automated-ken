@@ -61,8 +61,15 @@ class LocalLemonadeCodingDispatcher:
     def __init__(self, user_config, token: str) -> None:
         self._uc = user_config
         self.token = token
-        self._bot = BotGitHubClient(token, bot_login=getattr(user_config, "bot_github_login", None))
-        self._tree = GitTreeClient(token, bot_login=getattr(user_config, "bot_github_login", None))
+        # Reads (repo contents, trees, branch refs) go through the repo
+        # owner's own token when configured — it's reliable for repos the
+        # owner has always had full access to, whereas the bot account may
+        # not even be a collaborator yet. Writes (commits/PRs) still use
+        # ``token`` (the bot account) so authorship stays consistent.
+        read_token = getattr(user_config, "github_token", "") or token
+        bot_login = getattr(user_config, "bot_github_login", None)
+        self._bot = BotGitHubClient(token, bot_login=bot_login, read_token=read_token)
+        self._tree = GitTreeClient(token, bot_login=bot_login, read_token=read_token)
 
     def start_task(
         self,

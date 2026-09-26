@@ -32,8 +32,14 @@ def _headers(token: str) -> dict[str, str]:
 class BotGitHubClient:
     """Creates version-bump branches and PRs using a bot GitHub account."""
 
-    def __init__(self, token: str, bot_login: str | None = None) -> None:
+    def __init__(self, token: str, bot_login: str | None = None, read_token: str | None = None) -> None:
         self.token = token
+        # Reads (GET) can use the repo owner's own token when supplied —
+        # it's reliably reads-anything-owned-by-that-account, whereas the
+        # bot account may not even be a collaborator on some repos yet.
+        # Writes (POST/PUT/PATCH) always go through ``token`` so commits/
+        # PRs are attributed to the bot account.
+        self.read_token = read_token or token
         # See push_target() below — when set (and not the repo's own
         # owner), writes go into a fork under this account instead of
         # directly into ``owner/repo``, since the bot is essentially never
@@ -75,7 +81,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/contents/{path}"
         try:
             with httpx.Client(timeout=15) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             if resp.status_code != 200:
                 return None
             data = resp.json()
@@ -90,7 +96,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             if resp.status_code == 200:
                 return resp.json().get("default_branch", "main")
         except Exception:
@@ -102,7 +108,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{branch}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             if resp.status_code == 200:
                 return resp.json()["object"]["sha"]
         except Exception:
@@ -187,7 +193,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/contents/{path}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.head(url, headers=_headers(self.token))
+                resp = client.head(url, headers=_headers(self.read_token))
             return resp.status_code == 200
         except Exception:
             return False
@@ -255,7 +261,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/trees/{sha}"
         try:
             with httpx.Client(timeout=20) as client:
-                resp = client.get(url, params={"recursive": "1"}, headers=_headers(self.token))
+                resp = client.get(url, params={"recursive": "1"}, headers=_headers(self.read_token))
             if resp.status_code != 200:
                 return []
             data = resp.json()
@@ -268,7 +274,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/git/ref/heads/{branch}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             return resp.status_code == 200
         except Exception:
             return False
@@ -283,7 +289,7 @@ class BotGitHubClient:
         url = f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}"
         try:
             with httpx.Client(timeout=10) as client:
-                resp = client.get(url, headers=_headers(self.token))
+                resp = client.get(url, headers=_headers(self.read_token))
             if resp.status_code == 200:
                 return resp.json().get("head", {}).get("ref")
         except Exception:

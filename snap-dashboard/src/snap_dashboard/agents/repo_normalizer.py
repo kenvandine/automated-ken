@@ -79,7 +79,11 @@ class RepoNormalizerAgent(BaseAgent):
         if not snaps:
             return "no packaging repos found"
 
-        bot_client = BotGitHubClient(token)
+        bot_client = BotGitHubClient(
+            token,
+            bot_login=getattr(uc, "bot_github_login", None),
+            read_token=getattr(uc, "github_token", "") or token,
+        )
         copilot = get_coding_dispatcher(uc)
         if not copilot:
             return "no coding backend configured/available"
