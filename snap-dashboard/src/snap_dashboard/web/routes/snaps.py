@@ -208,7 +208,7 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
                 review_items = []
             review_report_data = {
                 "summary": review_report.summary,
-                "items": review_items,
+                "review_items": review_items,
                 "error_msg": review_report.error_msg,
                 "updated_at": review_report.updated_at,
             }

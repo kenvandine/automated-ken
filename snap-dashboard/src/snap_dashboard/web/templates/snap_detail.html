@@ -220,7 +220,7 @@
   {% elif review_report.summary %}
   <pre style="white-space:pre-wrap; font-family:inherit; margin:0 0 12px 0;">{{ review_report.summary }}</pre>
   {% endif %}
-  {% if review_report.items %}
+  {% if review_report.review_items %}
   <div class="table-wrapper">
     <table class="snap-table">
       <thead>
@@ -234,7 +234,7 @@
         </tr>
       </thead>
       <tbody>
-        {% for it in review_report.items %}
+        {% for it in review_report.review_items %}
         <tr>
           <td>{{ 'PR' if it.type == 'pr' else 'Issue' }}</td>
           <td class="muted small">{{ it.owner_repo }}</td>
