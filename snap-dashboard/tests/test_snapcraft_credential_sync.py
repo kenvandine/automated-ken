@@ -16,7 +16,7 @@ import pytest
 
 from snap_dashboard.agents import snapcraft_credential_sync as scs_module
 from snap_dashboard.agents.snapcraft_credential_sync import SnapcraftCredentialSyncAgent
-from snap_dashboard.db.models import Snap, User
+from snap_dashboard.db.models import User
 
 
 def _uc(**kwargs) -> SimpleNamespace:
