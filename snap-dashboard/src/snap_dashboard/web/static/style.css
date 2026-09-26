@@ -2132,8 +2132,12 @@ footer a:hover {
    icon (positioned at 1rem 1.16rem), so removing it made the icon overlap
    the first word of the message. Keep the compact padding these banners
    want everywhere except the left edge, which needs to stay wide enough
-   for the icon. */
+   for the icon. Vanilla's icon position is a fixed top offset tuned for
+   its own default padding/line-height, so with our shorter padding it
+   sat too high above the text — override to vertically center it against
+   whatever height this single-line banner ends up being instead. */
 .snap-detail-notice.p-notification--positive,
 .snap-detail-notice.p-notification--negative {
   padding: 8px 12px 8px 3rem;
+  background-position: 1rem center;
 }
