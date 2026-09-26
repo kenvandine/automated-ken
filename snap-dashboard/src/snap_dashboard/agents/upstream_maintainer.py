@@ -35,6 +35,7 @@ from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.copilot_agent import CopilotAgentClient
+from snap_dashboard.github.bot_client import BotGitHubClient
 from snap_dashboard.github.utils import parse_owner_repo
 
 logger = logging.getLogger(__name__)
@@ -134,7 +135,8 @@ class UpstreamMaintainerAgent(BaseAgent):
             "a pull request with the dependency bumps. Skip if everything is already "
             "up to date — don't open an empty PR."
         )
-        task = client.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        base_ref = BotGitHubClient(token).get_default_branch(owner, repo)
+        task = client.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -143,7 +145,7 @@ class UpstreamMaintainerAgent(BaseAgent):
                     kind="dep_update",
                     owner_repo=owner_repo,
                     prompt=prompt,
-                    base_ref="main",
+                    base_ref=base_ref,
                     **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                 )
             )
@@ -229,6 +231,7 @@ class UpstreamMaintainerAgent(BaseAgent):
 
         dispatched = 0
         acted = False
+        base_ref = BotGitHubClient(token).get_default_branch(owner, repo)
         for issue in issues:
             if dispatched >= _MAX_ISSUES_PER_RUN:
                 break
@@ -243,7 +246,7 @@ class UpstreamMaintainerAgent(BaseAgent):
                 "decision, or you're not confident in a safe fix, leave a comment "
                 "explaining what's needed instead of guessing."
             )
-            task = client.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+            task = client.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
             with get_session() as session:
                 session.add(
                     CopilotTask(
@@ -253,7 +256,7 @@ class UpstreamMaintainerAgent(BaseAgent):
                         owner_repo=owner_repo,
                         prompt=prompt,
                         issue_number=number,
-                        base_ref="main",
+                        base_ref=base_ref,
                         **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                     )
                 )

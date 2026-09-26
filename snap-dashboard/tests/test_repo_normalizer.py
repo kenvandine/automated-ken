@@ -58,6 +58,9 @@ class _FakeBotClient:
     def file_exists(self, owner, repo, path):
         return f"{owner}/{repo}" in self.existing
 
+    def get_default_branch(self, owner, repo):
+        return "main"
+
 
 def _seed(session_local, packaging_repo="kenvandine/my-snap", testing_repo="kenvandine/automated-ken-tests"):
     session = session_local()

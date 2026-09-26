@@ -134,6 +134,8 @@ class RepoNormalizerAgent(BaseAgent):
 
         suite_block, moved_suite = self._build_suite_block(testing_repo, snap_name, token)
 
+        base_ref = bot_client.get_default_branch(owner, repo)
+
         prompt = (
             f"This repo packages the '{snap_name}' snap and is now maintained by "
             "automated-ken (https://github.com/kenvandine/automated-ken), a "
@@ -172,7 +174,7 @@ class RepoNormalizerAgent(BaseAgent):
             + "\nOpen a single pull request with all of the above changes."
         )
 
-        task = copilot.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        task = copilot.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -181,12 +183,12 @@ class RepoNormalizerAgent(BaseAgent):
                     kind="fleet_normalize",
                     owner_repo=owner_repo_str,
                     prompt=prompt,
-                    base_ref="main",
+                    base_ref=base_ref,
                     **task_result_fields(task, fallback_error=getattr(copilot, "last_error", None)),
                 )
             )
         if task and moved_suite and testing_repo:
-            self._dispatch_suite_cleanup(copilot, snap_id, snap_name, testing_repo, packaging_repo)
+            self._dispatch_suite_cleanup(bot_client, copilot, snap_id, snap_name, testing_repo, packaging_repo)
         return bool(task)
 
     @staticmethod
@@ -217,7 +219,13 @@ class RepoNormalizerAgent(BaseAgent):
         return "\n\n".join(blocks), True
 
     def _dispatch_suite_cleanup(
-        self, copilot: CodingDispatcher, snap_id: int, snap_name: str, testing_repo: str, packaging_repo: str,
+        self,
+        bot_client: BotGitHubClient,
+        copilot: CodingDispatcher,
+        snap_id: int,
+        snap_name: str,
+        testing_repo: str,
+        packaging_repo: str,
     ) -> None:
         owner_repo = parse_owner_repo(testing_repo)
         if not owner_repo:
@@ -238,13 +246,15 @@ class RepoNormalizerAgent(BaseAgent):
             if existing and existing.status not in RETRY_ELIGIBLE_STATUSES:
                 return
 
+        base_ref = bot_client.get_default_branch(owner, repo)
+
         prompt = (
             f"The '{snap_name}' YARF test suite under suites/{snap_name}/ has been "
             f"moved to its own packaging repo ({packaging_repo}), where it now lives "
             "under tests/. Please remove suites/"
             f"{snap_name}/ from this repo and open a pull request for the removal."
         )
-        task = copilot.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        task = copilot.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -254,7 +264,7 @@ class RepoNormalizerAgent(BaseAgent):
                     owner_repo=owner_repo_str,
                     prompt=prompt,
                     issue_number=snap_id,  # repurposed here as a "which snap" dedupe key
-                    base_ref="main",
+                    base_ref=base_ref,
                     **task_result_fields(task, fallback_error=getattr(copilot, "last_error", None)),
                 )
             )
