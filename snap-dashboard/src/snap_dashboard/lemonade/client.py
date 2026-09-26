@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -35,6 +36,16 @@ _TIMEOUT = 600
 # auto_promote_confidence threshold (default 0.85) even for a clean-looking
 # window, ensuring these runs still land in "needs manual review" territory.
 _MAX_SINGLE_IMAGE_CONFIDENCE = 0.35
+
+# Retry policy for /v1/chat/completions requests. Transient failures here
+# are overwhelmingly "lemond is still cold-loading/pulling this model" —
+# connection refused while the process is coming up, or a 425/429/503
+# while it's mid-load — rather than a real, permanent error, so a few
+# short-backoff retries turn what would otherwise be a silent fall-back-
+# to-heuristics into a successful (if slightly slower) first request.
+_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = (2, 8)  # len == _MAX_ATTEMPTS - 1
+_RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 
 
 class LemonadeClient:
@@ -83,6 +94,77 @@ class LemonadeClient:
             output_tokens=output_tokens,
             estimated=estimated,
         )
+
+    # ------------------------------------------------------------------
+    # Shared /v1/chat/completions POST with cold-load-aware retries
+    # ------------------------------------------------------------------
+
+    def _post_chat_completion(
+        self, payload: dict, *, timeout: float, task: str
+    ) -> httpx.Response | None:
+        """POST to /v1/chat/completions, retrying transient/cold-load failures.
+
+        Returns the successful ``Response`` (status 200), or ``None`` after
+        exhausting retries — always logged with enough detail (attempt
+        number, elapsed time, model, status/exception) to tell a genuine
+        outage apart from "the model was still loading" without needing to
+        reproduce the failure.
+        """
+        last_status: int | None = None
+        last_body: str = ""
+        last_exc: Exception | None = None
+
+        for attempt in range(1, _MAX_ATTEMPTS + 1):
+            start = time.monotonic()
+            try:
+                with httpx.Client(timeout=timeout) as client:
+                    resp = client.post(
+                        f"{self.base_url}/v1/chat/completions",
+                        json=payload,
+                        headers=self._headers(),
+                    )
+            except httpx.HTTPError as exc:
+                elapsed = time.monotonic() - start
+                last_exc = exc
+                logger.warning(
+                    "lemonade %s: %s after %.1fs on attempt %d/%d (model=%s): %s",
+                    task, type(exc).__name__, elapsed, attempt, _MAX_ATTEMPTS, self.model, exc,
+                )
+            else:
+                elapsed = time.monotonic() - start
+                if resp.status_code == 200:
+                    logger.debug(
+                        "lemonade %s: succeeded in %.1fs on attempt %d/%d (model=%s)",
+                        task, elapsed, attempt, _MAX_ATTEMPTS, self.model,
+                    )
+                    return resp
+                last_status = resp.status_code
+                last_body = resp.text[:300]
+                if resp.status_code not in _RETRYABLE_STATUS_CODES:
+                    logger.warning(
+                        "lemonade %s: HTTP %s (non-retryable) after %.1fs (model=%s): %s",
+                        task, resp.status_code, elapsed, self.model, last_body,
+                    )
+                    return None
+                logger.info(
+                    "lemonade %s: HTTP %s on attempt %d/%d (model=%s, %.1fs) — likely "
+                    "still cold-loading/pulling the model, retrying: %s",
+                    task, resp.status_code, attempt, _MAX_ATTEMPTS, self.model, elapsed, last_body,
+                )
+            if attempt < _MAX_ATTEMPTS:
+                time.sleep(_RETRY_BACKOFF_SECONDS[attempt - 1])
+
+        if last_status is not None:
+            logger.warning(
+                "lemonade %s: giving up after %d attempts (model=%s), last status %s: %s",
+                task, _MAX_ATTEMPTS, self.model, last_status, last_body,
+            )
+        else:
+            logger.warning(
+                "lemonade %s: giving up after %d attempts (model=%s): %s",
+                task, _MAX_ATTEMPTS, self.model, last_exc,
+            )
+        return None
 
     # ------------------------------------------------------------------
     # Availability check
@@ -147,25 +229,17 @@ class LemonadeClient:
         }
         if max_tokens:
             payload["max_tokens"] = max_tokens
+        resp = self._post_chat_completion(payload, timeout=timeout or _TIMEOUT, task="chat")
+        if resp is None:
+            return None
         try:
-            with httpx.Client(timeout=timeout or _TIMEOUT) as client:
-                resp = client.post(
-                    f"{self.base_url}/v1/chat/completions",
-                    json=payload,
-                    headers=self._headers(),
-                )
-            if resp.status_code != 200:
-                logger.warning(
-                    "lemonade chat error %s: %s", resp.status_code, resp.text[:200]
-                )
-                return None
             resp_json = resp.json()
             reply = resp_json["choices"][0]["message"]["content"]
-            self._record_usage("chat", resp_json, prompt_text=f"{system}\n{prompt}", reply_text=reply)
-            return reply
         except Exception as exc:
-            logger.warning("lemonade chat failed: %s", exc)
+            logger.warning("lemonade chat: failed to parse response (model=%s): %s", self.model, exc)
             return None
+        self._record_usage("chat", resp_json, prompt_text=f"{system}\n{prompt}", reply_text=reply)
+        return reply
 
     # ------------------------------------------------------------------
     # Vision: compare two images
@@ -223,31 +297,23 @@ class LemonadeClient:
             "messages": messages,
             "temperature": 0.1,
         }
+        resp = self._post_chat_completion(payload, timeout=_TIMEOUT, task="vision_compare")
+        if resp is None:
+            return None
         try:
-            with httpx.Client(timeout=_TIMEOUT) as client:
-                resp = client.post(
-                    f"{self.base_url}/v1/chat/completions",
-                    json=payload,
-                    headers=self._headers(),
-                )
-            if resp.status_code != 200:
-                logger.warning(
-                    "lemonade vision error %s: %s", resp.status_code, resp.text[:200]
-                )
-                return None
             resp_json = resp.json()
             content = resp_json["choices"][0]["message"]["content"]
-            self._record_usage(
-                "vision_compare",
-                resp_json,
-                prompt_text=prompt,
-                reply_text=content,
-                extra_input_tokens=2 * ESTIMATED_TOKENS_PER_IMAGE,
-            )
-            return _parse_vision_response(content)
         except Exception as exc:
-            logger.warning("lemonade vision_compare failed: %s", exc)
+            logger.warning("lemonade vision_compare: failed to parse response (model=%s): %s", self.model, exc)
             return None
+        self._record_usage(
+            "vision_compare",
+            resp_json,
+            prompt_text=prompt,
+            reply_text=content,
+            extra_input_tokens=2 * ESTIMATED_TOKENS_PER_IMAGE,
+        )
+        return _parse_vision_response(content)
 
     # ------------------------------------------------------------------
     # Vision: inspect a single screenshot (no baseline available)
@@ -312,34 +378,26 @@ class LemonadeClient:
             "messages": messages,
             "temperature": 0.1,
         }
+        resp = self._post_chat_completion(payload, timeout=_TIMEOUT, task="vision_inspect")
+        if resp is None:
+            return None
         try:
-            with httpx.Client(timeout=_TIMEOUT) as client:
-                resp = client.post(
-                    f"{self.base_url}/v1/chat/completions",
-                    json=payload,
-                    headers=self._headers(),
-                )
-            if resp.status_code != 200:
-                logger.warning(
-                    "lemonade vision error %s: %s", resp.status_code, resp.text[:200]
-                )
-                return None
             resp_json = resp.json()
             content = resp_json["choices"][0]["message"]["content"]
-            self._record_usage(
-                "vision_inspect",
-                resp_json,
-                prompt_text=prompt,
-                reply_text=content,
-                extra_input_tokens=ESTIMATED_TOKENS_PER_IMAGE,
-            )
-            result = _parse_vision_response(content)
-            if result is not None:
-                result["confidence"] = min(result["confidence"], _MAX_SINGLE_IMAGE_CONFIDENCE)
-            return result
         except Exception as exc:
-            logger.warning("lemonade vision_inspect failed: %s", exc)
+            logger.warning("lemonade vision_inspect: failed to parse response (model=%s): %s", self.model, exc)
             return None
+        self._record_usage(
+            "vision_inspect",
+            resp_json,
+            prompt_text=prompt,
+            reply_text=content,
+            extra_input_tokens=ESTIMATED_TOKENS_PER_IMAGE,
+        )
+        result = _parse_vision_response(content)
+        if result is not None:
+            result["confidence"] = min(result["confidence"], _MAX_SINGLE_IMAGE_CONFIDENCE)
+        return result
 
     # ------------------------------------------------------------------
     # PR description generator

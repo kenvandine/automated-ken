@@ -111,8 +111,11 @@ def test_vision_compare_uses_real_usage_when_present():
 
 def test_failed_request_does_not_record_usage():
     resp = _FakeResp({}, status_code=500)
+    # 500 is retried a couple of times before giving up — patch out the real
+    # sleep between attempts so this test stays fast.
     with patch("httpx.Client", return_value=_FakeClient(resp)), \
-            patch("snap_dashboard.lemonade.client.record_model_usage") as record:
+            patch("snap_dashboard.lemonade.client.record_model_usage") as record, \
+            patch("snap_dashboard.lemonade.client.time.sleep"):
         result = _client().chat("hi")
     assert result is None
     record.assert_not_called()

@@ -78,7 +78,13 @@ def test_vision_inspect_caps_confidence_even_if_model_overshoots():
 
 def test_vision_inspect_returns_none_on_http_error():
     resp = _FakeResp({}, status_code=500)
-    with patch("httpx.Client", return_value=_FakeClient(resp)):
+    # 500 is treated as a possibly-transient "still cold-loading" error and
+    # retried a couple of times before giving up — patch out the real sleep
+    # between attempts so this test stays fast.
+    with (
+        patch("httpx.Client", return_value=_FakeClient(resp)),
+        patch("snap_dashboard.lemonade.client.time.sleep"),
+    ):
         result = _client().vision_inspect(
             image_bytes=b"fakepng", snap_name="evince", version="45.0"
         )
