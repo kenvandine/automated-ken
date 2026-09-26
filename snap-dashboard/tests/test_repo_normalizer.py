@@ -275,3 +275,36 @@ def test_run_skips_packaging_repo_not_owned_by_user(isolated_session, monkeypatc
     result = agent._run()
 
     assert "no owned packaging repos found" in result
+
+
+def test_only_snap_id_bypasses_disabled_gate_and_scopes_to_one_snap(isolated_session, monkeypatch) -> None:
+    """The "Normalize Repo" button on a single snap's detail page must work
+    even when the fleet-wide campaign isn't opted in, and must only touch
+    the one snap it was triggered for."""
+    user_id, snap_id = _seed(isolated_session)
+    # A second, unrelated snap for the same user — must NOT be touched.
+    session = isolated_session()
+    other = Snap(user_id=user_id, name="other-snap", packaging_repo="kenvandine/other-snap")
+    session.add(other)
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    uc.fleet_normalization_enabled = False
+    session.commit()
+    other_id = other.id
+    session.close()
+
+    monkeypatch.setattr(rn_module, "list_suite_files", lambda *a, **k: None)
+    monkeypatch.setattr(rn_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(rn_module, "get_coding_dispatcher", lambda uc: _FakeDispatcher())
+    monkeypatch.setattr(rn_module, "BotGitHubClient", lambda *a, **k: _FakeBotClient())
+
+    agent = RepoNormalizerAgent(user_id=user_id, only_snap_id=snap_id)
+    result = agent._run()
+
+    assert "dispatched 1 normalization task" in result
+    session = isolated_session()
+    tasks = session.query(CopilotTask).filter_by(kind="fleet_normalize").all()
+    assert len(tasks) == 1
+    assert tasks[0].snap_id == snap_id
+    assert tasks[0].snap_id != other_id
+    session.close()
+

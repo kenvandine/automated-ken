@@ -715,8 +715,11 @@ class CopilotTask(Base):
     Covers all the "capable coding" work delegated out rather than done with
     a local/small model: fixing a failing CI check on a bot PR (``ci_fix``),
     dependency upgrades on a repo the user maintains upstream (``dep_update``),
-    attempting a fix for a filed issue (``issue_fix``), and the one-time
-    fleet-normalization campaign (``fleet_normalize``).
+    attempting a fix for a filed issue (``issue_fix``), the one-time
+    fleet-normalization campaign (``fleet_normalize``), a manual "review this
+    repo's stack for outdated deps/framework version" trigger
+    (``stack_update``), and a manual Copilot review request on an open PR
+    (``pr_review_request``).
     """
 
     __tablename__ = "copilot_tasks"
@@ -724,7 +727,7 @@ class CopilotTask(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     snap_id = Column(Integer, ForeignKey("snaps.id", ondelete="SET NULL"), nullable=True)
-    # ci_fix | dep_update | issue_fix | fleet_normalize
+    # ci_fix | dep_update | issue_fix | fleet_normalize | stack_update | pr_review_request
     kind = Column(String(32), nullable=False)
     owner_repo = Column(String(500), nullable=False)  # "owner/repo" the task targets
     # GitHub's own agent-task id, e.g. for GET /agents/repos/{o}/{r}/tasks/{id}.
@@ -752,3 +755,36 @@ class CopilotTask(Base):
             f"<CopilotTask id={self.id} kind={self.kind!r}"
             f" repo={self.owner_repo!r} status={self.status!r}>"
         )
+
+
+class IssueReviewReport(Base):
+    """Latest "review open issues/PRs" summary for one snap.
+
+    Produced on-demand from the snap detail page's "Review Issues & PRs"
+    button (see ``agents/issue_pr_reviewer.py``) rather than on a schedule.
+    ``items_json`` is a JSON array of ``{owner_repo, number, type, title,
+    url, age_days, needs_attention, note}`` dicts — used both to render the
+    summary table and to know which repo/issue-number an "Address with
+    Copilot" button on a given row should dispatch a CopilotTask against.
+    Only the most recent report per snap is kept (overwritten in place)
+    since a new review supersedes the old one.
+    """
+
+    __tablename__ = "issue_review_reports"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    snap_id = Column(
+        Integer, ForeignKey("snaps.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    summary = Column(Text, nullable=True)
+    items_json = Column(Text, nullable=True)
+    error_msg = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=_now, nullable=False)
+    updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
+
+    user = relationship("User")
+    snap = relationship("Snap")
+
+    def __repr__(self) -> str:
+        return f"<IssueReviewReport snap_id={self.snap_id}>"

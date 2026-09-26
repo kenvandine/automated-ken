@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from html import escape
@@ -11,12 +12,13 @@ from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, StaleBuildTrigger, TestRun
+from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, IssueReviewReport, Snap, StaleBuildTrigger, TestRun
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.repo_discovery import (
     build_packaging_repo_map,
     get_cached_packaging_repo_map,
 )
+from snap_dashboard.github.utils import parse_repo_slug
 from snap_dashboard.store.client import extract_repo_urls, get_snap_info
 from snap_dashboard.web.templating import templates
 
@@ -195,6 +197,22 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             .all()
         )
 
+        # Most recent "Review Issues & PRs" run, if any (see
+        # agents/issue_pr_reviewer.py) — overwritten in place on each run.
+        review_report = session.query(IssueReviewReport).filter_by(snap_id=snap.id).first()
+        review_report_data = None
+        if review_report:
+            try:
+                review_items = json.loads(review_report.items_json or "[]")
+            except (json.JSONDecodeError, TypeError):
+                review_items = []
+            review_report_data = {
+                "summary": review_report.summary,
+                "items": review_items,
+                "error_msg": review_report.error_msg,
+                "updated_at": review_report.updated_at,
+            }
+
         # Build channel map table: arch -> {channel: {version, revision, released_at}}
         arch_map: dict[str, dict] = {}
         for cm in cm_rows:
@@ -222,6 +240,16 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             "packaging_repo_suggested": None,
             "upstream_repo_suggested": None,
         }
+        # True when the packaging repo and upstream repo are the same GitHub
+        # repo (e.g. a personal Electron/Rust app the user both develops and
+        # packages) — shown to gate the "Check for Stack Updates" button,
+        # since that prompt assumes there's one repo to review both the
+        # framework/dependency stack *and* the packaging in.
+        snap_data["same_repo"] = bool(
+            snap.packaging_repo
+            and snap.upstream_repo
+            and parse_repo_slug(snap.packaging_repo).lower() == parse_repo_slug(snap.upstream_repo).lower()
+        )
 
         # If either repo URL is unknown, try to suggest one from Snap Store
         issues_data = [
@@ -329,6 +357,7 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             "issues": issues_data,
             "test_runs": test_runs_data,
             "rebuild_triggers": rebuild_triggers_data,
+            "review_report": review_report_data,
             "last_run": _get_last_run(user_id),
             "channels": ["stable", "candidate", "beta", "edge"],
             "current_user": user,
@@ -429,6 +458,134 @@ async def snap_rebuild(name: str, request: Request):
     if is_fetch:
         return JSONResponse({"started": True})
     return RedirectResponse(url=f"/snap/{name}?notice=rebuild_started", status_code=303)
+
+
+@router.post("/snap/{name}/normalize")
+async def snap_normalize(name: str, request: Request) -> RedirectResponse:
+    """Manually run the fleet-normalization campaign against just this one
+    snap's packaging repo — the single-snap counterpart of Settings' opt-in
+    "fleet_normalization_enabled" scheduled campaign (see
+    agents/repo_normalizer.py). Lets a user normalize one repo (canonical
+    build/publish workflow, AGENTS.md, remove stray sync-release workflows)
+    without opting the whole fleet in.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            return RedirectResponse(url="/", status_code=303)
+        if not snap.packaging_repo:
+            return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.repo_normalizer import RepoNormalizerAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(RepoNormalizerAgent(user_id=user_id, only_snap_id=snap_id))
+    return RedirectResponse(url=f"/snap/{name}?notice=normalize_started", status_code=303)
+
+
+@router.post("/snap/{name}/stack-update")
+async def snap_stack_update(name: str, request: Request) -> RedirectResponse:
+    """Ask Copilot cloud agent to review this snap's repo for outdated
+    stack/framework dependencies (npm/cargo/pip/go, plus an Electron version
+    bump if applicable) — see agents/stack_updater.py. Only meaningful (and
+    only shown in the UI) when the packaging repo and upstream repo are the
+    same GitHub repo, i.e. a project the user develops and packages together.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            return RedirectResponse(url="/", status_code=303)
+        if not snap.packaging_repo:
+            return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
+        if not snap.upstream_repo or parse_repo_slug(snap.packaging_repo).lower() != parse_repo_slug(snap.upstream_repo).lower():
+            return RedirectResponse(url=f"/snap/{name}?error=not_same_repo", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.stack_updater import StackUpdateAgent
+
+    get_runner().submit(StackUpdateAgent(user_id=user_id, snap_id=snap_id))
+    return RedirectResponse(url=f"/snap/{name}?notice=stack_update_started", status_code=303)
+
+
+@router.post("/snap/{name}/review-issues")
+async def snap_review_issues(name: str, request: Request) -> RedirectResponse:
+    """Review every open issue/PR on this snap's repo(s) and summarize what
+    needs attention — see agents/issue_pr_reviewer.py. Runs in the
+    background and refreshes the "Issues & PRs Review" section on this page
+    once done (poll by reloading, same as other agent-backed actions here).
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            return RedirectResponse(url="/", status_code=303)
+        if not snap.packaging_repo and not snap.upstream_repo:
+            return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.issue_pr_reviewer import IssuePrReviewAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(IssuePrReviewAgent(user_id=user_id, snap_id=snap_id))
+    return RedirectResponse(url=f"/snap/{name}?notice=review_started", status_code=303)
+
+
+@router.post("/snap/{name}/review-issues/address")
+async def snap_review_issues_address(
+    name: str,
+    request: Request,
+    owner_repo: str = Form(...),
+    number: int = Form(...),
+    item_type: str = Form(...),
+    title: str = Form(default=""),
+    body: str = Form(default=""),
+) -> RedirectResponse:
+    """"Address with Copilot" for one item from the Issues & PRs Review
+    section — dispatches an issue-fix attempt (issues) or a Copilot review
+    request (PRs). See agents/issue_pr_reviewer.py's AddressReviewItemAgent.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            return RedirectResponse(url="/", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.issue_pr_reviewer import AddressReviewItemAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(
+        AddressReviewItemAgent(
+            user_id=user_id,
+            snap_id=snap_id,
+            owner_repo=owner_repo,
+            number=number,
+            item_type=item_type,
+            title=title,
+            body=body,
+        )
+    )
+    return RedirectResponse(url=f"/snap/{name}?notice=address_started#review-section", status_code=303)
 
 
 @router.post("/snap/{name}/trigger-test")

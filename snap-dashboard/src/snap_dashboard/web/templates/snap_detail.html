@@ -11,6 +11,10 @@
   {% if notice == 'test_queued' %}Test run queued — see it in the Test Run History below.
   {% elif notice == 'scan_started' %}Checking for a newer upstream version — a version-bump PR will open automatically if one is found.
   {% elif notice == 'rebuild_started' %}Rebuild triggered — see it on the <a href="/agents" class="link-inline">Agents</a> page.
+  {% elif notice == 'normalize_started' %}Normalizing this repo (workflow + AGENTS.md) — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
+  {% elif notice == 'stack_update_started' %}Reviewing the repo's stack/dependencies for updates — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
+  {% elif notice == 'review_started' %}Reviewing open issues/PRs — reload this page in a bit to see the summary below.
+  {% elif notice == 'address_started' %}Dispatched — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
   {% else %}{{ notice }}{% endif %}
 </div>
 {% endif %}
@@ -18,6 +22,7 @@
 <div class="p-notification--negative detail-section" style="padding:8px 12px; border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
   <span>
   {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for updates or triggering a rebuild.
+  {% elif page_error == 'not_same_repo' %}Stack updates need the packaging repo and upstream repo to be the same GitHub repo.
   {% elif page_error == 'trigger_failed' %}Failed to queue the test run — check that a runner is enrolled and online.
   {% else %}{{ page_error }}{% endif %}
   </span>
@@ -70,6 +75,25 @@
           hx-post="/snap/{{ snap.name }}/rebuild" hx-target="#page-content" hx-select="#page-content"
           hx-swap="innerHTML" hx-disabled-elt="find button">
       <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild — the dashboard inspects the packaging repo's GitHub Actions workflows and figures out which one builds/publishes the snap">Rebuild Now</button>
+    </form>
+    <form method="post" action="/snap/{{ snap.name }}/normalize" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/normalize" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button is-small" title="Ask Copilot to bring this repo's build/publish workflow and AGENTS.md in line with the rest of the fleet">Normalize Repo</button>
+    </form>
+    {% if snap.same_repo %}
+    <form method="post" action="/snap/{{ snap.name }}/stack-update" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/stack-update" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button is-small" title="Ask Copilot to check this repo's stack (Electron/Node, Rust, Python, Go, ...) for outdated dependencies or a stale framework version">Check for Stack Updates</button>
+    </form>
+    {% endif %}
+    {% endif %}
+    {% if snap.packaging_repo or snap.upstream_repo %}
+    <form method="post" action="/snap/{{ snap.name }}/review-issues" style="display:inline"
+          hx-post="/snap/{{ snap.name }}/review-issues" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button is-small" title="Summarize open issues/PRs and flag what needs attention">Review Issues &amp; PRs</button>
     </form>
     {% endif %}
     <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
@@ -183,6 +207,63 @@
   </div>
   {% endif %}
 </div>
+
+<!-- Issues & PRs Review summary -->
+{% if review_report %}
+<div class="card detail-section" id="review-section">
+  <h3 class="section-label">Issues &amp; PRs Review</h3>
+  {% if review_report.updated_at %}
+  <p class="text-muted small">Last reviewed: {{ review_report.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
+  {% endif %}
+  {% if review_report.error_msg %}
+  <p class="p-notification--negative" style="padding:6px 10px; border-radius:4px;">{{ review_report.error_msg }}</p>
+  {% elif review_report.summary %}
+  <pre style="white-space:pre-wrap; font-family:inherit; margin:0 0 12px 0;">{{ review_report.summary }}</pre>
+  {% endif %}
+  {% if review_report.items %}
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Repo</th>
+          <th>#</th>
+          <th>Title</th>
+          <th>Age</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for it in review_report.items %}
+        <tr>
+          <td>{{ 'PR' if it.type == 'pr' else 'Issue' }}</td>
+          <td class="muted small">{{ it.owner_repo }}</td>
+          <td><a href="{{ it.url }}" target="_blank" rel="noopener">#{{ it.number }}</a></td>
+          <td>{{ it.title }}</td>
+          <td class="muted small">{{ it.age_days ~ 'd' if it.age_days is not none else '—' }}</td>
+          <td>
+            <form method="post" action="/snap/{{ snap.name }}/review-issues/address" style="margin:0;"
+                  hx-post="/snap/{{ snap.name }}/review-issues/address" hx-target="#page-content" hx-select="#page-content"
+                  hx-swap="innerHTML" hx-disabled-elt="find button">
+              <input type="hidden" name="owner_repo" value="{{ it.owner_repo }}">
+              <input type="hidden" name="number" value="{{ it.number }}">
+              <input type="hidden" name="item_type" value="{{ it.type }}">
+              <input type="hidden" name="title" value="{{ it.title }}">
+              <input type="hidden" name="body" value="{{ it.body }}">
+              <button type="submit" class="p-button--link" style="font-size:11px;"
+                      title="{{ 'Request a Copilot code review on this PR' if it.type == 'pr' else 'Ask Copilot to attempt a fix for this issue' }}">
+                Address with Copilot
+              </button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
 
 <!-- Issues & PRs -->
 <div class="card detail-section">

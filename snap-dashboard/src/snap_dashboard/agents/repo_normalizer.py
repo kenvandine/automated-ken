@@ -55,26 +55,35 @@ class RepoNormalizerAgent(BaseAgent):
 
     agent_type = "repo_normalizer"
 
-    def __init__(self, user_id: int | None = None) -> None:
+    def __init__(self, user_id: int | None = None, only_snap_id: int | None = None) -> None:
         super().__init__(user_id=user_id)
+        # Set when triggered manually from a single snap's detail page (the
+        # "Normalize Repo" button) rather than the fleet-wide scheduled/
+        # opt-in campaign — bypasses the fleet_normalization_enabled gate
+        # below (the user explicitly asked for this one repo) and scopes
+        # the run to just that snap instead of the whole portfolio.
+        self.only_snap_id = only_snap_id
 
     def _run(self) -> str:
         if not self.user_id:
             return "no user_id — skipped"
         uc = get_user_config(self.user_id)
-        if not uc or not getattr(uc, "fleet_normalization_enabled", False):
+        if not self.only_snap_id and (not uc or not getattr(uc, "fleet_normalization_enabled", False)):
             return "disabled"
-        token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "")
+        token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "") if uc else ""
         if not token:
             return "no GitHub token configured"
-        testing_repo = getattr(uc, "testing_repo", "") or ""
+        testing_repo = getattr(uc, "testing_repo", "") or "" if uc else ""
 
         with get_session() as session:
             user = session.query(User).get(self.user_id)
             login = (user.github_login or "") if user else ""
+            snap_query = session.query(Snap).filter_by(user_id=self.user_id)
+            if self.only_snap_id:
+                snap_query = snap_query.filter_by(id=self.only_snap_id)
             snaps = [
                 (s.id, s.name, s.packaging_repo)
-                for s in session.query(Snap).filter_by(user_id=self.user_id).all()
+                for s in snap_query.all()
                 if s.packaging_repo
             ]
 
