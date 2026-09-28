@@ -29,6 +29,29 @@ def _gh_headers(token: str) -> dict[str, str]:
     return h
 
 
+def _is_newer_build(rev: int | None, other_rev: int | None, ver: str | None, other_ver: str | None) -> bool:
+    """Return True if this channel's build is newer than another's.
+
+    Snap Store *revisions* are assigned store-wide (shared across every
+    channel and architecture a snap has) and strictly increase by one on
+    every single publish — they're a reliable, always-comparable ordering.
+    The *version* string, by contrast, is just whatever the packaging
+    author put in ``snapcraft.yaml``; it's controlled by the upstream
+    project, not guaranteed to be semver (or even sortable at all — think
+    date-based, git-hash-based, or otherwise idiosyncratic schemes), and
+    two channels can easily carry the exact same version string for a
+    same-version rebuild (e.g. a security patch) where only the revision
+    actually moved. So revision is compared first and is authoritative
+    whenever available; the version-string heuristic (:func:`is_newer`) is
+    only a fallback for the rare case a revision is missing on either side.
+    """
+    if other_rev is None:
+        return rev is not None  # nothing published to the other channel yet
+    if rev is not None:
+        return rev > other_rev
+    return is_newer(ver, other_ver)
+
+
 def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
     """Return snaps where candidate or edge version differs from stable, as a set.
 
@@ -85,27 +108,23 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
                 stable_rev = stable_info.get("revision")
 
                 if can_promote:
-                    # Include rebuilds: same version but higher revision
-                    # (e.g. a security rebuild). Otherwise only a version
-                    # that's actually newer than stable counts — a stale
-                    # candidate that's *older* (e.g. left over from before a
-                    # manual/out-of-band stable release) must not show up as
-                    # "ready to promote".
-                    is_rebuild = (
-                        ver == stable_ver
-                        and info.get("revision") is not None
-                        and stable_rev is not None
-                        and info["revision"] > stable_rev
-                    )
-                    differs = is_rebuild or is_newer(ver, stable_ver)
+                    # A build is only "ready to promote" if it's actually
+                    # newer than stable — this also naturally covers
+                    # same-version rebuilds (e.g. a security rebuild),
+                    # since those still get a higher revision.
+                    differs = _is_newer_build(info.get("revision"), stable_rev, ver, stable_ver)
                 else:
-                    candidate_ver = ((channels.get("candidate") or {}).get(arch) or {}).get("version")
+                    candidate_info = (channels.get("candidate") or {}).get(arch) or {}
+                    candidate_ver = candidate_info.get("version")
+                    candidate_rev = candidate_info.get("revision")
                     # Edge only belongs in "test only" when it's actually
-                    # ahead of both stable and candidate — an edge version
-                    # that's merely *older* than one of them (e.g. stable/
+                    # ahead of both stable and candidate — an edge build
+                    # that's merely *behind* one of them (e.g. stable/
                     # candidate got a newer release since edge was last
                     # built) must not be listed as if it needed testing.
-                    differs = is_newer(ver, stable_ver) and is_newer(ver, candidate_ver)
+                    differs = _is_newer_build(
+                        info.get("revision"), stable_rev, ver, stable_ver
+                    ) and _is_newer_build(info.get("revision"), candidate_rev, ver, candidate_ver)
 
                 if not differs:
                     continue

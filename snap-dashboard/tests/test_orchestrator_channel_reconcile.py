@@ -132,6 +132,36 @@ def test_candidate_newer_than_stable_is_still_flagged(isolated_session):
     assert results[0]["version"] == "0.5.2"
 
 
+def test_revision_is_authoritative_over_an_unsortable_version_string(isolated_session):
+    """Revision must win even when the version string can't be compared.
+
+    Snap versions are arbitrary, upstream-controlled strings (dates, git
+    hashes, build metadata, ...) that don't necessarily sort the way a
+    naive string/semver comparison would suggest. Revisions, by contrast,
+    are Store-assigned and strictly increasing on every publish — so a
+    higher revision must always win regardless of what the version string
+    looks like.
+    """
+    session_local = isolated_session
+    with session_local() as session:
+        snap = Snap(name="git-hash-versioned-app", user_id=1)
+        session.add(snap)
+        session.flush()
+        # "abc123" sorts lexicographically *after* "zzz999" is false, but
+        # pick a pair where a naive comparator would get it backwards:
+        # candidate's version string is "lexicographically smaller" than
+        # stable's, yet its revision (the real source of truth) is higher.
+        _seed_channel_map(session, snap.id, "stable", "amd64", "zzz-build", 10)
+        _seed_channel_map(session, snap.id, "candidate", "amd64", "aaa-build", 15)
+        session.commit()
+
+        results = orchestrator.find_snaps_needing_tests(session, user_id=1)
+
+    assert len(results) == 1
+    assert results[0]["from_channel"] == "candidate"
+    assert results[0]["version"] == "aaa-build"
+
+
 def test_same_version_higher_revision_rebuild_still_flagged(isolated_session):
     """Same-version security rebuild (higher revision) must still show up."""
     session_local = isolated_session
