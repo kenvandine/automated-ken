@@ -80,8 +80,13 @@ class BaseAgent(ABC):
             logger.info("agent %s started (run_id=%s snap=%s)", self.agent_type, self._run_id, self.snap_name)
             try:
                 summary = self._run()
-                self._finish_run(summary=summary, log_output=capture.getvalue())
+                # Log the final summary *before* snapshotting the captured log
+                # text, so the persisted log_output ends with the same
+                # "agent ... done: <summary>" line you'd see live — otherwise
+                # the stored log looks like it just stops mid-run with no
+                # indication of success/failure or the resulting PR url.
                 logger.info("agent %s done (run_id=%s): %s", self.agent_type, self._run_id, summary)
+                self._finish_run(summary=summary, log_output=capture.getvalue())
             except Exception as exc:
                 logger.exception("agent %s error (run_id=%s): %s", self.agent_type, self._run_id, exc)
                 self._error_run(str(exc), log_output=capture.getvalue())

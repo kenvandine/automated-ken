@@ -41,11 +41,14 @@ def isolated_session(monkeypatch):
     return session_local
 
 
+_UNSET = object()
+
+
 class _FakeDispatcher:
-    def __init__(self, task: dict | None = None) -> None:
+    def __init__(self, task=_UNSET) -> None:
         self.calls: list[tuple] = []
         self.last_error = None
-        self._task = task if task is not None else {"id": "task-1"}
+        self._task = {"id": "task-1"} if task is _UNSET else task
 
     def start_task(self, owner, repo, prompt, base_ref="main", create_pull_request=True, model=None):
         self.calls.append((owner, repo, prompt, base_ref))
@@ -160,6 +163,65 @@ def test_no_coding_backend_skips(isolated_session, monkeypatch) -> None:
 
     agent = CustomPromptAgent(user_id=user_id, snap_id=snap_id, prompt="do something")
     assert agent._run() == "no coding backend configured/available"
+
+
+def test_completed_task_with_pr_url_reports_success(isolated_session, monkeypatch) -> None:
+    """A synchronous backend (e.g. local Lemonade) that already opened the
+    PR should surface the PR url directly in the summary, not just
+    'dispatched' — see the log-legibility fix in this commit."""
+    user_id, snap_id = _seed(isolated_session)
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    session.close()
+
+    dispatcher = _FakeDispatcher(
+        task={"state": "completed", "html_url": "https://github.com/kenvandine/neofetch-desktop/pull/9"}
+    )
+    monkeypatch.setattr(cp_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(cp_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    monkeypatch.setattr(cp_module, "BotGitHubClient", _FakeBotClient)
+
+    agent = CustomPromptAgent(user_id=user_id, snap_id=snap_id, prompt="do something")
+    result = agent._run()
+
+    assert result == "succeeded: opened https://github.com/kenvandine/neofetch-desktop/pull/9"
+
+
+def test_failed_task_reports_failure_with_error(isolated_session, monkeypatch) -> None:
+    user_id, snap_id = _seed(isolated_session)
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    session.close()
+
+    dispatcher = _FakeDispatcher(task={"state": "failed", "error": "boom: out of disk space"})
+    monkeypatch.setattr(cp_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(cp_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    monkeypatch.setattr(cp_module, "BotGitHubClient", _FakeBotClient)
+
+    agent = CustomPromptAgent(user_id=user_id, snap_id=snap_id, prompt="do something")
+    result = agent._run()
+
+    assert result.startswith("FAILED")
+    assert "boom: out of disk space" in result
+
+
+def test_dispatch_call_returning_none_reports_failure(isolated_session, monkeypatch) -> None:
+    user_id, snap_id = _seed(isolated_session)
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    session.close()
+
+    dispatcher = _FakeDispatcher(task=None)
+    dispatcher.last_error = "HTTP 403: copilot_plan_required"
+    monkeypatch.setattr(cp_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(cp_module, "get_coding_dispatcher", lambda uc: dispatcher)
+    monkeypatch.setattr(cp_module, "BotGitHubClient", _FakeBotClient)
+
+    agent = CustomPromptAgent(user_id=user_id, snap_id=snap_id, prompt="do something")
+    result = agent._run()
+
+    assert result.startswith("FAILED")
+    assert "copilot_plan_required" in result
 
 
 def test_snap_name_passed_through_to_base_agent() -> None:

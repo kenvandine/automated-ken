@@ -94,6 +94,7 @@ class CustomPromptAgent(BaseAgent):
         )
 
         task = dispatcher.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
+        fields = task_result_fields(task, fallback_error=getattr(dispatcher, "last_error", None))
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -103,11 +104,26 @@ class CustomPromptAgent(BaseAgent):
                     owner_repo=owner_repo_str,
                     prompt=prompt,
                     base_ref=base_ref,
-                    **task_result_fields(task, fallback_error=getattr(dispatcher, "last_error", None)),
+                    **fields,
                 )
             )
 
-        return (
-            f"dispatched custom task for {owner_repo_str}"
-            if task else f"dispatch failed for {owner_repo_str}"
-        )
+        # Make the summary self-contained: whether it succeeded, is still
+        # queued/running, or failed, and (if known already) the PR url —
+        # this is what shows up both in the "recent activity" list and as
+        # the final line of the persisted run log, so it needs to answer
+        # "did this work?" without requiring a click into /copilot-tasks.
+        status = fields.get("status")
+        pr_url = fields.get("pr_url")
+        error_msg = fields.get("error_msg")
+        if status == "failed" or (not task and status == "dispatch_failed"):
+            detail = f" — {error_msg}" if error_msg else ""
+            return f"FAILED: custom task for {owner_repo_str}{detail}"
+        if status == "completed" and pr_url:
+            return f"succeeded: opened {pr_url}"
+        if status == "completed":
+            return f"succeeded for {owner_repo_str} (no PR url returned)"
+        # copilot_cloud_agent dispatches async — status is "queued" here;
+        # the real outcome (and PR url) shows up later in /copilot-tasks
+        # and, once the PR opens, in pr_monitor.py's CI-watch.
+        return f"dispatched custom task for {owner_repo_str} (status={status or 'unknown'})"
