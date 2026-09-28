@@ -120,16 +120,23 @@ button {
 }
 
 /* ---- Main app top navigation --------------------------------
-   Vanilla's .p-navigation__row is a CSS Grid container shared with
-   the page's column grid system, which normally splits it into a
-   banner column and a nav column side by side. Force both to span
-   every grid column instead, so the banner (logo + user menu) gets
-   its own full-width row on top, with the nav links wrapping onto
-   their own line below — all while keeping Vanilla's own display/
-   responsive rules (dark theme, mobile collapse, etc.) intact. */
+   Vanilla's .p-navigation__row lays the banner (logo + user menu)
+   and nav out as flex/grid siblings side by side, sized to their
+   own content — so at wide viewports the (narrow) banner and the
+   nav links end up squeezed together on the left instead of the
+   banner spanning the full row with nav below it. Force a wrap: the
+   banner always takes the full row width by itself, pushing the nav
+   links onto their own line(s) underneath, while keeping Vanilla's
+   own display/responsive rules (dark theme, mobile collapse, etc.)
+   intact. */
+.p-navigation .p-navigation__row {
+  flex-wrap: wrap;
+}
+
 .p-navigation .p-navigation__banner,
 .p-navigation .p-navigation__nav {
   grid-column: 1 / -1;
+  flex: 1 1 100%;
 }
 
 .p-navigation .p-navigation__banner {
@@ -153,6 +160,11 @@ button {
 .nav-user-menu {
   display: flex;
   align-items: center;
+  /* Vanilla's .p-contextual-menu class normally supplies this, but we
+     pin it here too so the dropdown always anchors under this toggle
+     (not some distant positioned ancestor) even if that class is ever
+     dropped from the markup. */
+  position: relative;
 }
 
 .nav-user-toggle {
