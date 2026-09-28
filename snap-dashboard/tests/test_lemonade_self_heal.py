@@ -6,6 +6,7 @@ lemonade/client.py's ``_post_chat_completion``).
 
 from __future__ import annotations
 
+import time
 from unittest.mock import MagicMock, patch
 
 from snap_dashboard.lemonade import embedded as embedded_module
@@ -86,7 +87,11 @@ def test_reload_model_returns_false_on_connection_error():
 
 def test_restart_stops_and_relaunches():
     manager = _manager()
-    manager._last_restart_at = 0.0  # long ago -> cooldown does not block
+    # time.monotonic() has an arbitrary epoch (often ~system boot), so on a
+    # freshly-booted CI VM 0.0 isn't reliably "long ago" -- compute an
+    # offset relative to now instead so the cooldown check is bypassed
+    # regardless of how long the machine has been up.
+    manager._last_restart_at = time.monotonic() - embedded_module._RESTART_COOLDOWN_SECONDS - 1
     fake_proc = MagicMock()
     fake_proc.poll.return_value = None
     manager._proc = fake_proc
