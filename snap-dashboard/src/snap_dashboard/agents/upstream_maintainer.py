@@ -37,6 +37,7 @@ from snap_dashboard.db.session import get_session
 from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.bot_client import BotGitHubClient
 from snap_dashboard.github.utils import is_owned_by, parse_owner_repo
+from snap_dashboard.agents.npm_registry import find_real_outdated_deps
 
 logger = logging.getLogger(__name__)
 
@@ -126,14 +127,35 @@ class UpstreamMaintainerAgent(BaseAgent):
             if recent:
                 return False
 
+        bot_client = BotGitHubClient(token, read_token=read_token or token)
+
+        # Verify against the real npm registry before dispatching anything —
+        # a single-shot coding backend with no tool use (local_lemonade) has
+        # no way to check this itself and will otherwise guess plausible-
+        # looking version numbers that may not even exist. See
+        # agents/npm_registry.py for the incident this guards against.
+        outdated = find_real_outdated_deps(bot_client, owner, repo)
+        if not outdated:
+            return False  # nothing genuinely outdated — don't open an empty/bogus PR
+
+        lines = []
+        for manifest_path, deps in outdated.items():
+            lines.append(f"In {manifest_path}:")
+            for name, (current_spec, latest) in deps.items():
+                lines.append(f"  - {name}: {current_spec} -> {latest} (verified via registry.npmjs.org)")
+        outdated_summary = "\n".join(lines)
+
         prompt = (
-            f"Check {owner_repo} for outdated npm/node dependencies (package.json / "
-            "package-lock.json). If any are outdated, upgrade them to the latest "
-            "compatible versions, run the existing test suite if one exists, and open "
-            "a pull request with the dependency bumps. Skip if everything is already "
-            "up to date — don't open an empty PR."
+            f"The following npm dependencies in {owner_repo} are genuinely outdated "
+            "(verified against the real npm registry — use exactly these target "
+            f"version numbers, don't substitute your own):\n{outdated_summary}\n\n"
+            "Update each package.json to pin exactly these versions, regenerate the "
+            "matching lockfile (package-lock.json / pnpm-lock.yaml / yarn.lock, "
+            "whichever this repo uses) so it's consistent with the new versions, run "
+            "the existing test suite if one exists, and open a pull request with the "
+            "dependency bumps."
         )
-        base_ref = BotGitHubClient(token, read_token=read_token or token).get_default_branch(owner, repo)
+        base_ref = bot_client.get_default_branch(owner, repo)
         task = client.start_task(owner, repo, prompt, base_ref=base_ref, create_pull_request=True)
         with get_session() as session:
             session.add(

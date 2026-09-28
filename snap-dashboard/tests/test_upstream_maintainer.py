@@ -104,6 +104,11 @@ def test_run_dispatches_dep_update_for_owned_repo(isolated_session, monkeypatch)
     monkeypatch.setattr(um_module, "get_user_config", lambda uid: uc)
     monkeypatch.setattr(um_module, "get_coding_dispatcher", lambda uc_: dispatcher)
     monkeypatch.setattr(
+        um_module,
+        "find_real_outdated_deps",
+        lambda client, owner, repo: {"package.json": {"svelte": ("^5.0.0", "5.57.1")}},
+    )
+    monkeypatch.setattr(
         UpstreamMaintainerAgent, "_maybe_request_reviews", lambda self, *a, **k: False
     )
     monkeypatch.setattr(
@@ -117,12 +122,47 @@ def test_run_dispatches_dep_update_for_owned_repo(isolated_session, monkeypatch)
     assert len(dispatcher.calls) == 1
     owner, repo, prompt = dispatcher.calls[0]
     assert (owner, repo) == ("kenvandine", "gemini-desktop")
-    assert "outdated npm/node dependencies" in prompt
+    assert "svelte: ^5.0.0 -> 5.57.1" in prompt
+    assert "verified via registry.npmjs.org" in prompt
 
     session = isolated_session()
     tasks = session.query(CopilotTask).filter_by(kind="dep_update").all()
     assert len(tasks) == 1
     assert tasks[0].status == "queued"
+    session.close()
+
+
+def test_dep_update_skips_when_nothing_really_outdated(isolated_session, monkeypatch) -> None:
+    """A coding backend without real tool use can't verify npm versions
+
+    itself, so dep_update must trust only the verified registry check —
+    never open a PR (let alone dispatch a task) when nothing is genuinely
+    outdated, even if the underlying model might otherwise "helpfully"
+    invent version bumps.
+    """
+    user_id = _seed_user_and_snap(isolated_session, "https://github.com/kenvandine/gemini-desktop")
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    session.close()
+
+    dispatcher = _FakeDispatcher()
+    monkeypatch.setattr(um_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(um_module, "get_coding_dispatcher", lambda uc_: dispatcher)
+    monkeypatch.setattr(um_module, "find_real_outdated_deps", lambda client, owner, repo: {})
+    monkeypatch.setattr(
+        UpstreamMaintainerAgent, "_maybe_request_reviews", lambda self, *a, **k: False
+    )
+    monkeypatch.setattr(
+        UpstreamMaintainerAgent, "_maybe_triage_issues", lambda self, *a, **k: False
+    )
+
+    agent = UpstreamMaintainerAgent(user_id=user_id)
+    agent._run()
+
+    assert len(dispatcher.calls) == 0
+
+    session = isolated_session()
+    assert session.query(CopilotTask).filter_by(kind="dep_update").count() == 0
     session.close()
 
 
