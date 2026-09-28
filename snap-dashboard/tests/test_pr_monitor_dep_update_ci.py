@@ -105,7 +105,7 @@ class _FakeDispatcher:
         self.calls: list[tuple] = []
 
     def start_task(self, owner, repo, prompt, base_ref="main", create_pull_request=True, model=None):
-        self.calls.append((owner, repo, prompt))
+        self.calls.append((owner, repo, prompt, base_ref))
         return {"state": "completed", "html_url": "https://github.com/kenvandine/obscura/pull/2"}
 
 
@@ -116,7 +116,7 @@ def test_dep_update_ci_failure_dispatches_fix_when_opted_in(isolated_session, mo
     _patch_http(
         monkeypatch,
         [
-            ("/pulls/1", _FakeResp(200, {"state": "open", "head": {"sha": "abc123"}})),
+            ("/pulls/1", _FakeResp(200, {"state": "open", "head": {"sha": "abc123", "ref": "dep-bump-1"}})),
             ("/commits/abc123/check-runs", _FakeResp(200, {"check_runs": [
                 {"status": "completed", "conclusion": "failure", "name": "Rust", "html_url": "http://x"},
             ]})),
@@ -132,9 +132,13 @@ def test_dep_update_ci_failure_dispatches_fix_when_opted_in(isolated_session, mo
     assert checked == 1
     assert updated == 1
     assert len(dispatcher.calls) == 1
-    owner, repo, prompt = dispatcher.calls[0]
+    owner, repo, prompt, base_ref = dispatcher.calls[0]
     assert (owner, repo) == ("kenvandine", "obscura")
     assert "PR #1" in prompt
+    # Regression: the fix must stack on top of the failing PR's own branch,
+    # not rebase onto main — dispatching against main produced empty-diff
+    # fix PRs since the model never saw the original PR's changes at all.
+    assert base_ref == "dep-bump-1"
 
     with isolated_session() as session:
         task = session.query(CopilotTask).get(task_id)
@@ -142,6 +146,7 @@ def test_dep_update_ci_failure_dispatches_fix_when_opted_in(isolated_session, mo
         fix_tasks = session.query(CopilotTask).filter_by(kind="ci_fix").all()
         assert len(fix_tasks) == 1
         assert fix_tasks[0].issue_number == 1
+        assert fix_tasks[0].base_ref == "dep-bump-1"
 
 
 def test_dep_update_ci_failure_respects_opt_out(isolated_session, monkeypatch):
@@ -246,7 +251,7 @@ def test_custom_prompt_ci_failure_dispatches_fix_when_opted_in(isolated_session,
     _patch_http(
         monkeypatch,
         [
-            ("/pulls/3", _FakeResp(200, {"state": "open", "head": {"sha": "def456"}})),
+            ("/pulls/3", _FakeResp(200, {"state": "open", "head": {"sha": "def456", "ref": "lemonade-coding/1"}})),
             ("/commits/def456/check-runs", _FakeResp(200, {"check_runs": [
                 {"status": "completed", "conclusion": "failure", "name": "snap", "html_url": "http://x"},
             ]})),
@@ -262,9 +267,10 @@ def test_custom_prompt_ci_failure_dispatches_fix_when_opted_in(isolated_session,
     assert checked == 1
     assert updated == 1
     assert len(dispatcher.calls) == 1
-    owner, repo, prompt = dispatcher.calls[0]
+    owner, repo, prompt, base_ref = dispatcher.calls[0]
     assert (owner, repo) == ("kenvandine", "neofetch-desktop")
     assert "user-typed custom task" in prompt
+    assert base_ref == "lemonade-coding/1"
 
     with isolated_session() as session:
         task = session.query(CopilotTask).get(task_id)

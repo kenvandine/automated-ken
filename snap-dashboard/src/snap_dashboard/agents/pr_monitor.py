@@ -442,15 +442,23 @@ class PRMonitorAgent(BaseAgent):
             return False
 
         # Stop watching once the PR is closed/merged on GitHub, regardless
-        # of CI state.
+        # of CI state. Also grabs the PR's head branch name here (reused
+        # below when dispatching a fix, so the fix stacks on top of this
+        # PR's own commits instead of rebasing onto main — see the
+        # base_ref="main" bug this fixed, which produced empty-diff fix
+        # PRs because the model only ever saw main's pre-PR content).
+        pr_head_branch = ""
         try:
             with httpx.Client(timeout=15) as http:
                 resp = http.get(
                     f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}", headers=_gh_headers(token)
                 )
-            if resp.status_code == 200 and resp.json().get("state") == "closed":
-                self._set_dep_update_ci_status(row["id"], "closed")
-                return True
+            if resp.status_code == 200:
+                pr_data = resp.json()
+                if pr_data.get("state") == "closed":
+                    self._set_dep_update_ci_status(row["id"], "closed")
+                    return True
+                pr_head_branch = (pr_data.get("head") or {}).get("ref") or ""
         except Exception as exc:
             logger.debug("_advance_dep_update_pr: closed-check failed for task %s: %s", row["id"], exc)
 
@@ -472,7 +480,7 @@ class PRMonitorAgent(BaseAgent):
         # _check_ci_complete/_maybe_dispatch_ci_fix; never re-dispatched on
         # later polls even if it keeps failing).
         self._set_dep_update_ci_status(row["id"], "ci_failed")
-        self._maybe_dispatch_dep_update_ci_fix(row, owner, repo, pr_number, uc, runs)
+        self._maybe_dispatch_dep_update_ci_fix(row, owner, repo, pr_number, uc, runs, pr_head_branch)
         return True
 
     @staticmethod
@@ -483,7 +491,8 @@ class PRMonitorAgent(BaseAgent):
                 task.ci_status = ci_status
 
     def _maybe_dispatch_dep_update_ci_fix(
-        self, row: dict, owner: str, repo: str, pr_number: int, uc, runs: list[dict]
+        self, row: dict, owner: str, repo: str, pr_number: int, uc, runs: list[dict],
+        head_branch: str = "",
     ) -> None:
         """Opt-in via UserConfig.auto_fix_ci_failures — same gate as version-bump PRs."""
         if not uc or not getattr(uc, "auto_fix_ci_failures", False):
@@ -522,7 +531,7 @@ class PRMonitorAgent(BaseAgent):
             "versions, a genuine incompatibility introduced by the change), and open a pull "
             "request with the fix."
         )
-        task = client.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        task = client.start_task(owner, repo, prompt, base_ref=head_branch or "main", create_pull_request=True)
         with get_session() as session:
             session.add(
                 CopilotTask(
@@ -532,7 +541,7 @@ class PRMonitorAgent(BaseAgent):
                     owner_repo=owner_repo,
                     prompt=prompt,
                     issue_number=pr_number,
-                    base_ref="main",
+                    base_ref=head_branch or "main",
                     **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                 )
             )
