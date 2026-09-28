@@ -163,26 +163,33 @@ def queue_auto_tests(user_id: int) -> int:
     Backs the "Enable automatic testing" setting (``UserConfig.auto_test``);
     run after each channel-map refresh (see agents/collector_agent.py). An
     architecture that already has *any* run for that exact
-    snap/channel/version — passed, failed, or still queued — is skipped, so
-    a version is tested once rather than on every refresh. Returns how many
-    runs were queued.
+    snap/channel/version/revision — passed, failed, or still queued — is
+    skipped, so a given revision is tested once rather than on every
+    refresh. When the Store revision is known, it's included in the dedup
+    check specifically so a same-version rebuild (e.g. a security rebuild,
+    new revision, same version string — see the "Include rebuilds" comment
+    in ``find_snaps_needing_tests`` above) still gets queued instead of
+    being mistaken for the version already tested under the prior revision.
+    Returns how many runs were queued.
     """
     with get_session() as session:
         wanted: list[tuple[str, str, str, str, int | None]] = []
         for item in find_snaps_needing_tests(session, user_id=user_id):
             snap_name = item["snap"].name
             for arch in item["architectures"]:
-                already = (
-                    session.query(TestRun.id)
-                    .filter_by(
-                        user_id=user_id,
-                        snap_name=snap_name,
-                        architecture=arch,
-                        from_channel=item["from_channel"],
-                        version=item["version"],
-                    )
-                    .first()
+                revision = item["revisions"].get(arch)
+                query = session.query(TestRun.id).filter_by(
+                    user_id=user_id,
+                    snap_name=snap_name,
+                    architecture=arch,
+                    from_channel=item["from_channel"],
+                    version=item["version"],
                 )
+                if revision is not None:
+                    query = query.filter(
+                        (TestRun.revision == revision) | (TestRun.revision.is_(None))
+                    )
+                already = query.first()
                 if not already:
                     wanted.append(
                         (snap_name, item["from_channel"], item["version"], arch, item["revisions"].get(arch))
