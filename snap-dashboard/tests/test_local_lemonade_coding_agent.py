@@ -16,8 +16,12 @@ from snap_dashboard.lemonade.coding_agent import LocalLemonadeCodingDispatcher
 
 
 class _FakeLemonadeClient:
-    def __init__(self, reply: str | None) -> None:
-        self.reply = reply
+    def __init__(self, reply: str | list[str | None] | None) -> None:
+        # A single reply is returned for every call; a list is consumed in
+        # order (one item per chat() call), repeating the last item once
+        # exhausted — lets a test script a first plan and a distinct retry
+        # plan for the noop-retry path.
+        self.replies = reply if isinstance(reply, list) else [reply]
         self.calls: list[dict] = []
 
     def is_available(self) -> bool:
@@ -28,7 +32,8 @@ class _FakeLemonadeClient:
             {"prompt": prompt, "system": system, "temperature": temperature,
              "max_tokens": max_tokens, "timeout": timeout, **kwargs}
         )
-        return self.reply
+        idx = min(len(self.calls) - 1, len(self.replies) - 1)
+        return self.replies[idx]
 
 
 class _FakeBotClient:
@@ -161,19 +166,20 @@ def test_start_task_empty_plan_returns_failed(monkeypatch) -> None:
     assert "no file changes" in result["error"]
 
 
-def test_start_task_noop_plan_returns_failed_without_committing(monkeypatch) -> None:
+def test_start_task_noop_plan_retries_then_fails_without_committing(monkeypatch) -> None:
     """The model echoing a file back unchanged must not open an empty-diff PR.
 
     Regression test for https://github.com/kenvandine/neofetch-desktop/pull/7
     — the local model's plan named a file to "fix" but the returned content
     was byte-identical to what's already on the base branch, so the commit
-    (and PR) it produced had no actual diff.
+    (and PR) it produced had no actual diff. It should get one corrective
+    retry (still echoing the same content here) before giving up.
     """
     plan = {
         "commit_message": "fix: correct snapcraft.yaml base",
         "files": [{"path": "snapcraft.yaml", "action": "write", "content": "name: neofetch-desktop\n"}],
     }
-    dispatcher, _ = _make_dispatcher(
+    dispatcher, fake_client = _make_dispatcher(
         monkeypatch, reply=json.dumps(plan),
         files={"snapcraft.yaml": "name: neofetch-desktop\n"},
     )
@@ -182,8 +188,33 @@ def test_start_task_noop_plan_returns_failed_without_committing(monkeypatch) -> 
 
     assert result["state"] == "failed"
     assert "unchanged" in result["error"]
+    assert "retry" in result["error"]
     assert dispatcher._tree.commit_calls == []
     assert dispatcher._tree.pr_calls == []
+    # One initial attempt, one corrective retry — not an open-ended loop.
+    assert len(fake_client.calls) == 2
+    assert "snapcraft.yaml" in fake_client.calls[1]["prompt"]
+
+
+def test_start_task_noop_plan_retry_succeeds(monkeypatch) -> None:
+    """A corrective retry that actually changes the file should commit and open a PR."""
+    first_plan = {
+        "files": [{"path": "snapcraft.yaml", "action": "write", "content": "base: core22\n"}],
+    }
+    fixed_plan = {
+        "commit_message": "fix: bump base to core24",
+        "files": [{"path": "snapcraft.yaml", "action": "write", "content": "base: core24\n"}],
+    }
+    dispatcher, fake_client = _make_dispatcher(
+        monkeypatch, reply=[json.dumps(first_plan), json.dumps(fixed_plan)],
+        files={"snapcraft.yaml": "base: core22\n"},
+    )
+
+    result = dispatcher.start_task("o", "r", "task")
+
+    assert result["state"] == "completed"
+    assert len(fake_client.calls) == 2
+    assert dispatcher._tree.commit_calls[0]["put_files"] == {"snapcraft.yaml": "base: core24\n"}
 
 
 def test_start_task_partial_noop_plan_commits_only_real_changes(monkeypatch) -> None:
@@ -239,6 +270,23 @@ def test_build_repo_context_skips_binary_and_truncates(monkeypatch) -> None:
     assert "logo.png" in context  # still listed in the file listing
     assert "```\nhello\n```" in context
     assert "omitted for length" in context
+
+
+def test_build_repo_context_prioritizes_snapcraft_yaml_over_inline_cap(monkeypatch) -> None:
+    """snapcraft.yaml must be inlined even if the file cap would otherwise cut it.
+
+    Every task through this backend targets a snap packaging repo — a "fix
+    the build failure" task is useless if the model never gets to see the
+    packaging manifest it needs to edit.
+    """
+    tree = [f"file{i}.txt" for i in range(ca_module._MAX_FILES_INLINED)] + ["snapcraft.yaml"]
+    files = {p: f"content of {p}" for p in tree}
+    dispatcher, _ = _make_dispatcher(monkeypatch, reply="{}", tree=tree, files=files)
+
+    context = dispatcher._build_repo_context("o", "r", "main")
+
+    assert "### snapcraft.yaml" in context
+    assert "content of snapcraft.yaml" in context
 
 
 # ---------------------------------------------------------------------------

@@ -16,10 +16,19 @@ using only the GitHub REST API (no git clone/push needed):
 
 This is necessarily less capable than GitHub Copilot cloud agent — no
 multi-turn tool use, no running tests, no iterating on CI failures. It's a
-best-effort single-shot patch, offered as a local/no-subscription-required
+best-effort single-shot (with one corrective retry — see
+``_noop_retry_prompt``) patch, offered as a local/no-subscription-required
 option for the same "capable coding" call sites (``agents/pr_monitor.py``,
 ``agents/upstream_maintainer.py``, ``agents/repo_normalizer.py``), all of
 which go through ``agents/coding_backend.get_coding_dispatcher()``.
+
+The small local model sometimes names a file as needing a fix but returns
+its content back byte-for-byte unchanged — a real commit whose tree matches
+its parent, i.e. a PR that opens with an empty diff (see
+``_drop_noop_writes``). When that happens, ``start_task()`` gives the model
+one more pass with the echoed paths called out explicitly before giving up,
+so a fixable CI failure isn't abandoned on the model's first hallucinated
+"fix".
 """
 
 from __future__ import annotations
@@ -28,7 +37,7 @@ import json
 import logging
 import time
 
-from snap_dashboard.github.bot_client import BotGitHubClient
+from snap_dashboard.github.bot_client import _SNAPCRAFT_PATHS, BotGitHubClient
 from snap_dashboard.github.tree_commit import GitTreeClient
 from snap_dashboard.lemonade.client import LemonadeClient, get_lemonade_client
 from snap_dashboard.lemonade.models import TASK_CODING
@@ -93,26 +102,32 @@ class LocalLemonadeCodingDispatcher:
         if not plan:
             return {"state": "failed", "error": "local coding model did not return a usable plan"}
 
-        put_files = {
-            f["path"]: f.get("content", "")
-            for f in plan.get("files", [])
-            if f.get("path") and f.get("action", "write") != "delete"
-        }
-        delete_paths = [
-            f["path"] for f in plan.get("files", []) if f.get("path") and f.get("action") == "delete"
-        ]
+        put_files, delete_paths = self._files_from_plan(plan)
         if not put_files and not delete_paths:
             return {"state": "failed", "error": "local coding model produced no file changes"}
 
         put_files = self._drop_noop_writes(owner, repo, base_branch, put_files)
         if not put_files and not delete_paths:
-            return {
-                "state": "failed",
-                "error": (
-                    "local coding model's plan only echoed existing file content back "
-                    "unchanged — no actual diff to commit"
-                ),
-            }
+            # The model named real files as needing a fix but handed back
+            # their content unchanged — rather than give up on an otherwise
+            # fixable failure, give it one corrective pass that calls out
+            # exactly which paths it echoed instead of editing.
+            echoed_paths = [f["path"] for f in plan.get("files", []) if f.get("path")]
+            retry_plan = self._request_plan(
+                client, owner, repo, self._noop_retry_prompt(prompt, echoed_paths), context,
+            )
+            if retry_plan:
+                plan = retry_plan
+                put_files, delete_paths = self._files_from_plan(plan)
+                put_files = self._drop_noop_writes(owner, repo, base_branch, put_files)
+            if not put_files and not delete_paths:
+                return {
+                    "state": "failed",
+                    "error": (
+                        "local coding model's plan only echoed existing file content back "
+                        "unchanged, even after a corrective retry — no actual diff to commit"
+                    ),
+                }
 
         branch = f"lemonade-coding/{int(time.time())}"
         commit_message = plan.get("commit_message") or "chore: automated-ken local coding task"
@@ -135,6 +150,31 @@ class LocalLemonadeCodingDispatcher:
         if not pr:
             return {"state": "failed", "error": "committed changes but failed to open a pull request"}
         return {"state": "completed", "html_url": pr.get("html_url"), "number": pr.get("number")}
+
+    @staticmethod
+    def _files_from_plan(plan: dict) -> tuple[dict[str, str], list[str]]:
+        put_files = {
+            f["path"]: f.get("content", "")
+            for f in plan.get("files", [])
+            if f.get("path") and f.get("action", "write") != "delete"
+        }
+        delete_paths = [
+            f["path"] for f in plan.get("files", []) if f.get("path") and f.get("action") == "delete"
+        ]
+        return put_files, delete_paths
+
+    @staticmethod
+    def _noop_retry_prompt(original_prompt: str, echoed_paths: list[str]) -> str:
+        paths = ", ".join(echoed_paths) or "the file(s) in your last plan"
+        return (
+            f"{original_prompt}\n\n"
+            f"Your previous plan named {paths} but returned their content completely "
+            "unchanged from what's already in the repository — that produces an empty "
+            "diff and doesn't fix anything. Look again at the actual failure and make a "
+            "real edit: change the specific line(s) causing it (e.g. the wrong base, "
+            "build-on, part source, or dependency), then return the FULL file content "
+            "with that change applied."
+        )
 
     def _drop_noop_writes(
         self, owner: str, repo: str, base_branch: str, put_files: dict[str, str],
@@ -162,9 +202,18 @@ class LocalLemonadeCodingDispatcher:
         paths = self._bot.list_tree(owner, repo, ref=branch)
         inlinable = [p for p in paths if not p.lower().endswith(_SKIP_SUFFIXES)]
 
+        # The packaging manifest is almost always the file a "fix the
+        # build/publish workflow" task needs to edit. Every task dispatched
+        # through this backend targets a snap packaging repo, so make sure
+        # it's always inlined instead of being pushed out by an unrelated
+        # alphabetically-earlier file once a repo has more than
+        # _MAX_FILES_INLINED text files.
+        priority = [p for p in _SNAPCRAFT_PATHS if p in inlinable]
+        ordered = priority + [p for p in inlinable if p not in priority]
+
         blocks: list[str] = []
         total = 0
-        for path in inlinable[:_MAX_FILES_INLINED]:
+        for path in ordered[:_MAX_FILES_INLINED]:
             result = self._bot.get_file(owner, repo, path, ref=branch)
             if not result:
                 continue
