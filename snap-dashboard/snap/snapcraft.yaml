@@ -3,6 +3,7 @@ base: core24
 adopt-info: snap-dashboard
 title: Automated Ken
 summary: Self-hosted agentic snap maintenance dashboard
+icon: snap/gui/icon.svg
 description: |
   Monitors channel versions, automates version-bump PRs, triggers YARF
   tests, and rebuilds stale snaps for the publisher account you configure.

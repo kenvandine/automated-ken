@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Automated Ken app icon: a gear (automation) with a checkmark badge
+     (passing tests/promotions), in Canonical's brand orange. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="Automated Ken">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#2c2c2c"/>
+      <stop offset="1" stop-color="#111111"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="256" height="256" rx="48" fill="url(#bg)"/>
+
+  <!-- Gear -->
+  <g fill="#E95420">
+    <path d="M128 44c-4.7 0-9.3.3-13.8.9l-4.4 21.6a68 68 0 0 0-18.9 7.8L71.3 62.1a104 104 0 0 0-19.6 19.6l12.2 19.6a68 68 0 0 0-7.8 18.9L34.5 124.6a105 105 0 0 0 0 27.6l21.6 4.4c1.8 6.7 4.5 13 7.8 18.9l-12.2 19.6a104 104 0 0 0 19.6 19.6l19.6-12.2c5.9 3.3 12.2 6 18.9 7.8l4.4 21.6c4.5.6 9.1.9 13.8.9s9.3-.3 13.8-.9l4.4-21.6a68 68 0 0 0 18.9-7.8l19.6 12.2a104 104 0 0 0 19.6-19.6l-12.2-19.6a68 68 0 0 0 7.8-18.9l21.6-4.4c.6-4.5.9-9.1.9-13.8s-.3-9.3-.9-13.8l-21.6-4.4a68 68 0 0 0-7.8-18.9l12.2-19.6a104 104 0 0 0-19.6-19.6l-19.6 12.2a68 68 0 0 0-18.9-7.8l-4.4-21.6c-4.5-.6-9.1-.9-13.8-.9zm0 54a30 30 0 1 1 0 60 30 30 0 0 1 0-60z"/>
+  </g>
+
+  <!-- Checkmark badge -->
+  <circle cx="182" cy="182" r="46" fill="#111111"/>
+  <circle cx="182" cy="182" r="38" fill="#2E8540"/>
+  <path d="M164 183l11 11 22-24" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
