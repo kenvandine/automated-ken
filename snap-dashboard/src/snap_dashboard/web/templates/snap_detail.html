@@ -15,6 +15,7 @@
   {% elif notice == 'stack_update_started' %}Reviewing the repo's stack/dependencies for updates — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
   {% elif notice == 'review_started' %}Reviewing open issues/PRs — reload this page in a bit to see the summary below.
   {% elif notice == 'address_started' %}Dispatched — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
+  {% elif notice == 'custom_task_started' %}Custom task dispatched — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page, or watch it live below.
   {% else %}{{ notice }}{% endif %}
 </div>
 {% endif %}
@@ -24,6 +25,7 @@
   {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for updates or triggering a rebuild.
   {% elif page_error == 'not_same_repo' %}Stack updates need the packaging repo and upstream repo to be the same GitHub repo.
   {% elif page_error == 'trigger_failed' %}Failed to queue the test run — check that a runner is enrolled and online.
+  {% elif page_error == 'empty_prompt' %}Type an instruction before dispatching a custom task.
   {% else %}{{ page_error }}{% endif %}
   </span>
   {% set retry_channel = request.query_params.get('retry_channel') %}
@@ -102,6 +104,30 @@
       <button type="submit" class="p-button is-small">Refresh</button>
     </form>
   </div>
+</div>
+
+<div class="card detail-section snap-activity-panel" id="snap-activity-panel" data-snap="{{ snap.name }}">
+  <div class="section-header-row">
+    <h3 class="section-label">🤖 Agent Activity <span id="snap-activity-dot" class="text-muted small">●</span></h3>
+    <a href="/agents/runs?snap_name={{ snap.name | urlencode }}" class="p-button is-small">📜 View Full History</a>
+  </div>
+  <div id="snap-activity-active">
+    <div class="text-muted small" style="padding:6px 0;">Checking for active agents…</div>
+  </div>
+  <div id="snap-activity-recent"></div>
+
+  {% if snap.packaging_repo %}
+  <details class="snap-custom-task" style="margin-top:12px;">
+    <summary class="p-button is-small" style="display:inline-block;cursor:pointer;">✏️ Ask a coding agent to do something</summary>
+    <form method="post" action="/snap/{{ snap.name }}/custom-task" style="margin-top:10px;"
+          hx-post="/snap/{{ snap.name }}/custom-task" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <textarea name="prompt" rows="3" class="p-form-control" placeholder="e.g. There is a new upstream release 0.5.0 which will require being updated to be based on core24 and gnome-46-2404" required></textarea>
+      <p class="text-muted small" style="margin:6px 0;">Dispatched to the configured coding backend against this snap's packaging repo. The resulting PR is watched for CI failures and a fix attempted automatically if "Auto-fix CI failures" is enabled in Settings.</p>
+      <button type="submit" class="p-button--positive is-small">Dispatch Task</button>
+    </form>
+  </details>
+  {% endif %}
 </div>
 
 {% if rebuild_triggers %}
@@ -537,6 +563,86 @@ document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
     }
   });
 });
+</script>
+
+<script>
+// Live "Agent Activity" panel — polls /api/snap/{name}/activity for anything
+// currently working (or queued to work) on this snap, plus recent finished
+// runs. Re-executes on every htmx swap of #page-content (e.g. after clicking
+// Rebuild/Normalize/etc.), so any previous interval is cleared first to
+// avoid stacking timers across swaps.
+(function () {
+  const SNAP_NAME = {{ snap.name | tojson }};
+
+  function escapeHtml(s) {
+    return (s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function renderActive(data) {
+    const el = document.getElementById('snap-activity-active');
+    if (!el) return;
+    const items = [];
+    (data.active || []).forEach(a => {
+      items.push(`<div class="snap-activity-item snap-activity-running"><span class="agent-type-badge agent-${a.agent_type}">${escapeHtml(a.agent_type.replace(/_/g, ' '))}</span> <span>${escapeHtml(a.task)}</span></div>`);
+    });
+    (data.queued_tasks || []).forEach(t => {
+      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="agent-type-badge">${escapeHtml(t.kind.replace(/_/g, ' '))}</span> <span>Coding task ${escapeHtml(t.status)} — queued ${escapeHtml(t.created_at)}</span></div>`);
+    });
+    (data.pending_tests || []).forEach(t => {
+      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="agent-type-badge">test run</span> <span>${escapeHtml(t.architecture)} — ${escapeHtml(t.status)} (started ${escapeHtml(t.started_at)})</span></div>`);
+    });
+    el.innerHTML = items.length
+      ? items.join('')
+      : '<div class="text-muted small" style="padding:6px 0;">No agents currently active or queued for this snap.</div>';
+
+    const dot = document.getElementById('snap-activity-dot');
+    if (dot) {
+      dot.textContent = data.busy ? '● busy' : '● idle';
+      dot.style.color = data.busy ? 'var(--amber)' : 'var(--text-muted)';
+    }
+  }
+
+  function renderRecent(data) {
+    const el = document.getElementById('snap-activity-recent');
+    if (!el) return;
+    const rows = (data.recent || []).map(r => {
+      const statusClass = r.status === 'done' ? 'p-status-label--positive'
+        : (r.status === 'error' ? 'p-status-label--negative' : 'p-status-label--caution');
+      const log = r.has_log
+        ? `<a href="/agents/runs/${r.id}/log" target="_blank" rel="noopener" class="p-button is-small">Log</a>`
+        : '<span class="muted small">—</span>';
+      const dur = (r.duration_s !== null && r.duration_s !== undefined) ? `${r.duration_s}s` : '…';
+      return `<tr>
+        <td><span class="agent-type-badge agent-${r.agent_type}">${escapeHtml(r.agent_type.replace(/_/g, ' '))}</span></td>
+        <td><span class="p-status-label ${statusClass}">${escapeHtml(r.status)}</span></td>
+        <td class="muted small" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.summary) || '—'}</td>
+        <td class="muted small">${escapeHtml(r.started_at)}</td>
+        <td class="muted small">${dur}</td>
+        <td>${log}</td>
+      </tr>`;
+    });
+    el.innerHTML = rows.length
+      ? `<div class="table-wrapper" style="margin-top:10px;"><table class="snap-table">
+          <thead><tr><th>Agent</th><th>Status</th><th>Result</th><th>Started</th><th>Duration</th><th>Log</th></tr></thead>
+          <tbody>${rows.join('')}</tbody>
+        </table></div>`
+      : '<div class="text-muted small" style="padding:6px 0;">No agent runs recorded yet for this snap.</div>';
+  }
+
+  async function refreshSnapActivity() {
+    try {
+      const r = await fetch(`/api/snap/${encodeURIComponent(SNAP_NAME)}/activity`);
+      if (!r.ok) return;
+      const data = await r.json();
+      renderActive(data);
+      renderRecent(data);
+    } catch (_) { /* ignore transient fetch errors, next tick will retry */ }
+  }
+
+  if (window.__snapActivityTimer) clearInterval(window.__snapActivityTimer);
+  refreshSnapActivity();
+  window.__snapActivityTimer = setInterval(refreshSnapActivity, 3000);
+})();
 </script>
 
 {% endblock %}

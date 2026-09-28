@@ -955,6 +955,34 @@ button {
   margin-bottom: 20px;
 }
 
+/* ---- Per-snap agent activity panel ------------------------- */
+.snap-activity-panel #snap-activity-active {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.snap-activity-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--surface2);
+}
+.snap-activity-item.snap-activity-running {
+  border-left: 3px solid var(--accent);
+}
+.snap-activity-item.snap-activity-queued {
+  border-left: 3px solid var(--amber);
+  color: var(--text-muted);
+}
+.snap-custom-task textarea.p-form-control {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+}
+
 /* ---- Collapsible ------------------------------------------ */
 .collapsible {
   border: 1px solid var(--border);

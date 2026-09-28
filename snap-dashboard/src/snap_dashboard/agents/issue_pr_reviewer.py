@@ -62,8 +62,10 @@ class IssuePrReviewAgent(BaseAgent):
 
     agent_type = "issue_pr_reviewer"
 
-    def __init__(self, user_id: int | None = None, snap_id: int | None = None) -> None:
-        super().__init__(user_id=user_id)
+    def __init__(
+        self, user_id: int | None = None, snap_id: int | None = None, snap_name: str | None = None
+    ) -> None:
+        super().__init__(user_id=user_id, snap_name=snap_name)
         self.snap_id = snap_id
 
     def _run(self) -> str:
@@ -281,8 +283,9 @@ class AddressReviewItemAgent(BaseAgent):
         item_type: str = "issue",
         title: str = "",
         body: str = "",
+        snap_name: str | None = None,
     ) -> None:
-        super().__init__(user_id=user_id)
+        super().__init__(user_id=user_id, snap_name=snap_name)
         self.snap_id = snap_id
         self.owner_repo = owner_repo
         self.number = number

@@ -209,10 +209,13 @@ async def agent_runs_page(
     request: Request,
     agent_type: str = "",
     status: str = "",
+    snap_name: str = "",
     page: int = 1,
 ) -> HTMLResponse:
     """Full, filterable, paginated history of every agent run — the "find any
-    run's logs" page linked from the Agent Fleet dashboard's nav/header.
+    run's logs" page linked from the Agent Fleet dashboard's nav/header, and
+    from each snap detail page's "View Full History" link (pre-filled with
+    ``snap_name``).
     """
     user = get_current_user(request)
     if user is None:
@@ -228,6 +231,8 @@ async def agent_runs_page(
             query = query.filter(AgentRun.agent_type == agent_type)
         if status:
             query = query.filter(AgentRun.status == status)
+        if snap_name:
+            query = query.filter(AgentRun.snap_name == snap_name)
 
         total = query.count()
         runs = (
@@ -238,6 +243,12 @@ async def agent_runs_page(
         )
         agent_types = sorted(
             t for (t,) in session.query(AgentRun.agent_type).filter_by(user_id=user_id).distinct().all()
+        )
+        snap_names = sorted(
+            n for (n,) in session.query(AgentRun.snap_name)
+            .filter_by(user_id=user_id)
+            .filter(AgentRun.snap_name.isnot(None))
+            .distinct().all()
         )
 
         rows = [
@@ -266,8 +277,10 @@ async def agent_runs_page(
             "current_user": user,
             "runs": rows,
             "agent_types": agent_types,
+            "snap_names": snap_names,
             "selected_agent_type": agent_type,
             "selected_status": status,
+            "selected_snap_name": snap_name,
             "page": page,
             "total_pages": total_pages,
             "total": total,

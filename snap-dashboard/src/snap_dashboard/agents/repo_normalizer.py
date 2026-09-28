@@ -55,8 +55,15 @@ class RepoNormalizerAgent(BaseAgent):
 
     agent_type = "repo_normalizer"
 
-    def __init__(self, user_id: int | None = None, only_snap_id: int | None = None) -> None:
-        super().__init__(user_id=user_id)
+    def __init__(
+        self,
+        user_id: int | None = None,
+        only_snap_id: int | None = None,
+        snap_name: str | None = None,
+    ) -> None:
+        # Only carry a snap_name when this is a single-snap run — a
+        # fleet-wide campaign has no one snap to attribute the AgentRun to.
+        super().__init__(user_id=user_id, snap_name=snap_name if only_snap_id else None)
         # Set when triggered manually from a single snap's detail page (the
         # "Normalize Repo" button) rather than the fleet-wide scheduled/
         # opt-in campaign — bypasses the fleet_normalization_enabled gate

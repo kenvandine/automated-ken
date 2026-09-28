@@ -729,8 +729,10 @@ class CopilotTask(Base):
     fleet-normalization campaign (``fleet_normalize``), a manual "review this
     repo's stack for outdated deps/framework version" trigger
     (``stack_update``), a manual Copilot review request on an open PR
-    (``pr_review_request``), and a packaging repo's own build/publish
-    workflow failing on its default branch (``build_fix``).
+    (``pr_review_request``), a packaging repo's own build/publish
+    workflow failing on its default branch (``build_fix``), and a
+    user-typed freeform instruction dispatched from a snap's detail page
+    (``custom_prompt`` — see agents/custom_prompt.py).
     """
 
     __tablename__ = "copilot_tasks"
@@ -739,7 +741,7 @@ class CopilotTask(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     snap_id = Column(Integer, ForeignKey("snaps.id", ondelete="SET NULL"), nullable=True)
     # ci_fix | dep_update | issue_fix | fleet_normalize | stack_update |
-    # pr_review_request | build_fix
+    # pr_review_request | build_fix | custom_prompt
     kind = Column(String(32), nullable=False)
     owner_repo = Column(String(500), nullable=False)  # "owner/repo" the task targets
     # GitHub's own agent-task id, e.g. for GET /agents/repos/{o}/{r}/tasks/{id}.

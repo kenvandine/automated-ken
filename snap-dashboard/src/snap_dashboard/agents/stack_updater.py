@@ -37,8 +37,10 @@ class StackUpdateAgent(BaseAgent):
 
     agent_type = "stack_updater"
 
-    def __init__(self, user_id: int | None = None, snap_id: int | None = None) -> None:
-        super().__init__(user_id=user_id)
+    def __init__(
+        self, user_id: int | None = None, snap_id: int | None = None, snap_name: str | None = None
+    ) -> None:
+        super().__init__(user_id=user_id, snap_name=snap_name)
         self.snap_id = snap_id
 
     def _run(self) -> str:

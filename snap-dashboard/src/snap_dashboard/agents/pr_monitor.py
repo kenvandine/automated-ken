@@ -119,7 +119,7 @@ class PRMonitorAgent(BaseAgent):
 
         return (
             f"checked {len(prs)} in-flight PRs, advanced {updated}; "
-            f"checked {dep_update_checked} dep-update PR(s), advanced {dep_update_updated}"
+            f"checked {dep_update_checked} dep-update/custom-task PR(s), advanced {dep_update_updated}"
         )
 
     def _advance(self, pr: dict) -> bool:
@@ -371,23 +371,31 @@ class PRMonitorAgent(BaseAgent):
     # dep_update PR CI watching (generic upstream repos, not snap packaging)
     # ------------------------------------------------------------------
 
+    # Kinds that get generic "watch for CI, dispatch a fix once if it
+    # fails" treatment via this method, rather than a full VersionBumpPR
+    # state machine: dep_update (UpstreamMaintainerAgent's dependency-bump
+    # PRs on repos the user maintains upstream) and custom_prompt (a
+    # user-typed instruction dispatched from a snap's detail page — see
+    # agents/custom_prompt.py).
+    _GENERIC_CI_WATCH_KINDS = ("dep_update", "custom_prompt")
+
     def _check_dep_update_prs(self) -> tuple[int, int]:
         """Apply the same ``auto_fix_ci_failures`` treatment to PRs opened by
-        ``UpstreamMaintainerAgent``'s ``dep_update`` task.
+        ``UpstreamMaintainerAgent``'s ``dep_update`` task or a user's
+        ``custom_prompt`` dispatch.
 
-        These PRs target arbitrary upstream repos the user personally
-        maintains (e.g. a GitHub project they're upstream for), not a snap
-        packaging repo — there's no YARF/release pipeline involved, just
-        "did CI pass". Unlike ``VersionBumpPR``, which gets a full state
-        machine via ``_advance()``, this only needs to watch for CI
-        completion once and dispatch a fix a single time, mirroring
+        These PRs target arbitrary repos (not necessarily a snap packaging
+        repo) — there's no YARF/release pipeline involved, just "did CI
+        pass". Unlike ``VersionBumpPR``, which gets a full state machine via
+        ``_advance()``, this only needs to watch for CI completion once and
+        dispatch a fix a single time, mirroring
         ``_check_ci_complete``/``_maybe_dispatch_ci_fix`` above.
 
         Returns ``(checked, updated)`` counts for the run summary.
         """
         with get_session() as session:
             q = session.query(CopilotTask).filter(
-                CopilotTask.kind == "dep_update",
+                CopilotTask.kind.in_(self._GENERIC_CI_WATCH_KINDS),
                 CopilotTask.status == "completed",
                 CopilotTask.pr_url.isnot(None),
                 or_(
@@ -402,6 +410,7 @@ class PRMonitorAgent(BaseAgent):
                     "id": t.id,
                     "user_id": t.user_id,
                     "snap_id": t.snap_id,
+                    "kind": t.kind,
                     "owner_repo": t.owner_repo,
                     "pr_url": t.pr_url,
                     "pr_number": t.issue_number,
@@ -500,13 +509,17 @@ class PRMonitorAgent(BaseAgent):
         failed = [r for r in runs if r.get("conclusion") not in ("success", None)]
         failed_names = ", ".join(r.get("name", "?") for r in failed) or "the CI checks"
         failed_urls = "\n".join(f"- {r.get('name', '?')}: {r.get('html_url', '')}" for r in failed)
+        origin = (
+            "a user-typed custom task" if row.get("kind") == "custom_prompt"
+            else "an automated dependency-update task"
+        )
         prompt = (
             f"The build/test workflow failed on PR #{pr_number} in {owner_repo}, which was "
-            f"opened by an automated dependency-update task. Failing check(s): {failed_names}.\n"
+            f"opened by {origin}. Failing check(s): {failed_names}.\n"
             f"{failed_urls}\n\n"
             "Please look at the failure logs, fix whatever is causing the build/test workflow "
             "to fail (e.g. a stale lockfile that needs regenerating for the new dependency "
-            "versions, a genuine incompatibility introduced by the bump), and open a pull "
+            "versions, a genuine incompatibility introduced by the change), and open a pull "
             "request with the fix."
         )
         task = client.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)

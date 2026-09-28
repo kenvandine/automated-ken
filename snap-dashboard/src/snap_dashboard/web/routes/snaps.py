@@ -12,7 +12,17 @@ from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, IssueReviewReport, Snap, StaleBuildTrigger, TestRun
+from snap_dashboard.db.models import (
+    AgentRun,
+    ChannelMap,
+    CollectionRun,
+    CopilotTask,
+    Issue,
+    IssueReviewReport,
+    Snap,
+    StaleBuildTrigger,
+    TestRun,
+)
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.repo_discovery import (
     build_packaging_repo_map,
@@ -144,6 +154,108 @@ async def snap_add_post(
         session.add(snap)
 
     return RedirectResponse(url=f"/snap/{snap_name}", status_code=303)
+
+
+@router.get("/api/snap/{name}/activity")
+def snap_activity(name: str, request: Request) -> JSONResponse:
+    """Live + recent agent activity for one snap — powers the "Agent
+    Activity" panel on the snap detail page. Combines three sources that
+    all attribute work to a snap in different ways:
+
+    - ``active``: agents currently running/dispatching against this snap
+      right now, from the in-memory ActivityTracker (e.g. "Rebuilding
+      neofetch-desktop…" while a Rebuild Now click is being dispatched).
+    - ``queued_tasks``: CopilotTask rows not yet finished (queued/
+      in_progress/waiting_for_user) — e.g. a coding-agent task dispatched
+      but not yet picked up or completed.
+    - ``pending_tests``: TestRun rows still in flight (triggered/running/
+      reviewing) — e.g. waiting for a YARF test run to finish.
+    - ``recent``: the last 15 finished AgentRun rows for this snap, for a
+      quick "what just happened" glance (full history + filters live at
+      ``/agents/runs?snap_name=...``).
+    """
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    user_id = user["id"]
+
+    from snap_dashboard.agents.runner import get_tracker
+    active = get_tracker().get_active_for_snap(name, user_id)
+
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        snap_id = snap.id if snap else None
+
+        queued_tasks: list[dict] = []
+        if snap_id is not None:
+            tasks = (
+                session.query(CopilotTask)
+                .filter(
+                    CopilotTask.snap_id == snap_id,
+                    CopilotTask.status.in_(("queued", "in_progress", "waiting_for_user")),
+                )
+                .order_by(CopilotTask.created_at.desc())
+                .all()
+            )
+            queued_tasks = [
+                {
+                    "kind": t.kind,
+                    "status": t.status,
+                    "created_at": t.created_at.strftime("%H:%M:%S") if t.created_at else "",
+                }
+                for t in tasks
+            ]
+
+        pending_tests = (
+            session.query(TestRun)
+            .filter(
+                TestRun.snap_name == name,
+                TestRun.user_id == user_id,
+                TestRun.status.in_(("triggered", "running", "reviewing")),
+            )
+            .order_by(TestRun.started_at.desc())
+            .all()
+        )
+        pending_tests_data = [
+            {
+                "id": r.id,
+                "status": r.status,
+                "architecture": r.architecture or "",
+                "started_at": r.started_at.strftime("%H:%M:%S") if r.started_at else "",
+            }
+            for r in pending_tests
+        ]
+
+        recent_runs = (
+            session.query(AgentRun)
+            .filter(AgentRun.snap_name == name, AgentRun.user_id == user_id)
+            .order_by(AgentRun.started_at.desc())
+            .limit(15)
+            .all()
+        )
+        recent = [
+            {
+                "id": r.id,
+                "agent_type": r.agent_type,
+                "status": r.status,
+                "summary": r.result_summary or r.error_msg or "",
+                "started_at": r.started_at.strftime("%Y-%m-%d %H:%M:%S") if r.started_at else "",
+                "duration_s": (
+                    int((r.finished_at - r.started_at).total_seconds())
+                    if r.finished_at and r.started_at else None
+                ),
+                "has_log": bool(r.log_output),
+            }
+            for r in recent_runs
+        ]
+
+    return JSONResponse({
+        "active": active,
+        "queued_tasks": queued_tasks,
+        "pending_tests": pending_tests_data,
+        "recent": recent,
+        "busy": bool(active) or bool(queued_tasks) or bool(pending_tests_data),
+    })
 
 
 @router.get("/snap/{name}", response_class=HTMLResponse)
@@ -414,7 +526,7 @@ async def snap_check_updates(name: str, request: Request) -> RedirectResponse:
     from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
     from snap_dashboard.agents.runner import get_runner
 
-    get_runner().submit(ReleaseScannerAgent(user_id=user_id, snap_id=snap_id))
+    get_runner().submit(ReleaseScannerAgent(user_id=user_id, snap_id=snap_id, snap_name=name))
     return RedirectResponse(url=f"/snap/{name}?notice=scan_started", status_code=303)
 
 
@@ -454,7 +566,7 @@ async def snap_rebuild(name: str, request: Request):
     from snap_dashboard.agents.runner import get_runner
     from snap_dashboard.agents.stale_build_scanner import RebuildOneSnapAgent
 
-    get_runner().submit(RebuildOneSnapAgent(user_id=user_id, snap_id=snap_id))
+    get_runner().submit(RebuildOneSnapAgent(user_id=user_id, snap_id=snap_id, snap_name=name))
     if is_fetch:
         return JSONResponse({"started": True})
     return RedirectResponse(url=f"/snap/{name}?notice=rebuild_started", status_code=303)
@@ -485,7 +597,7 @@ async def snap_normalize(name: str, request: Request) -> RedirectResponse:
     from snap_dashboard.agents.repo_normalizer import RepoNormalizerAgent
     from snap_dashboard.agents.runner import get_runner
 
-    get_runner().submit(RepoNormalizerAgent(user_id=user_id, only_snap_id=snap_id))
+    get_runner().submit(RepoNormalizerAgent(user_id=user_id, only_snap_id=snap_id, snap_name=name))
     return RedirectResponse(url=f"/snap/{name}?notice=normalize_started", status_code=303)
 
 
@@ -515,8 +627,42 @@ async def snap_stack_update(name: str, request: Request) -> RedirectResponse:
     from snap_dashboard.agents.runner import get_runner
     from snap_dashboard.agents.stack_updater import StackUpdateAgent
 
-    get_runner().submit(StackUpdateAgent(user_id=user_id, snap_id=snap_id))
+    get_runner().submit(StackUpdateAgent(user_id=user_id, snap_id=snap_id, snap_name=name))
     return RedirectResponse(url=f"/snap/{name}?notice=stack_update_started", status_code=303)
+
+
+@router.post("/snap/{name}/custom-task")
+async def snap_custom_task(
+    name: str, request: Request, prompt: str = Form(...)
+) -> RedirectResponse:
+    """Dispatch a user-typed freeform instruction to the coding backend
+    against this snap's packaging repo — e.g. "there's a new 0.5.0 upstream
+    release which needs core24/gnome-46-2404, update snapcraft.yaml and
+    anything else needed". See agents/custom_prompt.py; the resulting PR is
+    then watched for CI failures by PRMonitorAgent the same way a
+    dep_update PR is (opt-in via Settings' "Auto-fix CI failures").
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    if not prompt.strip():
+        return RedirectResponse(url=f"/snap/{name}?error=empty_prompt", status_code=303)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            return RedirectResponse(url="/", status_code=303)
+        if not snap.packaging_repo:
+            return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.custom_prompt import CustomPromptAgent
+    from snap_dashboard.agents.runner import get_runner
+
+    get_runner().submit(CustomPromptAgent(user_id=user_id, snap_id=snap_id, prompt=prompt, snap_name=name))
+    return RedirectResponse(url=f"/snap/{name}?notice=custom_task_started", status_code=303)
 
 
 @router.post("/snap/{name}/review-issues")
@@ -542,7 +688,7 @@ async def snap_review_issues(name: str, request: Request) -> RedirectResponse:
     from snap_dashboard.agents.issue_pr_reviewer import IssuePrReviewAgent
     from snap_dashboard.agents.runner import get_runner
 
-    get_runner().submit(IssuePrReviewAgent(user_id=user_id, snap_id=snap_id))
+    get_runner().submit(IssuePrReviewAgent(user_id=user_id, snap_id=snap_id, snap_name=name))
     return RedirectResponse(url=f"/snap/{name}?notice=review_started", status_code=303)
 
 
@@ -583,6 +729,7 @@ async def snap_review_issues_address(
             item_type=item_type,
             title=title,
             body=body,
+            snap_name=name,
         )
     )
     return RedirectResponse(url=f"/snap/{name}?notice=address_started#review-section", status_code=303)

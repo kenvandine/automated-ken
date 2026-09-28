@@ -99,6 +99,30 @@ class ActivityTracker:
                 }
         return result
 
+    def get_active_for_snap(self, snap_name: str, user_id: int | None = None) -> list[dict]:
+        """Return every active entry for one snap, *not* collapsed by agent_type.
+
+        Unlike ``get_active()`` (which keys by agent_type and so only shows
+        one entry per type even if e.g. two different snaps are both being
+        rebuilt at once), the per-snap activity view on a snap's detail page
+        needs every concurrently-active agent instance touching *this* one
+        snap — there's normally only one, but nothing prevents e.g. a
+        "Rebuild Now" click and a scheduled stale-build sweep dispatch
+        touching the same snap in the same moment.
+        """
+        with self._lock:
+            entries = sorted(self._active.values(), key=lambda e: e["started_at"])
+        needle = snap_name.lower()
+        return [
+            {
+                "agent_type": e["agent_type"],
+                "task": e["task"],
+                "started_at": e["started_at"],
+            }
+            for e in entries
+            if _visible(e, user_id) and (e.get("snap_name") or "").lower() == needle
+        ]
+
     def get_log_since(self, seq: int, user_id: int | None = None) -> list[dict]:
         with self._lock:
             return [e for e in self._log if e["seq"] > seq and _visible(e, user_id)]

@@ -368,19 +368,32 @@ user-to-server token (PAT/OAuth), not a GitHub App installation token.
 
 ### New DB model: `copilot_tasks`
 Tracks every dispatched task — `kind` (`ci_fix` | `dep_update` | `issue_fix` |
-`fleet_normalize` | `stack_update` | `pr_review_request` | `build_fix`),
-`owner_repo`, `external_task_id`, `status`, `pr_url`,
+`fleet_normalize` | `stack_update` | `pr_review_request` | `build_fix` |
+`custom_prompt`), `owner_repo`, `external_task_id`, `status`, `pr_url`,
 `issue_number` (also reused as a per-snap dedupe key for fleet-normalize
 suite-cleanup tasks), `error_msg`, `dedupe_key` (kind-specific dedup key;
 holds the failing run's head SHA for `build_fix`). Visible at
 `/copilot-tasks`, with per-task and refresh-all actions that poll
 `get_task()` for live status.
 
-### Four delegated agents (all opt-in, default off)
+### Five delegated agents (all opt-in, default off)
 - **`agents/pr_monitor.py`** (`_maybe_dispatch_ci_fix`): when a version-bump
   PR's build/test workflow fails, dispatches a fix-PR task with `base_ref`
   set to the failing PR's own branch (so the fix stacks on top of it).
-  Gated by `UserConfig.auto_fix_ci_failures`.
+  Gated by `UserConfig.auto_fix_ci_failures`. The same agent's
+  `_check_dep_update_prs()` generically watches CI on both `dep_update`
+  PRs (see `UpstreamMaintainerAgent` below) and `custom_prompt` PRs (see
+  `agents/custom_prompt.py`) and dispatches one `ci_fix` follow-up task if
+  the workflow fails, also gated by `auto_fix_ci_failures`.
+- **`agents/custom_prompt.py`** (`CustomPromptAgent`, manually triggered
+  from the "✏️ Ask a coding agent to do something" box on a snap's detail
+  page): dispatches a user-typed freeform instruction (e.g. "there's a new
+  0.5.0 upstream release which needs core24/gnome-46-2404, update
+  snapcraft.yaml and anything else needed") to the configured coding
+  backend against that snap's packaging repo. Recorded as
+  `CopilotTask(kind="custom_prompt")` so `pr_monitor.py` picks up the
+  resulting PR for the same CI-watch/fix-dispatch treatment described
+  above — no separate polling loop needed.
 - **`agents/build_failure_watcher.py`** (`BuildFailureWatcherAgent`,
   scheduled every 15 minutes across all users): unlike `pr_monitor.py`,
   this watches a packaging repo's own build/publish workflow on its
@@ -410,10 +423,36 @@ holds the failing run's head SHA for `build_fix`). Visible at
   existing `CopilotTask` rows. Gated by
   `UserConfig.fleet_normalization_enabled`.
 
+### Per-snap "Agent Activity" panel (snap detail page)
+Every snap's detail page shows a live view of what's currently
+working/queued on it, plus a recent-history table:
+
+- `GET /api/snap/{name}/activity` (polled every 3s by inline JS) returns
+  `active` (from `ActivityTracker.get_active_for_snap()` — every
+  concurrently-active agent instance touching this snap, *not* collapsed
+  by agent_type like the fleet-wide `/api/agent-status`'s `get_active()`
+  is), `queued_tasks` (`CopilotTask` rows not yet `completed`/`failed`/
+  etc.), `pending_tests` (`TestRun` rows still `triggered`/`running`/
+  `reviewing`), and `recent` (last 15 finished `AgentRun` rows for this
+  snap).
+- Every single-snap-triggered agent (`ReleaseScannerAgent`,
+  `RebuildOneSnapAgent`, `RepoNormalizerAgent` in single-snap mode,
+  `StackUpdateAgent`, `IssuePrReviewAgent`, `AddressReviewItemAgent`,
+  `CustomPromptAgent`) now accepts an explicit `snap_name` constructor
+  param (forwarded to `BaseAgent`) so its `AgentRun` history row is
+  attributed to the right snap from the start — previously only the
+  *live* tracker entry (via `self._report(msg, snap_name)`) knew which
+  snap a run was for; the persisted `AgentRun.snap_name` stayed `None`,
+  breaking any attempt to filter history by snap.
+- `/agents/runs` (the fleet-wide "find any run's logs" page) gained a
+  `snap_name` filter/dropdown alongside `agent_type`/`status`; the snap
+  detail page's "📜 View Full History" link opens it pre-filtered to that
+  snap.
+
 ### New `UserConfig` columns
 | Column | Default | Purpose |
 |--------|---------|---------|
-| `auto_fix_ci_failures` | `False` | Enable CI-fix dispatch on failing bot-opened PRs (version-bump PRs and dep_update PRs alike) |
+| `auto_fix_ci_failures` | `False` | Enable CI-fix dispatch on failing bot-opened PRs (version-bump, dep_update, and custom_prompt PRs alike) |
 | `auto_fix_build_failures` | `False` | Enable fix-PR dispatch when a packaging repo's own build/publish workflow fails on its default branch |
 | `auto_maintain_upstream` | `False` | Enable dep-update/PR-review/issue-fix for upstream-owned repos |
 | `fleet_normalization_enabled` | `False` | Allow manually triggering the fleet-normalization campaign |

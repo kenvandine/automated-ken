@@ -33,8 +33,17 @@
         {% endfor %}
       </select>
     </div>
+    <div>
+      <label class="text-muted small" style="display:block;margin-bottom:4px;">Snap</label>
+      <select name="snap_name" class="p-form-control">
+        <option value="">All snaps</option>
+        {% for n in snap_names %}
+        <option value="{{ n }}" {% if n == selected_snap_name %}selected{% endif %}>{{ n }}</option>
+        {% endfor %}
+      </select>
+    </div>
     <button type="submit" class="p-button--positive">Filter</button>
-    {% if selected_agent_type or selected_status %}
+    {% if selected_agent_type or selected_status or selected_snap_name %}
     <a href="/agents/runs" class="p-button">Clear</a>
     {% endif %}
   </form>
@@ -63,7 +72,7 @@
         {% for r in runs %}
         <tr>
           <td><span class="agent-type-badge agent-{{ r.agent_type }}">{{ r.agent_type | replace('_', ' ') }}</span></td>
-          <td class="muted">{{ r.snap_name or '—' }}</td>
+          <td class="muted">{% if r.snap_name %}<a href="/snap/{{ r.snap_name }}" class="link-inline">{{ r.snap_name }}</a>{% else %}—{% endif %}</td>
           <td>
             {% if r.status == 'done' %}
             <span class="p-status-label p-status-label--positive">done</span>
@@ -91,7 +100,7 @@
 
   {% if total_pages > 1 %}
   <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:16px;">
-    {% set qs = "&agent_type=" ~ selected_agent_type ~ "&status=" ~ selected_status %}
+    {% set qs = "&agent_type=" ~ selected_agent_type ~ "&status=" ~ selected_status ~ "&snap_name=" ~ selected_snap_name %}
     {% if page > 1 %}
     <a class="p-button is-small" href="/agents/runs?page={{ page - 1 }}{{ qs }}">&larr; Prev</a>
     {% endif %}
