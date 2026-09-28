@@ -96,3 +96,53 @@ def test_renders_with_review_error_and_no_items() -> None:
     }
     html = templates.env.get_template("snap_detail.html").render(_base_context(review_report))
     assert "No packaging or upstream repo configured." in html
+
+
+def test_same_repo_consolidates_packaging_and_upstream_display() -> None:
+    """When packaging_repo == upstream_repo, don't show two duplicate repo
+    links/filter-tabs/badges for what is really just one repository."""
+    ctx = _base_context(None)
+    ctx["issues"] = [
+        {
+            "type": "pr",
+            "repo_url": "https://github.com/kenvandine/duck-ai",
+            "title": "Rebase snapcraft.yaml to core24",
+            "url": "https://github.com/kenvandine/duck-ai/pull/5",
+            "issue_number": 5,
+            "author": "automated-ken",
+            "updated_at": datetime.now(timezone.utc),
+        }
+    ]
+    html = templates.env.get_template("snap_detail.html").render(ctx)
+
+    assert ">\n      Repository\n    </a>" in html
+    assert "Packaging repo" not in html
+    assert "Upstream repo" not in html
+    assert html.count('data-filter="packaging"') == 1
+    assert 'data-filter="upstream"' not in html
+    assert '<span class="repo-badge">' not in html
+
+
+def test_different_repos_keeps_separate_packaging_and_upstream_display() -> None:
+    ctx = _base_context(None)
+    ctx["snap"] = dict(ctx["snap"])
+    ctx["snap"]["upstream_repo"] = "https://github.com/some-upstream/duck-ai"
+    ctx["snap"]["same_repo"] = False
+    ctx["issues"] = [
+        {
+            "type": "pr",
+            "repo_url": "https://github.com/kenvandine/duck-ai",
+            "title": "Rebase snapcraft.yaml to core24",
+            "url": "https://github.com/kenvandine/duck-ai/pull/5",
+            "issue_number": 5,
+            "author": "automated-ken",
+            "updated_at": datetime.now(timezone.utc),
+        }
+    ]
+    html = templates.env.get_template("snap_detail.html").render(ctx)
+
+    assert "Packaging repo" in html
+    assert "Upstream repo" in html
+    assert 'data-filter="packaging"' in html
+    assert 'data-filter="upstream"' in html
+    assert '<span class="repo-badge">' in html

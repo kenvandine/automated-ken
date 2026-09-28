@@ -57,6 +57,11 @@
     {% endif %}
   </div>
   <div class="snap-meta-badges">
+    {% if snap.same_repo %}
+    <a href="{{ snap.packaging_repo }}" target="_blank" rel="noopener" class="repo-link" title="Packaging and upstream repository are the same">
+      Repository
+    </a>
+    {% else %}
     {% if snap.packaging_repo %}
     <a href="{{ snap.packaging_repo }}" target="_blank" rel="noopener" class="repo-link">
       Packaging repo
@@ -66,6 +71,7 @@
     <a href="{{ snap.upstream_repo }}" target="_blank" rel="noopener" class="repo-link">
       Upstream repo
     </a>
+    {% endif %}
     {% endif %}
     {% if snap.packaging_repo %}
     <form method="post" action="/snap/{{ snap.name }}/check-updates" style="display:inline"
@@ -306,6 +312,12 @@
     <button class="filter-tab" data-filter="pr">
       PRs <span class="tab-count">{{ issues|selectattr('type', 'equalto', 'pr')|list|length }}</span>
     </button>
+    {% set same_repo = snap.same_repo %}
+    {% if same_repo %}
+    <button class="filter-tab" data-filter="packaging">
+      Repository <span class="tab-count">{{ issues|selectattr('repo_url', 'equalto', snap.packaging_repo)|list|length }}</span>
+    </button>
+    {% else %}
     {% if snap.packaging_repo %}
     <button class="filter-tab" data-filter="packaging">
       Packaging <span class="tab-count">{{ issues|selectattr('repo_url', 'equalto', snap.packaging_repo)|list|length }}</span>
@@ -315,6 +327,7 @@
     <button class="filter-tab" data-filter="upstream">
       Upstream <span class="tab-count">{{ issues|selectattr('repo_url', 'equalto', snap.upstream_repo)|list|length }}</span>
     </button>
+    {% endif %}
     {% endif %}
   </div>
 
@@ -337,6 +350,7 @@
         {% if issue.updated_at %}
         <span>&middot; updated {{ issue.updated_at.strftime('%Y-%m-%d') }}</span>
         {% endif %}
+        {% if not same_repo %}
         <span class="repo-badge">
           {% if issue.repo_url == snap.packaging_repo %}
           packaging
@@ -346,6 +360,7 @@
           {{ issue.repo_url }}
           {% endif %}
         </span>
+        {% endif %}
       </div>
     </div>
     {% endfor %}
