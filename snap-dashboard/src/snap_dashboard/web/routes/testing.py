@@ -38,6 +38,62 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
+def _build_pending_promotion(
+    session,
+    user_id: int,
+    runs_data: list[dict],
+    tracked_snap_names: set[str],
+    dismissed: set[tuple[str, str]],
+) -> list[dict]:
+    """Return one "pending promotion" card per candidate release set that
+    still has something left to promote.
+
+    ``runs_data`` (most-recent-first) is scanned for the first passed,
+    un-promoted candidate run of each (snap, version) — that's just a
+    starting point for *which* sets to consider, though. The actual
+    per-architecture status shown, and whether the card is shown at all,
+    always comes from :func:`candidate_release_set`/:func:`member_state`,
+    which reflect the *current* state of every architecture rather than
+    whichever single row happened to trigger the lookup. This matters
+    because a superseded/duplicate run (e.g. an earlier re-trigger) can
+    still be "passed" and un-promoted in the DB even after the current run
+    for every architecture has already been promoted to stable — without
+    this check, that stale duplicate kept a "ready to promote" card
+    showing (with only a Dismiss button, since there was really nothing
+    left ready) for sets that had already been fully released.
+    """
+    pending_promotion = []
+    seen: set[tuple[str, str]] = set()
+    for r in runs_data:
+        key = (r["snap_name"], r["version"] or "")
+        if (
+            r["status"] != "passed" or r["promoted"] or r["from_channel"] != "candidate"
+            or not r["version"] or key in seen
+            or r["snap_name"] not in tracked_snap_names
+            or key in dismissed
+        ):
+            continue
+        seen.add(key)
+        members = []
+        for member in candidate_release_set(session, user_id, r["snap_name"], r["version"]):
+            run = member["run"]
+            members.append(
+                {
+                    "architecture": member["architecture"],
+                    "state": member_state(member),
+                    "run_id": run.id if run else None,
+                    "review_decision": run.review_decision if run else None,
+                    "review_confidence": run.review_confidence if run else None,
+                }
+            )
+        if members and all(m["state"] == PROMOTED for m in members):
+            continue
+        pending_promotion.append(
+            {"snap_name": r["snap_name"], "version": r["version"], "members": members}
+        )
+    return pending_promotion
+
+
 @router.get("/testing", response_class=HTMLResponse)
 async def testing_index(request: Request) -> HTMLResponse:
     """Render the YARF testing overview page."""
@@ -167,33 +223,9 @@ async def testing_index(request: Request) -> HTMLResponse:
             (d.snap_name, d.version)
             for d in session.query(PromotionDismissal).filter_by(user_id=user_id).all()
         }
-        pending_promotion = []
-        seen: set[tuple[str, str]] = set()
-        for r in runs_data:
-            key = (r["snap_name"], r["version"] or "")
-            if (
-                r["status"] != "passed" or r["promoted"] or r["from_channel"] != "candidate"
-                or not r["version"] or key in seen
-                or r["snap_name"] not in tracked_snap_names
-                or key in dismissed
-            ):
-                continue
-            seen.add(key)
-            members = []
-            for member in candidate_release_set(session, user_id, r["snap_name"], r["version"]):
-                run = member["run"]
-                members.append(
-                    {
-                        "architecture": member["architecture"],
-                        "state": member_state(member),
-                        "run_id": run.id if run else None,
-                        "review_decision": run.review_decision if run else None,
-                        "review_confidence": run.review_confidence if run else None,
-                    }
-                )
-            pending_promotion.append(
-                {"snap_name": r["snap_name"], "version": r["version"], "members": members}
-            )
+        pending_promotion = _build_pending_promotion(
+            session, user_id, runs_data, tracked_snap_names, dismissed
+        )
 
     return templates.TemplateResponse(
         request,
