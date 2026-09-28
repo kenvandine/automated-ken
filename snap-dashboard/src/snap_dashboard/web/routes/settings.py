@@ -101,6 +101,7 @@ async def settings_post(
     auto_rebuild_stale: str = Form(default=""),
     stale_build_days: int = Form(default=30),
     auto_fix_ci_failures: str = Form(default=""),
+    auto_fix_build_failures: str = Form(default=""),
     auto_maintain_upstream: str = Form(default=""),
     fleet_normalization_enabled: str = Form(default=""),
     coding_task_backend: str = Form(default="copilot_cloud_agent"),
@@ -138,6 +139,7 @@ async def settings_post(
     _auto_promote = auto_promote in ("1", "true", "on", "yes")
     _auto_rebuild_stale = auto_rebuild_stale in ("1", "true", "on", "yes")
     _auto_fix_ci_failures = auto_fix_ci_failures in ("1", "true", "on", "yes")
+    _auto_fix_build_failures = auto_fix_build_failures in ("1", "true", "on", "yes")
     _auto_maintain_upstream = auto_maintain_upstream in ("1", "true", "on", "yes")
     _fleet_normalization_enabled = fleet_normalization_enabled in ("1", "true", "on", "yes")
 
@@ -182,6 +184,7 @@ async def settings_post(
             uc.stale_build_days = max(1, stale_build_days)
             # Copilot cloud agent delegation toggles (all default off / opt-in)
             uc.auto_fix_ci_failures = _auto_fix_ci_failures
+            uc.auto_fix_build_failures = _auto_fix_build_failures
             uc.auto_maintain_upstream = _auto_maintain_upstream
             uc.fleet_normalization_enabled = _fleet_normalization_enabled
             # Pluggable coding-task backend — see agents/coding_backend.py

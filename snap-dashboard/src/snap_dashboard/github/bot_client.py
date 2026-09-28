@@ -296,6 +296,73 @@ class BotGitHubClient:
             pass
         return None
 
+    def latest_workflow_run(
+        self, owner: str, repo: str, workflow_file: str, branch: str
+    ) -> dict | None:
+        """Return the most recent *completed* run of ``workflow_file`` on
+        ``branch``, or None if there isn't one yet (or the lookup fails).
+
+        Used by :mod:`agents.build_failure_watcher` to detect a packaging
+        repo's own build/publish workflow failing on its default branch —
+        as opposed to :func:`agents.pr_monitor._get_pr_check_runs`, which
+        watches check runs on a specific bot-opened PR.
+        """
+        url = f"{_GH_API}/repos/{owner}/{repo}/actions/workflows/{workflow_file}/runs"
+        params = {"branch": branch, "status": "completed", "per_page": 1}
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.get(url, params=params, headers=_headers(self.read_token))
+            if resp.status_code != 200:
+                return None
+            runs = resp.json().get("workflow_runs") or []
+            return runs[0] if runs else None
+        except Exception as exc:
+            logger.debug("latest_workflow_run %s/%s/%s failed: %s", owner, repo, workflow_file, exc)
+            return None
+
+    def failed_job_summaries(self, owner: str, repo: str, run_id: int, *, tail_chars: int = 2000) -> list[dict]:
+        """Return ``[{"name": job_name, "url": html_url, "log_tail": str}]``
+        for every job that didn't succeed in run ``run_id``.
+
+        ``log_tail`` is the last ``tail_chars`` characters of that job's
+        plain-text log (GitHub's job-logs endpoint 302s to a plaintext
+        blob) — enough to show the actual error (e.g. a snapcraft layout
+        conflict, a failed lint) without ballooning the coding-agent
+        prompt with an entire build log. Best-effort: a job whose log
+        can't be fetched is still included, just with an empty log_tail.
+        """
+        jobs_url = f"{_GH_API}/repos/{owner}/{repo}/actions/runs/{run_id}/jobs"
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.get(jobs_url, headers=_headers(self.read_token))
+            if resp.status_code != 200:
+                return []
+            jobs = resp.json().get("jobs") or []
+        except Exception as exc:
+            logger.debug("failed_job_summaries %s/%s run %s failed: %s", owner, repo, run_id, exc)
+            return []
+
+        failed_jobs = [j for j in jobs if j.get("conclusion") not in ("success", "skipped", None)]
+        out = []
+        for job in failed_jobs:
+            log_tail = ""
+            log_url = f"{_GH_API}/repos/{owner}/{repo}/actions/jobs/{job['id']}/logs"
+            try:
+                with httpx.Client(timeout=20, follow_redirects=True) as client:
+                    log_resp = client.get(log_url, headers=_headers(self.read_token))
+                if log_resp.status_code == 200:
+                    log_tail = log_resp.text[-tail_chars:]
+            except Exception as exc:
+                logger.debug("job log fetch failed for job %s: %s", job.get("id"), exc)
+            out.append(
+                {
+                    "name": job.get("name", "?"),
+                    "url": job.get("html_url", ""),
+                    "log_tail": log_tail,
+                }
+            )
+        return out
+
 
 # ---------------------------------------------------------------------------
 # snapcraft.yaml patching

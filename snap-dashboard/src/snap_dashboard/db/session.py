@@ -184,6 +184,14 @@ def _migrate() -> None:
         # Tracks CI state of a dep_update-opened PR so PRMonitorAgent can
         # apply auto_fix_ci_failures to it too — see db/models.CopilotTask.
         "ALTER TABLE copilot_tasks ADD COLUMN ci_status VARCHAR(32)",
+        # Opt-in: detect a packaging repo's own build/publish workflow
+        # failing on its default branch and dispatch the coding backend to
+        # fix it — see agents/build_failure_watcher.py.
+        "ALTER TABLE user_configs ADD COLUMN auto_fix_build_failures BOOLEAN DEFAULT 0",
+        # Dedup key (build_fix's failing run's head SHA) so the periodic
+        # scanner doesn't re-dispatch a fix for the same failure every
+        # poll — see db/models.CopilotTask.dedupe_key.
+        "ALTER TABLE copilot_tasks ADD COLUMN dedupe_key VARCHAR(255)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

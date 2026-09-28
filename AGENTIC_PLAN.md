@@ -368,16 +368,28 @@ user-to-server token (PAT/OAuth), not a GitHub App installation token.
 
 ### New DB model: `copilot_tasks`
 Tracks every dispatched task — `kind` (`ci_fix` | `dep_update` | `issue_fix` |
-`fleet_normalize`), `owner_repo`, `external_task_id`, `status`, `pr_url`,
+`fleet_normalize` | `stack_update` | `pr_review_request` | `build_fix`),
+`owner_repo`, `external_task_id`, `status`, `pr_url`,
 `issue_number` (also reused as a per-snap dedupe key for fleet-normalize
-suite-cleanup tasks), `error_msg`. Visible at `/copilot-tasks`, with
-per-task and refresh-all actions that poll `get_task()` for live status.
+suite-cleanup tasks), `error_msg`, `dedupe_key` (kind-specific dedup key;
+holds the failing run's head SHA for `build_fix`). Visible at
+`/copilot-tasks`, with per-task and refresh-all actions that poll
+`get_task()` for live status.
 
-### Three delegated agents (all opt-in, default off)
+### Four delegated agents (all opt-in, default off)
 - **`agents/pr_monitor.py`** (`_maybe_dispatch_ci_fix`): when a version-bump
   PR's build/test workflow fails, dispatches a fix-PR task with `base_ref`
   set to the failing PR's own branch (so the fix stacks on top of it).
   Gated by `UserConfig.auto_fix_ci_failures`.
+- **`agents/build_failure_watcher.py`** (`BuildFailureWatcherAgent`,
+  scheduled every 15 minutes across all users): unlike `pr_monitor.py`,
+  this watches a packaging repo's own build/publish workflow on its
+  *default* branch — not tied to any bot-opened PR — so a break caused by
+  e.g. a Snap Store/base-snap change, not just a bot's own commit, still
+  gets noticed and a fix dispatched. Dedupes by the failing run's head SHA
+  (`CopilotTask.dedupe_key`) so the same commit's failure is only ever
+  attempted once, but a *new* failing commit gets a fresh attempt. Gated by
+  `UserConfig.auto_fix_build_failures`.
 - **`agents/upstream_maintainer.py`** (`UpstreamMaintainerAgent`, scheduled
   daily): for snaps whose `upstream_repo` is owned by the logged-in user's
   own GitHub account (heuristic — no new DB column), dispatches rate-limited
@@ -402,6 +414,7 @@ per-task and refresh-all actions that poll `get_task()` for live status.
 | Column | Default | Purpose |
 |--------|---------|---------|
 | `auto_fix_ci_failures` | `False` | Enable CI-fix dispatch on failing bot-opened PRs (version-bump PRs and dep_update PRs alike) |
+| `auto_fix_build_failures` | `False` | Enable fix-PR dispatch when a packaging repo's own build/publish workflow fails on its default branch |
 | `auto_maintain_upstream` | `False` | Enable dep-update/PR-review/issue-fix for upstream-owned repos |
 | `fleet_normalization_enabled` | `False` | Allow manually triggering the fleet-normalization campaign |
 | `coding_task_backend` | `"copilot_cloud_agent"` | Which backend `get_coding_dispatcher()` selects |

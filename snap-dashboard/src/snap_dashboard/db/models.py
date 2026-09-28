@@ -112,6 +112,11 @@ class UserConfig(Base):
     auto_fix_ci_failures = Column(Boolean, default=False, nullable=False)
     auto_maintain_upstream = Column(Boolean, default=False, nullable=False)
     fleet_normalization_enabled = Column(Boolean, default=False, nullable=False)
+    # Detects a packaging repo's own build/publish workflow failing on its
+    # default branch (as opposed to auto_fix_ci_failures, which watches PRs
+    # the bot itself opened) and dispatches the coding backend to open a
+    # fix PR — see agents/build_failure_watcher.py.
+    auto_fix_build_failures = Column(Boolean, default=False, nullable=False)
 
     # Which backend handles "capable coding" tasks (CI fixes, dep upgrades,
     # issue fixes, fleet normalization). Long-term goal is to run this
@@ -723,8 +728,9 @@ class CopilotTask(Base):
     attempting a fix for a filed issue (``issue_fix``), the one-time
     fleet-normalization campaign (``fleet_normalize``), a manual "review this
     repo's stack for outdated deps/framework version" trigger
-    (``stack_update``), and a manual Copilot review request on an open PR
-    (``pr_review_request``).
+    (``stack_update``), a manual Copilot review request on an open PR
+    (``pr_review_request``), and a packaging repo's own build/publish
+    workflow failing on its default branch (``build_fix``).
     """
 
     __tablename__ = "copilot_tasks"
@@ -732,7 +738,8 @@ class CopilotTask(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     snap_id = Column(Integer, ForeignKey("snaps.id", ondelete="SET NULL"), nullable=True)
-    # ci_fix | dep_update | issue_fix | fleet_normalize | stack_update | pr_review_request
+    # ci_fix | dep_update | issue_fix | fleet_normalize | stack_update |
+    # pr_review_request | build_fix
     kind = Column(String(32), nullable=False)
     owner_repo = Column(String(500), nullable=False)  # "owner/repo" the task targets
     # GitHub's own agent-task id, e.g. for GET /agents/repos/{o}/{r}/tasks/{id}.
@@ -757,6 +764,11 @@ class CopilotTask(Base):
     # ci_pending | ci_passed | ci_failed | closed (PR closed/merged, stop
     # watching). Only meaningful for kind == "dep_update" today.
     ci_status = Column(String(32), nullable=True)
+    # Kind-specific dedup key so a periodic scanner doesn't re-dispatch a
+    # fix for the same underlying failure on every poll. Only meaningful
+    # for kind == "build_fix" today, where it holds the failing workflow
+    # run's head commit SHA — see agents/build_failure_watcher.py.
+    dedupe_key = Column(String(255), nullable=True)
     created_at = Column(DateTime, default=_now, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
 

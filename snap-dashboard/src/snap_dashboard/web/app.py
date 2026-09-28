@@ -92,6 +92,13 @@ async def on_startup() -> None:
     # PR monitor runs every 5 minutes regardless of user count.
     runner.schedule_periodic(PRMonitorAgent, interval_hours=5 / 60)
 
+    # Build failure watcher — detects a packaging repo's own build/publish
+    # workflow failing on its default branch (gated internally by
+    # UserConfig.auto_fix_build_failures, off by default) — every 15
+    # minutes across all users, same "sweep everyone" pattern as PR monitor.
+    from snap_dashboard.agents.build_failure_watcher import BuildFailureWatcherAgent
+    runner.schedule_periodic(BuildFailureWatcherAgent, interval_hours=15 / 60)
+
     # Runner watchdog — clears stalled remote-runner jobs every 2 minutes.
     from snap_dashboard.agents.runner_watchdog import RunnerWatchdogAgent
     runner.schedule_periodic(RunnerWatchdogAgent, interval_hours=2 / 60)

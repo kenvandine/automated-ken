@@ -464,6 +464,25 @@
       <label class="form-label checkbox-label">
         <input
           type="checkbox"
+          name="auto_fix_build_failures"
+          value="true"
+          {% if config.auto_fix_build_failures %}checked{% endif %}
+          style="margin-right: 6px;"
+        >
+        Auto-fix failing packaging repo builds
+      </label>
+      <span class="form-hint">
+        When a snap's own packaging repo build/publish workflow fails on its default
+        branch (not tied to any bot-opened PR — e.g. a snapcraft.yaml issue, a base
+        snap update breaking a part) so it stops publishing new revisions, dispatch
+        the configured coding backend to open a fix PR. Checked every 15 minutes.
+      </span>
+    </div>
+
+    <div class="form-row">
+      <label class="form-label checkbox-label">
+        <input
+          type="checkbox"
           name="auto_maintain_upstream"
           value="true"
           {% if config.auto_maintain_upstream %}checked{% endif %}
