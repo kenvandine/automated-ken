@@ -42,7 +42,7 @@ class _FakeBotClient:
     def list_tree(self, owner, repo, ref=None):
         return self._tree
 
-    def get_file(self, owner, repo, path):
+    def get_file(self, owner, repo, path, ref=None):
         if path in self._files:
             return self._files[path], "sha"
         return None
@@ -159,6 +159,49 @@ def test_start_task_empty_plan_returns_failed(monkeypatch) -> None:
 
     assert result["state"] == "failed"
     assert "no file changes" in result["error"]
+
+
+def test_start_task_noop_plan_returns_failed_without_committing(monkeypatch) -> None:
+    """The model echoing a file back unchanged must not open an empty-diff PR.
+
+    Regression test for https://github.com/kenvandine/neofetch-desktop/pull/7
+    — the local model's plan named a file to "fix" but the returned content
+    was byte-identical to what's already on the base branch, so the commit
+    (and PR) it produced had no actual diff.
+    """
+    plan = {
+        "commit_message": "fix: correct snapcraft.yaml base",
+        "files": [{"path": "snapcraft.yaml", "action": "write", "content": "name: neofetch-desktop\n"}],
+    }
+    dispatcher, _ = _make_dispatcher(
+        monkeypatch, reply=json.dumps(plan),
+        files={"snapcraft.yaml": "name: neofetch-desktop\n"},
+    )
+
+    result = dispatcher.start_task("o", "r", "task")
+
+    assert result["state"] == "failed"
+    assert "unchanged" in result["error"]
+    assert dispatcher._tree.commit_calls == []
+    assert dispatcher._tree.pr_calls == []
+
+
+def test_start_task_partial_noop_plan_commits_only_real_changes(monkeypatch) -> None:
+    plan = {
+        "files": [
+            {"path": "unchanged.txt", "action": "write", "content": "same\n"},
+            {"path": "changed.txt", "action": "write", "content": "new content\n"},
+        ],
+    }
+    dispatcher, _ = _make_dispatcher(
+        monkeypatch, reply=json.dumps(plan),
+        files={"unchanged.txt": "same\n", "changed.txt": "old content\n"},
+    )
+
+    result = dispatcher.start_task("o", "r", "task")
+
+    assert result["state"] == "completed"
+    assert dispatcher._tree.commit_calls[0]["put_files"] == {"changed.txt": "new content\n"}
 
 
 def test_start_task_commit_failure_returns_failed(monkeypatch) -> None:

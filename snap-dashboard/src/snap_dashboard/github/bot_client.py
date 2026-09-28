@@ -76,12 +76,13 @@ class BotGitHubClient:
     # Read
     # ------------------------------------------------------------------
 
-    def get_file(self, owner: str, repo: str, path: str) -> tuple[str, str] | None:
-        """Return (content_text, sha) for a file, or None."""
+    def get_file(self, owner: str, repo: str, path: str, ref: str | None = None) -> tuple[str, str] | None:
+        """Return (content_text, sha) for a file at ``ref`` (default branch if unset), or None."""
         url = f"{_GH_API}/repos/{owner}/{repo}/contents/{path}"
+        params = {"ref": ref} if ref else None
         try:
             with httpx.Client(timeout=15) as client:
-                resp = client.get(url, headers=_headers(self.read_token))
+                resp = client.get(url, params=params, headers=_headers(self.read_token))
             if resp.status_code != 200:
                 return None
             data = resp.json()

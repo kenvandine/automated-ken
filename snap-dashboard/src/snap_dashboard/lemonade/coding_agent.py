@@ -104,6 +104,16 @@ class LocalLemonadeCodingDispatcher:
         if not put_files and not delete_paths:
             return {"state": "failed", "error": "local coding model produced no file changes"}
 
+        put_files = self._drop_noop_writes(owner, repo, base_branch, put_files)
+        if not put_files and not delete_paths:
+            return {
+                "state": "failed",
+                "error": (
+                    "local coding model's plan only echoed existing file content back "
+                    "unchanged — no actual diff to commit"
+                ),
+            }
+
         branch = f"lemonade-coding/{int(time.time())}"
         commit_message = plan.get("commit_message") or "chore: automated-ken local coding task"
         created_branch = self._tree.commit_multi(
@@ -126,6 +136,28 @@ class LocalLemonadeCodingDispatcher:
             return {"state": "failed", "error": "committed changes but failed to open a pull request"}
         return {"state": "completed", "html_url": pr.get("html_url"), "number": pr.get("number")}
 
+    def _drop_noop_writes(
+        self, owner: str, repo: str, base_branch: str, put_files: dict[str, str],
+    ) -> dict[str, str]:
+        """Drop any planned "write" whose content is byte-identical to what's
+        already at ``base_branch`` — the local model sometimes echoes a file
+        back unchanged (e.g. truncated by ``_CODING_MAX_TOKENS``, or it just
+        didn't actually apply the fix it described) while still naming it in
+        the plan. Committing those verbatim produces a real commit whose tree
+        matches its parent, i.e. a PR that opens with an empty diff.
+        """
+        kept = {}
+        for path, new_content in put_files.items():
+            existing = self._bot.get_file(owner, repo, path, ref=base_branch)
+            if existing is not None and existing[0] == new_content:
+                logger.info(
+                    "local_lemonade coding backend: dropping no-op write for %s/%s:%s "
+                    "(plan content matches %s unchanged)", owner, repo, path, base_branch,
+                )
+                continue
+            kept[path] = new_content
+        return kept
+
     def _build_repo_context(self, owner: str, repo: str, branch: str) -> str:
         paths = self._bot.list_tree(owner, repo, ref=branch)
         inlinable = [p for p in paths if not p.lower().endswith(_SKIP_SUFFIXES)]
@@ -133,7 +165,7 @@ class LocalLemonadeCodingDispatcher:
         blocks: list[str] = []
         total = 0
         for path in inlinable[:_MAX_FILES_INLINED]:
-            result = self._bot.get_file(owner, repo, path)
+            result = self._bot.get_file(owner, repo, path, ref=branch)
             if not result:
                 continue
             content, _sha = result
