@@ -67,6 +67,7 @@ def env(monkeypatch):
     monkeypatch.setattr("snap_dashboard.testing.promoter.promote_snap", _promote)
     monkeypatch.setattr("snap_dashboard.collector.refresh_channel_map", _refresh)
     monkeypatch.setattr("snap_dashboard.testing.baselines.persist_stable_baseline_for_run", lambda *a, **k: 0)
+    monkeypatch.setattr("snap_dashboard.store.client.verify_channel_revision", lambda *a, **k: True)
 
     with _fake_get_session() as s:
         user = User(github_login="k", github_id=1)

@@ -147,6 +147,52 @@ def test_release_set_waits_for_every_arch_and_ignores_untestable(db):
         assert states == [release_set.READY, "review: needs_review"]
 
 
+def test_rejected_review_blocks_manual_promotion_even_without_threshold(db):
+    """member_state() without auto_threshold is the manual "Promote set" path.
+
+    A run the AI explicitly rejected must never look READY there, even
+    though its status stays "passed" — otherwise a rejected screenshot
+    review gets silently promoted by a human clicking the plain
+    (non-override) promote button.
+    """
+    with db() as s:
+        (alice,) = _users(s, 1)
+        amd_id, arm_id = _candidate_set(s, alice, arm_review="reject")
+        members = release_set.candidate_release_set(s, alice, "foo", "2.0")
+        states = [release_set.member_state(m) for m in members]
+    assert states == [release_set.READY, "review: rejected"]
+
+
+def test_promotion_not_confirmed_on_store_is_not_recorded_as_promoted(db, monkeypatch):
+    """A 2xx from the Store release API isn't proof the release landed.
+
+    If the public channel-map still doesn't show the revision afterwards,
+    the run must stay unpromoted (surfaced as a failure) rather than the
+    dashboard claiming a promotion the Store never actually applied.
+    """
+    monkeypatch.setattr(
+        "snap_dashboard.testing.promoter.promote_snap",
+        lambda name, rev, channel, store_credentials="": (True, "ok"),
+    )
+    monkeypatch.setattr(
+        "snap_dashboard.testing.baselines.persist_stable_baseline_for_run", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "snap_dashboard.store.client.verify_channel_revision", lambda *a, **k: False
+    )
+    with db() as s:
+        (alice,) = _users(s, 1)
+        amd_id, arm_id = _candidate_set(s, alice, arm_review="approve")
+
+    uc = SimpleNamespace(snapcraft_macaroon="m", github_token="", testing_repo="")
+    promoted, failures = release_set.promote_release_set(alice, "foo", "2.0", [amd_id, arm_id], uc)
+    assert promoted == []
+    assert len(failures) == 2
+    with db() as s:
+        amd_run = s.query(TestRun).get(amd_id)
+        assert amd_run.status == "passed" and not amd_run.promoted
+
+
 def test_release_set_promotes_all_together_once(db, monkeypatch):
     released = []
     monkeypatch.setattr(
@@ -155,6 +201,9 @@ def test_release_set_promotes_all_together_once(db, monkeypatch):
     )
     monkeypatch.setattr(
         "snap_dashboard.testing.baselines.persist_stable_baseline_for_run", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        "snap_dashboard.store.client.verify_channel_revision", lambda *a, **k: True
     )
     with db() as s:
         (alice,) = _users(s, 1)

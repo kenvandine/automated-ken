@@ -137,6 +137,44 @@ def extract_channel_map(info: dict[str, Any]) -> list[dict[str, Any]]:
     return results
 
 
+def verify_channel_revision(
+    snap_name: str,
+    architecture: str,
+    revision: int,
+    channel: str = "stable",
+    attempts: int = 3,
+    delay: float = 3.0,
+) -> bool:
+    """Confirm the public Store channel-map actually shows *revision* released.
+
+    The Store's authenticated ``snap-release`` publisher endpoint can
+    return a ``2xx`` response even when the release didn't actually land
+    on the channel (e.g. a store-side validation issue that isn't
+    surfaced as an HTTP error), so a caller that only trusts that
+    response can end up recording a promotion the Store never applied.
+    This re-reads the same public channel-map used elsewhere in the
+    dashboard (:func:`get_snap_info`/:func:`extract_channel_map`) as an
+    independent, authoritative check before anything is marked promoted.
+
+    Retries a few times with a short delay since the Store can take a
+    moment to propagate a release to this read API.
+    """
+    for attempt in range(attempts):
+        if attempt:
+            time.sleep(delay)
+        info = get_snap_info(snap_name)
+        if not info:
+            continue
+        for entry in extract_channel_map(info):
+            if (
+                entry["channel"] == channel
+                and entry["architecture"] == architecture
+                and entry["revision"] == revision
+            ):
+                return True
+    return False
+
+
 def _looks_like_repo(url: str) -> bool:
     """Return True if the URL looks like a GitHub or GitLab repo."""
     if not url:

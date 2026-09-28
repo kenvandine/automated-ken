@@ -90,8 +90,12 @@ def candidate_release_set(session, user_id: int, snap_name: str, version: str) -
 def member_state(member: dict, auto_threshold: float | None = None) -> str:
     """Return ``"promoted"``, ``"ready"``, or a short reason the member isn't ready.
 
-    With ``auto_threshold`` set (auto-promotion), a member additionally
-    needs an "approve" review at or above that confidence.
+    An explicit AI "reject" review always blocks promotion — manual or
+    automatic — regardless of ``auto_threshold``; a rejected screenshot
+    review must never be promoted without a confirmed manual override
+    (the ``override``-gated path in the "Promote set" route). With
+    ``auto_threshold`` set (auto-promotion), a member additionally needs
+    an "approve" review at or above that confidence.
     """
     if member["promoted"]:
         return PROMOTED
@@ -102,6 +106,8 @@ def member_state(member: dict, auto_threshold: float | None = None) -> str:
         return run.status
     if member["revision"] is None:
         return "no revision"
+    if run.review_decision == "reject":
+        return "review: rejected"
     if auto_threshold is not None:
         if run.review_decision != "approve":
             return f"review: {run.review_decision or 'pending'}"
@@ -162,6 +168,7 @@ def promote_release_set(
 
     Returns ``(promoted_architectures, failure_messages)``.
     """
+    from snap_dashboard.store.client import verify_channel_revision
     from snap_dashboard.testing.baselines import persist_stable_baseline_for_run
     from snap_dashboard.testing.promoter import promote_snap
 
@@ -205,6 +212,22 @@ def promote_release_set(
     failures: list[str] = []
     for item in claimed:
         ok, output = promote_snap(snap_name, item["revision"], "stable", store_credentials=credentials)
+        if ok:
+            # The Store API call itself succeeding (HTTP 2xx) isn't proof the
+            # release actually landed — verify against the public channel-map
+            # before ever recording this run as promoted, so the dashboard
+            # can't claim a promotion the Store didn't apply.
+            confirmed = verify_channel_revision(snap_name, item["arch"], item["revision"])
+            if not confirmed:
+                ok = False
+                output = (
+                    "Store accepted the release request, but the stable channel-map "
+                    "still doesn't show this revision — treating as not promoted."
+                )
+                logger.warning(
+                    "promote_release_set: %s %s rev %s not confirmed on stable after release call",
+                    snap_name, item["arch"], item["revision"],
+                )
         with get_session() as session:
             run = session.query(TestRun).get(item["id"])
             if run is None:
