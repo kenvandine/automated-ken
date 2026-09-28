@@ -749,6 +749,14 @@ class CopilotTask(Base):
     pr_url = Column(Text, nullable=True)
     issue_number = Column(Integer, nullable=True)
     error_msg = Column(Text, nullable=True)
+    # CI state of the PR this task opened, watched by
+    # PRMonitorAgent._check_dep_update_prs() so a bot-opened dep_update PR
+    # on a generic (non-snap-packaging) upstream repo gets the same
+    # auto_fix_ci_failures treatment as version-bump PRs — this had no
+    # coverage at all before. None (not yet checked/no checks reported) |
+    # ci_pending | ci_passed | ci_failed | closed (PR closed/merged, stop
+    # watching). Only meaningful for kind == "dep_update" today.
+    ci_status = Column(String(32), nullable=True)
     created_at = Column(DateTime, default=_now, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
 

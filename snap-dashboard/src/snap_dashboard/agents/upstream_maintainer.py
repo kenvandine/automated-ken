@@ -28,6 +28,7 @@ from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.agents.coding_backend import (
     RETRY_ELIGIBLE_STATUSES,
     CodingDispatcher,
+    extract_pr_number,
     get_coding_dispatcher,
     task_result_fields,
 )
@@ -166,6 +167,11 @@ class UpstreamMaintainerAgent(BaseAgent):
                     owner_repo=owner_repo,
                     prompt=prompt,
                     base_ref=base_ref,
+                    # Set as soon as we know it (e.g. local_lemonade resolves
+                    # synchronously) so pr_monitor.py can watch this PR's CI
+                    # without waiting on a separate polling step — see
+                    # PRMonitorAgent._check_dep_update_prs().
+                    issue_number=extract_pr_number(task) if task else None,
                     **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
                 )
             )

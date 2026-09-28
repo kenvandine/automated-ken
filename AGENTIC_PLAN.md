@@ -401,7 +401,7 @@ per-task and refresh-all actions that poll `get_task()` for live status.
 ### New `UserConfig` columns
 | Column | Default | Purpose |
 |--------|---------|---------|
-| `auto_fix_ci_failures` | `False` | Enable CI-fix dispatch on failing version-bump PRs |
+| `auto_fix_ci_failures` | `False` | Enable CI-fix dispatch on failing bot-opened PRs (version-bump PRs and dep_update PRs alike) |
 | `auto_maintain_upstream` | `False` | Enable dep-update/PR-review/issue-fix for upstream-owned repos |
 | `fleet_normalization_enabled` | `False` | Allow manually triggering the fleet-normalization campaign |
 | `coding_task_backend` | `"copilot_cloud_agent"` | Which backend `get_coding_dispatcher()` selects |

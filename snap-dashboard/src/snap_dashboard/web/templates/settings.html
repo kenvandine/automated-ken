@@ -451,11 +451,12 @@
           {% if config.auto_fix_ci_failures %}checked{% endif %}
           style="margin-right: 6px;"
         >
-        Auto-fix failing CI on version-bump PRs
+        Auto-fix failing CI on bot-opened PRs
       </label>
       <span class="form-hint">
-        When a bot-opened version-bump PR's build/test workflow fails, dispatch the configured
-        coding backend to open a fix PR stacked on top of the failing branch.
+        When a bot-opened PR's build/test workflow fails — a version-bump PR, or a
+        dependency-update PR from "Auto-maintain upstream repos" below — dispatch the
+        configured coding backend to open a fix PR stacked on top of the failing branch.
       </span>
     </div>
 

@@ -181,6 +181,9 @@ def _migrate() -> None:
         # Full captured log for every agent run — see agents/base.py's
         # ``_ThreadLogCapture`` handler and db/models.AgentRun.log_output.
         "ALTER TABLE agent_runs ADD COLUMN log_output TEXT",
+        # Tracks CI state of a dep_update-opened PR so PRMonitorAgent can
+        # apply auto_fix_ci_failures to it too — see db/models.CopilotTask.
+        "ALTER TABLE copilot_tasks ADD COLUMN ci_status VARCHAR(32)",
     ]
     with engine.connect() as conn:
         for sql in migrations:

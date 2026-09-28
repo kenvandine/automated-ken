@@ -6,6 +6,7 @@ import logging
 from datetime import datetime, timezone
 
 import httpx
+from sqlalchemy import or_
 
 from snap_dashboard.agents.base import BaseAgent
 from snap_dashboard.agents.coding_backend import (
@@ -114,7 +115,12 @@ class PRMonitorAgent(BaseAgent):
             except Exception as exc:
                 logger.warning("pr_monitor: error on PR %s: %s", pr["id"], exc)
 
-        return f"checked {len(prs)} in-flight PRs, advanced {updated}"
+        dep_update_checked, dep_update_updated = self._check_dep_update_prs()
+
+        return (
+            f"checked {len(prs)} in-flight PRs, advanced {updated}; "
+            f"checked {dep_update_checked} dep-update PR(s), advanced {dep_update_updated}"
+        )
 
     def _advance(self, pr: dict) -> bool:
         """Try to advance the PR state machine; return True if state changed."""
@@ -360,6 +366,167 @@ class PRMonitorAgent(BaseAgent):
             logger.info("pr_monitor: dispatched Copilot ci_fix task for %s PR #%s", owner_repo, pr["bot_pr_number"])
         else:
             logger.warning("pr_monitor: failed to dispatch Copilot ci_fix task for %s PR #%s", owner_repo, pr["bot_pr_number"])
+
+    # ------------------------------------------------------------------
+    # dep_update PR CI watching (generic upstream repos, not snap packaging)
+    # ------------------------------------------------------------------
+
+    def _check_dep_update_prs(self) -> tuple[int, int]:
+        """Apply the same ``auto_fix_ci_failures`` treatment to PRs opened by
+        ``UpstreamMaintainerAgent``'s ``dep_update`` task.
+
+        These PRs target arbitrary upstream repos the user personally
+        maintains (e.g. a GitHub project they're upstream for), not a snap
+        packaging repo — there's no YARF/release pipeline involved, just
+        "did CI pass". Unlike ``VersionBumpPR``, which gets a full state
+        machine via ``_advance()``, this only needs to watch for CI
+        completion once and dispatch a fix a single time, mirroring
+        ``_check_ci_complete``/``_maybe_dispatch_ci_fix`` above.
+
+        Returns ``(checked, updated)`` counts for the run summary.
+        """
+        with get_session() as session:
+            q = session.query(CopilotTask).filter(
+                CopilotTask.kind == "dep_update",
+                CopilotTask.status == "completed",
+                CopilotTask.pr_url.isnot(None),
+                or_(
+                    CopilotTask.ci_status.is_(None),
+                    CopilotTask.ci_status.notin_(["ci_passed", "ci_failed", "closed"]),
+                ),
+            )
+            if self.user_id:
+                q = q.filter_by(user_id=self.user_id)
+            rows = [
+                {
+                    "id": t.id,
+                    "user_id": t.user_id,
+                    "snap_id": t.snap_id,
+                    "owner_repo": t.owner_repo,
+                    "pr_url": t.pr_url,
+                    "pr_number": t.issue_number,
+                    "ci_status": t.ci_status,
+                }
+                for t in q.all()
+            ]
+
+        updated = 0
+        for row in rows:
+            try:
+                if self._advance_dep_update_pr(row):
+                    updated += 1
+            except Exception as exc:
+                logger.warning("pr_monitor: error on dep_update PR task %s: %s", row["id"], exc)
+
+        return len(rows), updated
+
+    def _advance_dep_update_pr(self, row: dict) -> bool:
+        owner_repo = parse_owner_repo(row["owner_repo"]) if row["owner_repo"] else None
+        pr_number = row["pr_number"] or extract_pr_number({"pull_request": row["pr_url"]})
+        if not owner_repo or not pr_number:
+            return False
+        owner, repo = owner_repo
+
+        uc = get_user_config(row["user_id"]) if row["user_id"] else None
+        token = (getattr(uc, "bot_github_token", "") if uc else "") or (getattr(uc, "github_token", "") if uc else "") or ""
+        if not token:
+            return False
+
+        # Stop watching once the PR is closed/merged on GitHub, regardless
+        # of CI state.
+        try:
+            with httpx.Client(timeout=15) as http:
+                resp = http.get(
+                    f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}", headers=_gh_headers(token)
+                )
+            if resp.status_code == 200 and resp.json().get("state") == "closed":
+                self._set_dep_update_ci_status(row["id"], "closed")
+                return True
+        except Exception as exc:
+            logger.debug("_advance_dep_update_pr: closed-check failed for task %s: %s", row["id"], exc)
+
+        runs = _get_pr_check_runs(owner, repo, pr_number, token)
+        if not runs:
+            return False
+        conclusions = [r.get("conclusion") for r in runs if r.get("status") == "completed"]
+        if len(conclusions) < len(runs):
+            if row["ci_status"] != "ci_pending":
+                self._set_dep_update_ci_status(row["id"], "ci_pending")
+                return True
+            return False  # still running, already recorded as pending
+
+        if all(c == "success" for c in conclusions):
+            self._set_dep_update_ci_status(row["id"], "ci_passed")
+            return True
+
+        # Failing — dispatch a fix exactly once, on this transition (mirrors
+        # _check_ci_complete/_maybe_dispatch_ci_fix; never re-dispatched on
+        # later polls even if it keeps failing).
+        self._set_dep_update_ci_status(row["id"], "ci_failed")
+        self._maybe_dispatch_dep_update_ci_fix(row, owner, repo, pr_number, uc, runs)
+        return True
+
+    @staticmethod
+    def _set_dep_update_ci_status(task_id: int, ci_status: str) -> None:
+        with get_session() as session:
+            task = session.query(CopilotTask).get(task_id)
+            if task:
+                task.ci_status = ci_status
+
+    def _maybe_dispatch_dep_update_ci_fix(
+        self, row: dict, owner: str, repo: str, pr_number: int, uc, runs: list[dict]
+    ) -> None:
+        """Opt-in via UserConfig.auto_fix_ci_failures — same gate as version-bump PRs."""
+        if not uc or not getattr(uc, "auto_fix_ci_failures", False):
+            return
+        client = get_coding_dispatcher(uc)
+        if not client:
+            return
+        owner_repo = f"{owner}/{repo}"
+        with get_session() as session:
+            existing = (
+                session.query(CopilotTask)
+                .filter(
+                    CopilotTask.kind == "ci_fix",
+                    CopilotTask.owner_repo == owner_repo,
+                    CopilotTask.issue_number == pr_number,
+                    CopilotTask.status.in_(["queued", "in_progress"]),
+                )
+                .first()
+            )
+            if existing:
+                return  # already dispatched, avoid duplicate tasks
+
+        failed = [r for r in runs if r.get("conclusion") not in ("success", None)]
+        failed_names = ", ".join(r.get("name", "?") for r in failed) or "the CI checks"
+        failed_urls = "\n".join(f"- {r.get('name', '?')}: {r.get('html_url', '')}" for r in failed)
+        prompt = (
+            f"The build/test workflow failed on PR #{pr_number} in {owner_repo}, which was "
+            f"opened by an automated dependency-update task. Failing check(s): {failed_names}.\n"
+            f"{failed_urls}\n\n"
+            "Please look at the failure logs, fix whatever is causing the build/test workflow "
+            "to fail (e.g. a stale lockfile that needs regenerating for the new dependency "
+            "versions, a genuine incompatibility introduced by the bump), and open a pull "
+            "request with the fix."
+        )
+        task = client.start_task(owner, repo, prompt, base_ref="main", create_pull_request=True)
+        with get_session() as session:
+            session.add(
+                CopilotTask(
+                    user_id=row.get("user_id"),
+                    snap_id=row.get("snap_id"),
+                    kind="ci_fix",
+                    owner_repo=owner_repo,
+                    prompt=prompt,
+                    issue_number=pr_number,
+                    base_ref="main",
+                    **task_result_fields(task, fallback_error=getattr(client, "last_error", None)),
+                )
+            )
+        if task:
+            logger.info("pr_monitor: dispatched Copilot ci_fix task for dep_update PR %s #%s", owner_repo, pr_number)
+        else:
+            logger.warning("pr_monitor: failed to dispatch Copilot ci_fix task for dep_update PR %s #%s", owner_repo, pr_number)
 
     def _trigger_yarf(self, pr: dict, uc) -> bool:
         """ci_passed → yarf_running by queuing one YARF test run per architecture.
