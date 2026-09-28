@@ -34,7 +34,9 @@
       <select id="interval" name="interval" class="form-input form-select">
         {% for h in intervals %}
         <option value="{{ h }}" {% if h == config.collect_interval_hours %}selected{% endif %}>
-          Every {{ h }} hour{% if h != 1 %}s{% endif %}
+          {% if h < 1 %}Every {{ (h * 60) | round | int }} minutes
+          {% else %}Every {{ h | int }} hour{% if h != 1 %}s{% endif %}
+          {% endif %}
         </option>
         {% endfor %}
       </select>
@@ -262,9 +264,11 @@
     <div class="form-row">
       <label class="form-label" for="agent_interval_hours">Release Scan Interval</label>
       <select id="agent_interval_hours" name="agent_interval_hours" class="form-input form-select">
-        {% for h in [1, 2, 4, 6, 12, 24] %}
+        {% for h in agent_intervals %}
         <option value="{{ h }}" {% if h == config.agent_interval_hours %}selected{% endif %}>
-          Every {{ h }} hour{% if h != 1 %}s{% endif %}
+          {% if h < 1 %}Every {{ (h * 60) | round | int }} minutes
+          {% else %}Every {{ h | int }} hour{% if h != 1 %}s{% endif %}
+          {% endif %}
         </option>
         {% endfor %}
       </select>

@@ -57,7 +57,7 @@ class Config:
     # Legacy single-user fields — still used as fallback when UserConfig is absent
     github_token: str = ""
     publisher: str = ""
-    collect_interval_hours: int = 6
+    collect_interval_hours: float = 6
     testing_repo: str = ""  # format: "owner/repo"
     auto_test: bool = False
     # Multi-tenant / auth settings (server-level)
@@ -98,7 +98,7 @@ def get_config() -> Config:
         port = 9080
 
     try:
-        interval = int(interval_str)
+        interval = float(interval_str)
     except ValueError:
         interval = 6
 

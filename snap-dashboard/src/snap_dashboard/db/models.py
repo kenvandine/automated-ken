@@ -77,7 +77,9 @@ class UserConfig(Base):
     testing_repo = Column(String(500), nullable=True)  # "owner/repo"
     snapcraft_macaroon = Column(Text, nullable=True)
     auto_test = Column(Boolean, default=False, nullable=False)
-    collect_interval_hours = Column(Integer, default=6, nullable=False)
+    # Float (not Integer) so sub-hour cadences like "every 10 minutes"
+    # (10 / 60 hours) can be stored precisely alongside whole-hour values.
+    collect_interval_hours = Column(Float, default=6, nullable=False)
 
     # Agent / AI settings
     lemonade_server_url = Column(String(500), nullable=True)
@@ -90,7 +92,10 @@ class UserConfig(Base):
     lemonade_api_key = Column(Text, nullable=True)
     bot_github_token = Column(Text, nullable=True)
     bot_github_login = Column(String(255), nullable=True)
-    agent_interval_hours = Column(Integer, default=4, nullable=False)
+    # Float (not Integer) so sub-hour cadences like "every 10 minutes"
+    # can be stored precisely alongside whole-hour values — see
+    # collect_interval_hours above.
+    agent_interval_hours = Column(Float, default=4, nullable=False)
     auto_merge = Column(Boolean, default=False, nullable=False)
     auto_promote = Column(Boolean, default=False, nullable=False)
     auto_promote_confidence = Column(Float, default=0.85, nullable=False)

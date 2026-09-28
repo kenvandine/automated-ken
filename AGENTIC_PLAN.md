@@ -53,7 +53,7 @@ Added to `UserConfig` model and the settings page:
 | `lemonade_model` | Model name to use (vision-capable) | `llava` |
 | `bot_github_token` | PAT for the secondary bot GitHub account | — |
 | `bot_github_login` | Login name of the bot account (display only) | — |
-| `agent_interval_hours` | How often the release scan runs | `4` |
+| `agent_interval_hours` | How often the release scan runs (configurable down to every 10 minutes) | `4` |
 | `auto_merge` | Whether agent-approved PRs are auto-merged | `false` |
 
 ## New Database Models

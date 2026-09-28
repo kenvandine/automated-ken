@@ -30,7 +30,9 @@ by) a given publisher account.
    clear, scannable format.
 6. **Snap-packaged** — the entire application ships as a snap.
 7. **Scheduled updates** — a `systemd` timer (provided by the snap) refreshes
-   data on a configurable interval (default: every 6 hours).
+   data on a configurable interval (default: every 6 hours; can be set as
+   low as every 10 minutes from the Settings page for faster candidate/edge
+   revision detection).
 
 ---
 
