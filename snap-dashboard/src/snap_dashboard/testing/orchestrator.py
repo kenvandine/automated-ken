@@ -11,6 +11,7 @@ import httpx
 from snap_dashboard.db.models import ChannelMap, Snap, TestRun, TestRunScreenshot
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_repo_slug
+from snap_dashboard.snapcraft.upstream import is_newer
 
 logger = logging.getLogger(__name__)
 
@@ -85,15 +86,26 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
 
                 if can_promote:
                     # Include rebuilds: same version but higher revision
-                    # (e.g. a security rebuild).
-                    differs = ver != stable_ver or (
-                        info.get("revision") is not None
+                    # (e.g. a security rebuild). Otherwise only a version
+                    # that's actually newer than stable counts — a stale
+                    # candidate that's *older* (e.g. left over from before a
+                    # manual/out-of-band stable release) must not show up as
+                    # "ready to promote".
+                    is_rebuild = (
+                        ver == stable_ver
+                        and info.get("revision") is not None
                         and stable_rev is not None
                         and info["revision"] > stable_rev
                     )
+                    differs = is_rebuild or is_newer(ver, stable_ver)
                 else:
                     candidate_ver = ((channels.get("candidate") or {}).get(arch) or {}).get("version")
-                    differs = ver != stable_ver and ver != candidate_ver
+                    # Edge only belongs in "test only" when it's actually
+                    # ahead of both stable and candidate — an edge version
+                    # that's merely *older* than one of them (e.g. stable/
+                    # candidate got a newer release since edge was last
+                    # built) must not be listed as if it needed testing.
+                    differs = is_newer(ver, stable_ver) and is_newer(ver, candidate_ver)
 
                 if not differs:
                     continue
