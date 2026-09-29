@@ -32,6 +32,18 @@
 </div>
 {% endif %}
 
+{% if run.id and not run.promoted and review_decision != 'reject' and (screenshot_pairs or unpaired_screenshots) %}
+<form method="post" action="/testing/runs/{{ run.id }}/reject" style="margin: -8px 0 16px;"
+      hx-post="/testing/runs/{{ run.id }}/reject" hx-target="#page-content" hx-select="#page-content"
+      hx-swap="innerHTML" hx-disabled-elt="find button"
+      hx-confirm="Reject this screenshot for {{ run.snap_name }} {{ run.version }}? This overrides any AI review and permanently blocks it from being promoted.">
+  <input type="hidden" name="return_to" value="{{ request.url.path }}">
+  <button type="submit" class="p-button is-small" title="Manually reject after reviewing the screenshot yourself">
+    ✕ Reject after review
+  </button>
+</form>
+{% endif %}
+
 {% if screenshot_pairs %}
 <div class="card">
   <h3 class="section-label">Screenshot Comparison</h3>

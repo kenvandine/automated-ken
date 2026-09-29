@@ -473,6 +473,46 @@ async def mark_run_failed(run_id: int, request: Request) -> RedirectResponse:
 
 
 # ---------------------------------------------------------------------------
+# Manually reject a run's screenshot review (human override of the AI review)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/testing/runs/{run_id}/reject")
+def reject_run_review(
+    run_id: int,
+    request: Request,
+    return_to: str = Form(default="/testing"),
+) -> RedirectResponse:
+    """Record a human "reject" decision after the user looks at the screenshot.
+
+    Overrides whatever the AI reviewer decided (approve/needs_review/reject)
+    with a manual rejection — same as an AI "reject", this permanently
+    blocks the run from being promoted (see
+    ``testing/release_set.py:member_state``), and since
+    ``testing/baselines.py`` only ever persists a stable baseline from a
+    run that actually got *promoted*, a rejected run's screenshot can never
+    later be used as a "known good" reference for future reviews either.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    user_id = user["id"]
+    if not return_to.startswith(("/testing", "/version-bumps")):
+        return_to = "/testing"
+
+    with get_session() as session:
+        run = session.query(TestRun).filter_by(id=run_id, user_id=user_id).first()
+        if run and not run.promoted:
+            run.review_decision = "reject"
+            run.review_confidence = 1.0
+            run.review_reasoning = (
+                f"Manually rejected by {user.get('display_name') or user.get('github_login') or 'user'} "
+                "after reviewing the screenshot."
+            )
+    return RedirectResponse(url=return_to, status_code=303)
+
+
+# ---------------------------------------------------------------------------
 # Live status API — polled by the testing page JS
 # ---------------------------------------------------------------------------
 
