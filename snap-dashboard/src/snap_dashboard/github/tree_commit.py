@@ -34,6 +34,20 @@ def _headers(token: str) -> dict[str, str]:
     }
 
 
+def _describe_http_error(exc: httpx.HTTPStatusError) -> str:
+    """Render a git-data-API failure as ``"<method> <path> -> <status>: <body>"``.
+
+    A bare ``str(exc)`` (what was logged before) is just "Client error '403
+    Forbidden' for url '...'" — enough to know a write failed, nothing about
+    why. The response body is where GitHub actually says whether that's a
+    missing scope, a suspended/rate-limited account, or something else, and
+    which endpoint (blob/tree/commit/ref) it happened on.
+    """
+    resp = exc.response
+    path = resp.url.path if resp.url else "?"
+    return f"{resp.request.method} {path} -> {resp.status_code}: {resp.text[:300]}"
+
+
 class GitTreeClient:
     """Builds one multi-file commit + branch from a set of puts/deletes."""
 
@@ -53,6 +67,13 @@ class GitTreeClient:
         # landed in, so create_pr() can build the right cross-repo head
         # without callers having to track/pass it themselves.
         self.push_owner: str | None = None
+        # Set by commit_multi()/create_pr() on failure — the actual GitHub
+        # error (status + response body), not just "it didn't work". Without
+        # this, a caller only ever sees "failed to commit changes", which
+        # looks identical whether the cause is a stale/expired bot token, a
+        # missing scope, a suspended account, or a rate limit — each needing
+        # a different fix, and none of them diagnosable from that alone.
+        self.last_error: str | None = None
 
     def commit_multi(
         self,
@@ -162,7 +183,14 @@ class GitTreeClient:
                     create_resp.raise_for_status()
 
                 return branch
+        except httpx.HTTPStatusError as exc:
+            self.last_error = _describe_http_error(exc)
+            logger.warning(
+                "commit_multi failed for %s/%s branch=%s: %s", owner, repo, branch, self.last_error,
+            )
+            return None
         except httpx.HTTPError as exc:
+            self.last_error = str(exc)
             logger.warning("commit_multi failed for %s/%s branch=%s: %s", owner, repo, branch, exc)
             return None
 
@@ -182,8 +210,10 @@ class GitTreeClient:
                 )
             if resp.status_code in (200, 201):
                 return resp.json()
+            self.last_error = f"{resp.status_code} {resp.reason_phrase}: {resp.text[:300]}"
             logger.warning("create_pr failed %s: %s", resp.status_code, resp.text[:300])
         except httpx.HTTPError as exc:
+            self.last_error = str(exc)
             logger.warning("create_pr failed: %s", exc)
         return None
 

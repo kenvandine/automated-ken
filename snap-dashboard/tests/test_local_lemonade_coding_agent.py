@@ -56,11 +56,12 @@ class _FakeBotClient:
 class _FakeTreeClient:
     _UNSET = object()
 
-    def __init__(self, commit_ok: bool = True, pr=_UNSET) -> None:
+    def __init__(self, commit_ok: bool = True, pr=_UNSET, last_error: str | None = None) -> None:
         self.commit_ok = commit_ok
         self.pr = {"html_url": "https://github.com/o/r/pull/1", "number": 1} if pr is self._UNSET else pr
         self.commit_calls: list[dict] = []
         self.pr_calls: list[dict] = []
+        self.last_error = last_error
 
     def commit_multi(self, owner, repo, branch, message, put_files=None, delete_paths=None, base_branch=None):
         self.commit_calls.append(
@@ -76,12 +77,14 @@ class _FakeTreeClient:
         return self.pr
 
 
-def _make_dispatcher(monkeypatch, reply, tree=None, files=None, commit_ok=True, pr=_FakeTreeClient._UNSET):
+def _make_dispatcher(
+    monkeypatch, reply, tree=None, files=None, commit_ok=True, pr=_FakeTreeClient._UNSET, tree_error=None,
+):
     fake_client = _FakeLemonadeClient(reply)
     monkeypatch.setattr(ca_module, "get_lemonade_client", lambda uc, ensure_started=False, task="text": fake_client)
     dispatcher = LocalLemonadeCodingDispatcher(user_config=object(), token="tok")
     dispatcher._bot = _FakeBotClient(tree=tree, files=files)
-    dispatcher._tree = _FakeTreeClient(commit_ok=commit_ok, pr=pr)
+    dispatcher._tree = _FakeTreeClient(commit_ok=commit_ok, pr=pr, last_error=tree_error)
     return dispatcher, fake_client
 
 
@@ -243,6 +246,28 @@ def test_start_task_commit_failure_returns_failed(monkeypatch) -> None:
 
     assert result["state"] == "failed"
     assert "commit" in result["error"]
+
+
+def test_start_task_commit_failure_surfaces_the_actual_github_error(monkeypatch) -> None:
+    """A bare "failed to commit" tells the user nothing actionable.
+
+    Regression scenario: the bot's fork write hit a 403 on git/blobs (a
+    token/permissions problem, not an empty-diff problem) — the dashboard
+    log had the detail, but start_task()'s returned error string didn't, so
+    the only way to see it was digging through server logs. It should be
+    in the result the UI actually shows.
+    """
+    plan = {"files": [{"path": "AGENTS.md", "action": "write", "content": "x"}]}
+    dispatcher, _ = _make_dispatcher(
+        monkeypatch, reply=json.dumps(plan), commit_ok=False,
+        tree_error="POST /repos/automated-ken/neofetch-desktop/git/blobs -> 403: Resource not accessible by personal access token",
+    )
+
+    result = dispatcher.start_task("o", "r", "task")
+
+    assert result["state"] == "failed"
+    assert "403" in result["error"]
+    assert "Resource not accessible" in result["error"]
 
 
 def test_start_task_pr_creation_failure_returns_failed(monkeypatch) -> None:

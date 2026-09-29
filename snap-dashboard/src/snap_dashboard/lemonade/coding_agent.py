@@ -136,7 +136,8 @@ class LocalLemonadeCodingDispatcher:
             put_files=put_files, delete_paths=delete_paths, base_branch=base_branch,
         )
         if not created_branch:
-            return {"state": "failed", "error": "failed to commit changes to a new branch"}
+            detail = f": {self._tree.last_error}" if self._tree.last_error else ""
+            return {"state": "failed", "error": f"failed to commit changes to a new branch{detail}"}
 
         if not create_pull_request:
             return {"state": "completed", "branch": branch}
@@ -148,7 +149,8 @@ class LocalLemonadeCodingDispatcher:
             head=branch, base=base_branch,
         )
         if not pr:
-            return {"state": "failed", "error": "committed changes but failed to open a pull request"}
+            detail = f": {self._tree.last_error}" if self._tree.last_error else ""
+            return {"state": "failed", "error": f"committed changes but failed to open a pull request{detail}"}
         return {"state": "completed", "html_url": pr.get("html_url"), "number": pr.get("number")}
 
     @staticmethod
