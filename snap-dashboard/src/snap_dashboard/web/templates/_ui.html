@@ -79,3 +79,12 @@
   ("/agents/stats", "Stats", None),
 ], active, "Agents sections") }}
 {%- endmacro %}
+
+{#- Section tabs shared by every page under /releases. -#}
+{% macro releases_tabs(active, bumps=None) -%}
+{{ tabs([
+  ("/releases", "To release", None),
+  ("/releases/bumps", "Version bumps", bumps),
+  ("/releases/runs", "Test runs", None),
+], active, "Releases sections") }}
+{%- endmacro %}

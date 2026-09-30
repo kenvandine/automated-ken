@@ -142,6 +142,7 @@ def nav_active(request, prefixes) -> bool:
 
 templates.env.filters["dt"] = format_dt
 templates.env.globals["status_info"] = status_info
+templates.env.globals["status_tones_json"] = lambda: {k: list(v) for k, v in STATUS_TONES.items()}
 templates.env.globals["nav_active"] = nav_active
 templates.env.globals["agent_info"] = agent_registry.get_agent
 templates.env.globals["agent_groups"] = agent_registry.grouped

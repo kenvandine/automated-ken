@@ -26,6 +26,7 @@ from snap_dashboard.testing.release_set import (
     member_state,
     promote_release_set,
 )
+from snap_dashboard.web.fleet import bumps_needing_you_count
 from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
@@ -94,9 +95,20 @@ def _build_pending_promotion(
     return pending_promotion
 
 
-@router.get("/testing", response_class=HTMLResponse)
-async def testing_index(request: Request) -> HTMLResponse:
-    """Render the YARF testing overview page."""
+@router.get("/testing")
+async def testing_legacy() -> RedirectResponse:
+    return RedirectResponse(url="/releases", status_code=301)
+
+
+@router.get("/releases/runs", response_class=HTMLResponse)
+async def releases_runs(request: Request) -> HTMLResponse:
+    """Releases → Test runs: the recent test-run history."""
+    return await testing_index(request, view="runs")
+
+
+@router.get("/releases", response_class=HTMLResponse)
+async def testing_index(request: Request, view: str = "queue") -> HTMLResponse:
+    """Releases → To release: pending promotions and snaps needing tests."""
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -226,6 +238,7 @@ async def testing_index(request: Request) -> HTMLResponse:
         pending_promotion = _build_pending_promotion(
             session, user_id, runs_data, tracked_snap_names, dismissed
         )
+        bumps_needing = bumps_needing_you_count(session, user_id)
 
     return templates.TemplateResponse(
         request,
@@ -235,6 +248,8 @@ async def testing_index(request: Request) -> HTMLResponse:
             "snaps_needing": prepared,
             "all_runs": runs_data,
             "pending_promotion": pending_promotion,
+            "view": "runs" if view == "runs" else "queue",
+            "bumps_needing": bumps_needing,
             "last_run": None,
             "current_user": user,
         },
@@ -347,7 +362,7 @@ async def trigger_test(
             {"ok": ok, "error": err, "run_id": db_run_id, "status": "pending"},
             status_code=200 if ok else 400,
         )
-    return RedirectResponse(url="/testing", status_code=303)
+    return RedirectResponse(url="/releases", status_code=303)
 
 
 @router.post("/testing/trigger-group/{snap_name}")
@@ -421,7 +436,7 @@ async def sync_runs(
         github_token=github_token,
         user_id=user_id,
     )
-    return RedirectResponse(url="/testing", status_code=303)
+    return RedirectResponse(url="/releases", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -469,7 +484,7 @@ async def mark_run_failed(run_id: int, request: Request) -> RedirectResponse:
         if run and run.status not in ("passed", "promoted"):
             run.status = "failed"
             run.finished_at = datetime.now(timezone.utc)
-    return RedirectResponse(url="/testing", status_code=303)
+    return RedirectResponse(url="/releases/runs", status_code=303)
 
 
 # ---------------------------------------------------------------------------
@@ -481,7 +496,7 @@ async def mark_run_failed(run_id: int, request: Request) -> RedirectResponse:
 def reject_run_review(
     run_id: int,
     request: Request,
-    return_to: str = Form(default="/testing"),
+    return_to: str = Form(default="/releases"),
 ) -> RedirectResponse:
     """Record a human "reject" decision after the user looks at the screenshot.
 
@@ -497,8 +512,8 @@ def reject_run_review(
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
     user_id = user["id"]
-    if not return_to.startswith(("/testing", "/version-bumps")):
-        return_to = "/testing"
+    if not return_to.startswith(("/releases", "/testing", "/version-bumps")):
+        return_to = "/releases"
 
     with get_session() as session:
         run = session.query(TestRun).filter_by(id=run_id, user_id=user_id).first()
@@ -826,7 +841,7 @@ def promote_set(
     request: Request,
     version: str = Form(...),
     override: str = Form(default=""),
-    return_to: str = Form(default="/testing"),
+    return_to: str = Form(default="/releases"),
 ) -> RedirectResponse:
     """Promote every ready architecture of a candidate version to stable, together.
 
@@ -841,8 +856,8 @@ def promote_set(
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
     user_id = user["id"]
-    if not return_to.startswith(("/testing", "/version-bumps")):
-        return_to = "/testing"
+    if not return_to.startswith(("/releases", "/testing", "/version-bumps")):
+        return_to = "/releases"
 
     with get_session() as session:
         states = [
@@ -897,7 +912,7 @@ def dismiss_promotion(
             session.add(
                 PromotionDismissal(user_id=user_id, snap_name=snap_name, version=version)
             )
-    return RedirectResponse(url="/testing", status_code=303)
+    return RedirectResponse(url="/releases", status_code=303)
 
 
 @router.post("/testing/promote/{snap_name}", response_model=None)
@@ -975,7 +990,7 @@ def promote_snap_route(
                 version,
                 uc.github_token,
             )
-        return RedirectResponse(url="/testing", status_code=303)
+        return RedirectResponse(url="/releases", status_code=303)
 
     # Failed: for a run_id-based (no PR) promote, redirect back to its
     # run-detail page — run_orm.error_msg was already persisted above and

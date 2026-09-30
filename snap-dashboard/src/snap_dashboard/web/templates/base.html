@@ -21,6 +21,12 @@
       var a = AK.agentInfo(t), esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); };
       return '<span class="agent-badge agent-palette-' + a.palette + '" title="' + esc(a.description) + '">' + esc(a.name) + '</span>';
     };
+    // Shared status → (tone, label) map (templating.STATUS_TONES).
+    AK.statuses = {{ status_tones_json()|tojson }};
+    AK.statusInfo = function (s) {
+      var v = AK.statuses[s];
+      return v ? { tone: v[0], label: v[1] } : { tone: 'neutral', label: String(s || '').replace(/_/g, ' ') };
+    };
   </script>
 </head>
 <body>

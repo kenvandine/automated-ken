@@ -31,6 +31,16 @@ BUMP_NEEDS_YOU = ("agent_approved", "needs_review", "ci_failed", "yarf_failed", 
 CHANNEL_ORDER = ("stable", "candidate", "beta", "edge")
 
 
+def bumps_needing_you_count(session, user_id: int) -> int:
+    """Open version-bump PRs waiting on a human (Releases tab badge)."""
+    return (
+        session.query(func.count(VersionBumpPR.id))
+        .filter(VersionBumpPR.user_id == user_id, VersionBumpPR.status.in_(BUMP_NEEDS_YOU))
+        .scalar()
+        or 0
+    )
+
+
 def snap_type(snap) -> str:
     if getattr(snap, "is_service", False):
         return "service"

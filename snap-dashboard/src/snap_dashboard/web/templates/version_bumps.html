@@ -1,43 +1,28 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
-{% block title %}Version Bumps — Automated Ken{% endblock %}
+{% block title %}Version bumps — Automated Ken{% endblock %}
 
 {% block content %}
 
-<div class="page-title-row">
-  <div>
-    <h2 class="page-heading">Version Bumps</h2>
-    <p class="text-muted">PRs created by the version bumper agent</p>
-  </div>
-  {% if actionable_count %}
-  <span class="p-status-label p-status-label--caution" style="font-size:13px;">{{ actionable_count }} awaiting action</span>
-  {% endif %}
-</div>
+{% call ui.page_header("Releases", "Test new builds, review version bumps and promote release sets to stable.") %}
+  <a href="/agents/runs?agent_type=version_bumper" class="p-button is-small">Bumper activity</a>
+{% endcall %}
+{{ ui.releases_tabs("/releases/bumps", actionable_count or None) }}
 
 {% if not groups %}
-<div class="card">
-  <div class="empty-state">
-    <p>No version bump PRs yet. The release scanner will create them automatically when new upstream versions are found.</p>
-    <a href="/agents" class="p-button" style="margin-top:12px;">View Agent Activity</a>
-  </div>
-</div>
+<section class="card">
+  {{ ui.empty("No version-bump PRs yet. When the release scanner finds a new upstream version, the version bumper opens a PR and it shows up here.", "/agents", "View agents") }}
+</section>
 {% endif %}
 
 {% for group in groups %}
-<div class="card" id="group-{{ group.status }}">
-  <div class="section-header-row">
-    <h3 class="section-label">
-      {% if group.status == 'stable_promoted' %}🚀{% endif %}
-      {% if group.status == 'stable_promoted_partial' %}⚠🚀{% endif %}
-      {% if group.status == 'candidate_testing' %}🧪{% endif %}
-      {% if group.status == 'awaiting_release' %}⏳{% endif %}
-      {% if group.status == 'agent_approved' %}✅{% endif %}
-      {% if group.status == 'needs_review' %}⚠️{% endif %}
-      {% if group.status == 'agent_rejected' %}❌{% endif %}
-      {{ group.label }} ({{ group.bumps | length }})
-    </h3>
+{% set tone = status_info(group.status).tone %}
+<section class="card card--tone-{{ tone }}" id="group-{{ group.status }}" aria-labelledby="group-title-{{ group.status }}">
+  <div class="card__header">
+    <h2 class="card__title" id="group-title-{{ group.status }}">{{ group.label }} <span class="tab-bar__count">{{ group.bumps | length }}</span></h2>
     {% if group.status == 'agent_approved' %}
-    <span class="text-muted small">Agent approved with high confidence — review before merging</span>
+    <span class="text-muted small">The agent approved these with high confidence — review before merging</span>
     {% endif %}
   </div>
 
@@ -56,11 +41,7 @@
         {% if b.architectures %}
         <span class="arch-badge-row">
           {% for a in b.architectures %}
-          <span class="arch-badge
-            {% if a.status in ('passed', 'promoted') %}arch-badge--ok
-            {% elif a.status in ('failed', 'error') %}arch-badge--fail
-            {% else %}arch-badge--pending{% endif %}
-          " title="{{ a.architecture }}: {{ a.status }}">{{ a.architecture }}</span>
+          {{ ui.arch(a.architecture, 'ok' if a.status in ('passed', 'promoted') else ('fail' if a.status in ('failed', 'error') else 'pending'), a.architecture ~ ': ' ~ status_info(a.status).label) }}
           {% endfor %}
         </span>
         {% endif %}
@@ -71,7 +52,7 @@
         <span class="text-muted small">{{ (b.agent_confidence * 100) | int }}% confident</span>
         {% endif %}
         {% if b.created_at %}
-        <span class="text-muted small">{{ b.created_at.strftime('%Y-%m-%d') }}</span>
+        <span class="text-muted small">{{ ui.when(b.created_at) }}</span>
         {% endif %}
       </div>
 
@@ -79,13 +60,13 @@
         <a href="/version-bumps/{{ b.id }}" class="p-button is-small">Review</a>
 
         {% if not b.merged_at and b.status in ('agent_approved', 'needs_review', 'yarf_passed') %}
-        <form method="post" action="/version-bumps/{{ b.id }}/merge" style="display:inline;"
+        <form method="post" action="/version-bumps/{{ b.id }}/merge" class="inline-form"
               hx-post="/version-bumps/{{ b.id }}/merge" hx-target="#page-content" hx-select="#page-content"
               hx-swap="innerHTML" hx-disabled-elt="find button"
               hx-confirm="Merge PR for {{ b.snap_name }} {{ b.new_version }}?">
           <button type="submit" class="p-button--positive is-small">Merge</button>
         </form>
-        <form method="post" action="/version-bumps/{{ b.id }}/reject" style="display:inline;"
+        <form method="post" action="/version-bumps/{{ b.id }}/reject" class="inline-form"
               hx-post="/version-bumps/{{ b.id }}/reject" hx-target="#page-content" hx-select="#page-content"
               hx-swap="innerHTML" hx-disabled-elt="find button"
               hx-confirm="Close PR for {{ b.snap_name }}?">
@@ -94,10 +75,10 @@
         {% endif %}
 
         {% if b.status in ('agent_rejected', 'yarf_failed') or (b.merged_at and b.status == 'needs_review') %}
-        <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" style="display:inline;"
+        <form method="post" action="/version-bumps/{{ b.id }}/re-run-yarf" class="inline-form"
               hx-post="/version-bumps/{{ b.id }}/re-run-yarf" hx-target="#page-content" hx-select="#page-content"
               hx-swap="innerHTML" hx-disabled-elt="find button" hx-push-url="true">
-          <button type="submit" class="p-button is-small">Re-run {% if b.merged_at %}candidate tests{% else %}YARF{% endif %}</button>
+          <button type="submit" class="p-button is-small">Re-run {% if b.merged_at %}candidate tests{% else %}tests{% endif %}</button>
         </form>
         {% endif %}
       </div>
@@ -111,7 +92,7 @@
 
     {% endfor %}
   </div>
-</div>
+</section>
 {% endfor %}
 
 {% endblock %}
