@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 
 from snap_dashboard.db.models import (
     ChannelMap,
@@ -305,14 +305,19 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
     tasks = (
         session.query(CopilotTask)
         .filter(CopilotTask.user_id == user_id)
-        .filter(CopilotTask.status.in_(_TASK_ACTIVE + _TASK_NEEDS_YOU))
+        .filter(
+            or_(
+                CopilotTask.status.in_(_TASK_ACTIVE + _TASK_NEEDS_YOU),
+                CopilotTask.ci_status == "ci_failed",
+            )
+        )
         .order_by(CopilotTask.updated_at.desc())
         .limit(50)
         .all()
     )
     active_tasks = []
     for t in tasks:
-        if t.status in _TASK_NEEDS_YOU:
+        if t.status in _TASK_NEEDS_YOU or t.ci_status == "ci_failed":
             if t.status != "waiting_for_user" and (t.updated_at is None or t.updated_at < week_ago):
                 continue
             needs.append({
@@ -321,7 +326,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
                 "label": "Coding task",
                 "title": f"{t.kind.replace('_', ' ')} · {t.owner_repo}",
                 "meta": (t.error_msg or "").strip()[:160] or None,
-                "status": t.status,
+                "status": "ci_failed" if t.ci_status == "ci_failed" and t.status not in _TASK_NEEDS_YOU else t.status,
                 "href": "/agents/tasks",
                 "external": t.pr_url,
                 "action": "Open",

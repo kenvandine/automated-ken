@@ -590,13 +590,13 @@ document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
     if (!el) return;
     const items = [];
     (data.active || []).forEach(a => {
-      items.push(`<div class="snap-activity-item snap-activity-running"><span class="agent-type-badge agent-${a.agent_type}">${escapeHtml(a.agent_type.replace(/_/g, ' '))}</span> <span>${escapeHtml(a.task)}</span></div>`);
+      items.push(`<div class="snap-activity-item snap-activity-running">${AK.agentBadge(a.agent_type)} <span>${escapeHtml(a.task)}</span></div>`);
     });
     (data.queued_tasks || []).forEach(t => {
-      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="agent-type-badge">${escapeHtml(t.kind.replace(/_/g, ' '))}</span> <span>Coding task ${escapeHtml(t.status)} — queued ${escapeHtml(t.created_at)}</span></div>`);
+      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="chip chip--info">${escapeHtml(t.kind.replace(/_/g, ' '))}</span> <span>Coding task ${escapeHtml(t.status)} — queued ${escapeHtml(t.created_at)}</span></div>`);
     });
     (data.pending_tests || []).forEach(t => {
-      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="agent-type-badge">test run</span> <span>${escapeHtml(t.architecture)} — ${escapeHtml(t.status)} (started ${escapeHtml(t.started_at)})</span></div>`);
+      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="chip chip--neutral">test run</span> <span>${escapeHtml(t.architecture)} — ${escapeHtml(t.status)} (started ${escapeHtml(t.started_at)})</span></div>`);
     });
     el.innerHTML = items.length
       ? items.join('')
@@ -613,15 +613,15 @@ document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
     const el = document.getElementById('snap-activity-recent');
     if (!el) return;
     const rows = (data.recent || []).map(r => {
-      const statusClass = r.status === 'done' ? 'p-status-label--positive'
-        : (r.status === 'error' ? 'p-status-label--negative' : 'p-status-label--caution');
+      const statusClass = r.status === 'done' ? 'chip--positive'
+        : (r.status === 'error' ? 'chip--negative' : 'chip--caution');
       const log = r.has_log
         ? `<a href="/agents/runs/${r.id}/log" target="_blank" rel="noopener" class="p-button is-small">Log</a>`
         : '<span class="muted small">—</span>';
       const dur = (r.duration_s !== null && r.duration_s !== undefined) ? `${r.duration_s}s` : '…';
       return `<tr>
-        <td><span class="agent-type-badge agent-${r.agent_type}">${escapeHtml(r.agent_type.replace(/_/g, ' '))}</span></td>
-        <td><span class="p-status-label ${statusClass}">${escapeHtml(r.status)}</span></td>
+        <td>${AK.agentBadge(r.agent_type)}</td>
+        <td><span class="chip ${statusClass}">${escapeHtml(r.status)}</span></td>
         <td class="muted small" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.summary) || '—'}</td>
         <td class="muted small">${escapeHtml(r.started_at)}</td>
         <td class="muted small">${dur}</td>

@@ -87,7 +87,12 @@ def _aggregate_model_usage(session) -> dict:
     }
 
 
-@router.get("/stats", response_class=HTMLResponse)
+@router.get("/stats")
+async def stats_legacy() -> RedirectResponse:
+    return RedirectResponse(url="/agents/stats", status_code=301)
+
+
+@router.get("/agents/stats", response_class=HTMLResponse)
 async def stats_page(request: Request) -> HTMLResponse:
     user = get_current_user(request)
     if user is None:

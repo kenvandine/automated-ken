@@ -69,3 +69,13 @@
 {% macro when(value) -%}
 {% if value %}<time datetime="{{ value }}" title="{{ value | dt('long') }}">{{ value | dt('relative') }}</time>{% else %}<span class="muted">—</span>{% endif %}
 {%- endmacro %}
+
+{#- Section tabs shared by every page under /agents. -#}
+{% macro agents_tabs(active) -%}
+{{ tabs([
+  ("/agents", "Overview", None),
+  ("/agents/runs", "Run history", None),
+  ("/agents/tasks", "Coding tasks", None),
+  ("/agents/stats", "Stats", None),
+], active, "Agents sections") }}
+{%- endmacro %}

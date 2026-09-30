@@ -1,39 +1,29 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
-{% block title %}Coding Tasks — Automated Ken{% endblock %}
+{% block title %}Coding tasks — Agents — Automated Ken{% endblock %}
 
 {% block content %}
 
-<div class="page-title-row">
-  <div>
-    <h2 class="page-heading">Coding Tasks</h2>
-    <p class="text-muted">
-      Coding work delegated out rather than done with a local/small model (CI fixes, dependency
-      upgrades, issue fixes, and fleet normalization) — via GitHub Copilot cloud agent or a local
-      model, see <a href="/settings">Settings</a> to configure the coding-task backend.
-    </p>
-  </div>
+{% call ui.page_header("Agents", "Coding work delegated to GitHub Copilot cloud agent or a local model — CI fixes, dependency upgrades, issue fixes and fleet normalization.") %}
   <form method="post" action="/copilot-tasks/refresh-all"
         hx-post="/copilot-tasks/refresh-all" hx-target="#page-content" hx-select="#page-content"
         hx-swap="innerHTML" hx-disabled-elt="find button">
-    <button type="submit" class="p-button">Refresh All Statuses</button>
+    <button type="submit" class="p-button">Refresh statuses</button>
   </form>
-</div>
+{% endcall %}
+{{ ui.agents_tabs("/agents/tasks") }}
 
 {% if not tasks %}
 <div class="card">
-  <div class="empty-state">
-    <p>No coding tasks have been dispatched yet. Enable the delegation toggles under
-       <a href="/settings">Settings</a> to let automated-ken dispatch CI fixes, dependency
-       upgrades, issue fixes, or the one-time fleet-normalization campaign.</p>
-  </div>
+  {{ ui.empty("No coding tasks have been dispatched yet. Turn on the options under Maintenance automation to let Automated Ken open fix and update PRs, or pick a coding backend.", "/settings#maintenance", "Maintenance automation", "/settings#coding", "Coding backend") }}
 </div>
 {% endif %}
 
 {% for kind in kinds %}
-<div class="card">
-  <div class="section-header-row">
-    <h3 class="section-label">{{ kind }} ({{ tasks | selectattr('kind', 'equalto', kind) | list | length }})</h3>
+<section class="card">
+  <div class="card__header">
+    <h2 class="card__title">{{ kind | replace('_', ' ') | capitalize }} <span class="text-muted">({{ tasks | selectattr('kind', 'equalto', kind) | list | length }})</span></h2>
   </div>
 
   <div class="table-wrapper">
@@ -44,32 +34,22 @@
         <th>Status</th>
         <th>PR</th>
         <th>Dispatched</th>
-        <th></th>
+        <th><span class="visually-hidden">Actions</span></th>
       </tr>
     </thead>
     <tbody>
       {% for t in tasks if t.kind == kind %}
       <tr>
         <td>{{ t.owner_repo }}{% if t.issue_number %} <span class="text-muted small">(#{{ t.issue_number }})</span>{% endif %}</td>
-        <td>
-          {% if t.status in ('completed',) %}
-          <span class="p-status-label p-status-label--positive">{{ t.status }}</span>
-          {% elif t.status in ('failed', 'dispatch_failed', 'cancelled', 'timed_out') %}
-          <span class="p-status-label p-status-label--negative">{{ t.status }}</span>
-          {% elif t.status in ('queued', 'in_progress', 'waiting_for_user') %}
-          <span class="p-status-label p-status-label--caution">{{ t.status }}</span>
-          {% else %}
-          <span class="p-status-label">{{ t.status }}</span>
-          {% endif %}
-        </td>
+        <td>{{ ui.status(t.status) }}{% if t.ci_status %} {{ ui.status(t.ci_status) }}{% endif %}</td>
         <td>
           {% if t.pr_url %}
-          <a href="{{ t.pr_url }}" target="_blank" rel="noopener" class="link-inline small">View PR ↗</a>
+          <a href="{{ t.pr_url }}" target="_blank" rel="noopener" class="link-inline small">PR ↗</a>
           {% else %}
           <span class="text-muted small">—</span>
           {% endif %}
         </td>
-        <td class="text-muted small">{{ t.created_at.strftime('%Y-%m-%d %H:%M') if t.created_at else '' }}</td>
+        <td class="text-muted small">{{ ui.when(t.created_at) }}</td>
         <td>
           {% if not t.is_terminal %}
           <form method="post" action="/copilot-tasks/{{ t.id }}/refresh"
@@ -81,7 +61,7 @@
           <form method="post" action="/copilot-tasks/{{ t.id }}/retry"
                 hx-post="/copilot-tasks/{{ t.id }}/retry" hx-target="#page-content" hx-select="#page-content"
                 hx-swap="innerHTML" hx-disabled-elt="find button"
-                onsubmit="return confirm('Retry this task? It will re-dispatch the same prompt as a new task.');">
+                hx-confirm="Retry this task? It will re-dispatch the same prompt as a new task.">
             <button type="submit" class="p-button is-small">↺ Retry</button>
           </form>
           {% endif %}
@@ -96,7 +76,7 @@
     </tbody>
   </table>
   </div>
-</div>
+</section>
 {% endfor %}
 
 {% endblock %}

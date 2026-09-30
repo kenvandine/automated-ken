@@ -1605,23 +1605,12 @@ footer a:hover {
   overflow: hidden;
   transition: border-color 0.3s, background 0.3s;
 }
+/* Running state is coloured from the registry palette class on the card
+   (agent-palette-N sets --agent-c / --agent-rgb). */
 .agent-card.agent-running {
-  border-color: rgba(var(--accent-rgb), 0.5);
-  background: rgba(var(--accent-rgb), 0.06);
+  border-color: rgba(var(--agent-rgb, var(--accent-rgb)), 0.5);
+  background: rgba(var(--agent-rgb, var(--accent-rgb)), 0.06);
   animation: card-activate 2s ease-in-out;
-}
-.agent-card[data-type="version_bumper"].agent-running {
-  border-color: rgba(var(--green-rgb), 0.5);
-  background: rgba(var(--green-rgb), 0.06);
-}
-.agent-card[data-type="pr_monitor"].agent-running {
-  border-color: rgba(var(--amber-rgb), 0.5);
-  background: rgba(var(--amber-rgb), 0.06);
-}
-.agent-card[data-type="screenshot_reviewer"].agent-running,
-.agent-card-lemonade.agent-running {
-  border-color: rgba(var(--blue-rgb), 0.5);
-  background: rgba(var(--blue-rgb), 0.06);
 }
 
 /* Animated left-edge glow bar */
@@ -1634,22 +1623,16 @@ footer a:hover {
   transition: background 0.3s;
   animation: none;
 }
-.agent-card[data-type="release_scanner"].agent-running .agent-card-glow {
-  background: var(--accent);
+.agent-card.agent-running .agent-card-glow {
+  background: var(--agent-c, var(--accent));
   animation: glow-pulse 1.5s ease-in-out infinite;
 }
-.agent-card[data-type="version_bumper"].agent-running .agent-card-glow {
-  background: var(--green);
-  animation: glow-pulse 1.5s ease-in-out infinite;
-}
-.agent-card[data-type="pr_monitor"].agent-running .agent-card-glow {
-  background: var(--amber);
-  animation: glow-pulse 1.5s ease-in-out infinite;
-}
-.agent-card[data-type="screenshot_reviewer"].agent-running .agent-card-glow {
-  background: var(--blue);
-  animation: glow-pulse 1s ease-in-out infinite;
-}
+.agent-card.agent-running .agent-status-dot { background: var(--agent-c, var(--accent)); }
+.agent-card.agent-running .agent-card-badge { color: var(--agent-c, var(--accent)); }
+.agent-group { margin-bottom: 8px; }
+.agent-group__head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 20px 0 10px; }
+.agent-group__head h2 { font-size: 15px; font-weight: 700; margin: 0; padding: 0; }
+.agent-group__head p { margin: 0; padding: 0; font-size: 13px; color: var(--text-muted); }
 
 .agent-card-header {
   display: flex;
@@ -1757,27 +1740,6 @@ footer a:hover {
   font-size: 11px;
   flex-shrink: 0;
 }
-
-/* ---- Agent type badges ----------------------------------- */
-.agent-type-badge {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.4px;
-  text-transform: uppercase;
-  background: var(--surface2);
-  color: var(--text-muted);
-}
-.agent-release_scanner  { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-hover); }
-.agent-version_bumper   { background: rgba(var(--green-rgb), 0.12);  color: var(--green); }
-.agent-pr_monitor       { background: rgba(var(--amber-rgb), 0.12);  color: var(--amber); }
-.agent-screenshot_reviewer { background: rgba(var(--blue-rgb), 0.15); color: var(--blue); }
-.agent-upstream_maintainer { background: rgba(var(--green-rgb), 0.12); color: var(--green); }
-.agent-repo_normalizer  { background: rgba(var(--amber-rgb), 0.12); color: var(--amber); }
-.agent-test_run_auto_promoter { background: rgba(var(--blue-rgb), 0.15); color: var(--blue); }
-.agent-test_failure_analyzer { background: rgba(var(--accent-rgb), 0.12); color: var(--accent-hover); }
 
 /* ---- Version bump rows ----------------------------------- */
 .bump-list {
@@ -2700,3 +2662,28 @@ fieldset.form-row > legend { padding: 0; }
 .form-label .p-chip, .form-label .chip { margin-left: 6px; vertical-align: middle; }
 details.inline-details { margin: 8px 0 16px; }
 details.inline-details > summary { cursor: pointer; color: var(--text-muted); font-size: 14px; margin-bottom: 8px; }
+
+/* ---- Filter bar / table helpers / pager ---------------------------- */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.filter-bar .form-row { margin: 0; }
+.filter-bar label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; }
+.cell-truncate {
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pager {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+}
+.agent-thinking__label { font-size: 11px; color: var(--blue); margin-left: 4px; }

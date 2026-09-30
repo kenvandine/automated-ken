@@ -1,15 +1,12 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
-{% block title %}Stats — Automated Ken{% endblock %}
+{% block title %}Stats — Agents — Automated Ken{% endblock %}
 
 {% block content %}
 
-<div class="page-title-row">
-  <div>
-    <h2 class="page-heading">Usage Stats</h2>
-    <p class="text-muted">How much autonomous work this instance has done</p>
-  </div>
-</div>
+{% call ui.page_header("Agents", "How much autonomous work this instance has done.") %}{% endcall %}
+{{ ui.agents_tabs("/agents/stats") }}
 
 <div class="row">
   <div class="col-3">

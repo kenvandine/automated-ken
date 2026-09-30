@@ -9,6 +9,19 @@
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
   <script src="/static/app.js" defer></script>
+  <script>
+    // Agent registry (agents/registry.py) for client-rendered badges.
+    // Inline + non-deferred so page scripts can use it immediately.
+    window.AK = window.AK || {};
+    AK.agents = {{ agent_registry_json()|tojson }};
+    AK.agentInfo = function (t) {
+      return AK.agents[t] || { agent_type: t, name: String(t || 'unknown').replace(/_/g, ' '), description: '', palette: 0 };
+    };
+    AK.agentBadge = function (t) {
+      var a = AK.agentInfo(t), esc = function (s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'); };
+      return '<span class="agent-badge agent-palette-' + a.palette + '" title="' + esc(a.description) + '">' + esc(a.name) + '</span>';
+    };
+  </script>
 </head>
 <body>
 <a class="p-link--skip" href="#page-content">Skip to content</a>
