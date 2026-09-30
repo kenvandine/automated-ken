@@ -214,3 +214,49 @@ def test_user_config_view_exposes_all_fields_saved_by_settings_post(monkeypatch,
     assert view.coding_task_backend == "local_lemonade"
     assert view.external_coding_api_base_url == "https://example.test"
     assert view.external_coding_api_model == "gpt-x"
+
+
+@pytest.mark.anyio
+async def test_granular_sections_only_touch_their_own_fields(isolated_session):
+    """The old combined "agents_ai" card is split into bot / release /
+    maintenance / coding / ai cards; saving one mustn't reset the others."""
+    user_id = _make_user(isolated_session)
+    await _post(user_id, section="maintenance", fleet_normalization_enabled="true", auto_rebuild_stale="true")
+    await _post(user_id, section="release", auto_promote="true")
+    resp = await _post(user_id, section="ai", lemonade_backend="system")
+
+    session = isolated_session()
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    assert uc.fleet_normalization_enabled is True
+    assert uc.auto_rebuild_stale is True
+    assert uc.auto_promote is True
+    assert uc.lemonade_backend == "system"
+    session.close()
+    assert resp.headers["location"] == "/settings?saved=ai#ai"
+
+
+@pytest.mark.anyio
+async def test_bot_section_redirects_to_github_anchor(isolated_session):
+    user_id = _make_user(isolated_session)
+    resp = await _post(user_id, section="bot", bot_github_login="ken-bot")
+    assert resp.headers["location"] == "/settings?saved=github#github"
+    assert get_user_config(user_id).bot_github_login == "ken-bot"
+
+
+def test_settings_page_has_no_snap_management(isolated_session):
+    import asyncio
+
+    from starlette.requests import Request
+
+    user_id = _make_user(isolated_session)
+    req = Request({
+        "type": "http", "method": "GET", "path": "/settings", "query_string": b"saved=store",
+        "headers": [], "session": {"user_id": user_id}, "app": None,
+    })
+    body = asyncio.run(settings_module.settings_get(req)).body.decode()
+    for anchor in ("store", "github", "testing", "release", "maintenance", "coding", "ai"):
+        assert f'id="{anchor}"' in body
+    assert "Tracked Snaps" not in body
+    assert "/settings/remove/" not in body
+    assert 'href="/snaps"' in body
+    assert "Settings saved." in body

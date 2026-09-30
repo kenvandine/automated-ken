@@ -8,11 +8,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import (
-    CollectionRun,
-    Snap,
-    UserConfig,
-)
+from snap_dashboard.db.models import CollectionRun, UserConfig
 from snap_dashboard.db.session import get_session
 from snap_dashboard.web.fleet_actions import run_fleet_action
 from snap_dashboard.web.templating import templates
@@ -20,6 +16,35 @@ from snap_dashboard.web.templating import templates
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Sub-navigation for the Settings page: (anchor, label). Tracked-snap
+# management lives on /snaps — Settings is configuration only.
+SETTINGS_NAV = [
+    ("store", "Snap Store"),
+    ("github", "GitHub"),
+    ("testing", "Testing"),
+    ("release", "Release automation"),
+    ("maintenance", "Maintenance automation"),
+    ("coding", "Coding tasks"),
+    ("ai", "AI backend"),
+]
+
+# Each Settings form posts a hidden ``section``; only that section's fields
+# are touched (see settings_post). ``agents_ai`` is the legacy combined card
+# and still applies all of its former sub-sections.
+_AGENT_SECTIONS = {"bot", "release", "maintenance", "coding", "ai"}
+_ALL_SECTIONS = {"publisher", "github_token", "snapcraft_macaroon", "testing"} | _AGENT_SECTIONS
+_SECTION_ANCHOR = {
+    "publisher": "store",
+    "snapcraft_macaroon": "store",
+    "github_token": "github",
+    "bot": "github",
+    "testing": "testing",
+    "release": "release",
+    "maintenance": "maintenance",
+    "coding": "coding",
+    "ai": "ai",
+}
 
 
 def _get_last_run(user_id: int):
@@ -42,30 +67,13 @@ async def settings_get(request: Request) -> HTMLResponse:
     user_id = user["id"]
     uc = get_user_config(user_id)
 
-    with get_session() as session:
-        snaps = (
-            session.query(Snap)
-            .filter_by(user_id=user_id)
-            .order_by(Snap.name)
-            .all()
-        )
-        snap_list = [
-            {
-                "name": s.name,
-                "publisher": s.publisher,
-                "manually_added": s.manually_added,
-                "packaging_repo": s.packaging_repo,
-                "upstream_repo": s.upstream_repo,
-            }
-            for s in snaps
-        ]
-
     return templates.TemplateResponse(
         request,
         "settings.html",
         {
             "config": uc,
-            "snaps": snap_list,
+            "saved": request.query_params.get("saved"),
+            "sections": SETTINGS_NAV,
             "last_run": _get_last_run(user_id),
             "intervals": [10 / 60, 30 / 60, 1, 6, 12, 24],
             "agent_intervals": [10 / 60, 30 / 60, 1, 2, 4, 6, 12, 24],
@@ -108,8 +116,8 @@ async def settings_post(
     """Save per-user settings to UserConfig in the database.
 
     The settings page is split into several independent ``<form>`` cards
-    (Publisher, GitHub Token, Snapcraft Credential, Testing, Agents & AI),
-    each with its own Save button, but they all post here. Each form only
+    (Snap Store, GitHub, Testing, Release/Maintenance automation, Coding
+    tasks, AI backend), each with its own Save button, but they all post here. Each form only
     includes its own fields in the submitted body -- notably, unchecked
     HTML checkboxes are omitted entirely, indistinguishable from a
     checkbox that simply isn't part of the submitted form. Without knowing
@@ -127,8 +135,12 @@ async def settings_post(
     # Unknown/missing section (e.g. a stale cached page) -- fall back to
     # updating every field present, matching the historical behavior of a
     # single monolithic form, rather than silently doing nothing.
-    all_sections = {"publisher", "github_token", "snapcraft_macaroon", "testing", "agents_ai"}
-    sections_to_apply = {section} if section in all_sections else all_sections
+    if section == "agents_ai":
+        sections_to_apply = set(_AGENT_SECTIONS)
+    elif section in _ALL_SECTIONS:
+        sections_to_apply = {section}
+    else:
+        sections_to_apply = set(_ALL_SECTIONS)
 
     _auto_test = auto_test in ("1", "true", "on", "yes")
     _auto_merge = auto_merge in ("1", "true", "on", "yes")
@@ -160,7 +172,7 @@ async def settings_post(
             uc.auto_test = _auto_test
             uc.runner_job_timeout_minutes = max(1, min(240, runner_job_timeout_minutes))
 
-        if "agents_ai" in sections_to_apply:
+        if "ai" in sections_to_apply:
             if lemonade_server_url.strip():
                 uc.lemonade_server_url = lemonade_server_url.strip()
             if lemonade_model.strip():
@@ -168,21 +180,29 @@ async def settings_post(
             uc.lemonade_backend = lemonade_backend.strip() if lemonade_backend.strip() in ("embedded", "system") else "embedded"
             if lemonade_api_key.strip():
                 uc.lemonade_api_key = lemonade_api_key.strip()
+
+        if "bot" in sections_to_apply:
             if bot_github_token.strip():
                 uc.bot_github_token = bot_github_token.strip()
             if bot_github_login.strip():
                 uc.bot_github_login = bot_github_login.strip()
+
+        if "release" in sections_to_apply:
             uc.agent_interval_hours = agent_interval_hours
             uc.auto_merge = _auto_merge
             uc.auto_promote = _auto_promote
             uc.auto_promote_confidence = max(0.0, min(1.0, auto_promote_confidence))
+
+        if "maintenance" in sections_to_apply:
             uc.auto_rebuild_stale = _auto_rebuild_stale
             uc.stale_build_days = max(1, stale_build_days)
-            # Copilot cloud agent delegation toggles (all default off / opt-in)
+            # Coding-agent delegation toggles (all default off / opt-in)
             uc.auto_fix_ci_failures = _auto_fix_ci_failures
             uc.auto_fix_build_failures = _auto_fix_build_failures
             uc.auto_maintain_upstream = _auto_maintain_upstream
             uc.fleet_normalization_enabled = _fleet_normalization_enabled
+
+        if "coding" in sections_to_apply:
             # Pluggable coding-task backend — see agents/coding_backend.py
             if coding_task_backend.strip():
                 uc.coding_task_backend = coding_task_backend.strip()
@@ -201,6 +221,9 @@ async def settings_post(
     except Exception as exc:
         logger.warning("failed to reschedule agents: %s", exc)
 
+    anchor = _SECTION_ANCHOR.get(section)
+    if anchor:
+        return RedirectResponse(url=f"/settings?saved={anchor}#{anchor}", status_code=303)
     return RedirectResponse(url="/settings", status_code=303)
 
 

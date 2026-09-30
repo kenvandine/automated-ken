@@ -1,662 +1,375 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
 {% block title %}Settings — Automated Ken{% endblock %}
 
+{% macro toggle(name, label, checked) -%}
+<label class="form-label checkbox-label">
+  <input type="checkbox" name="{{ name }}" value="true" {% if checked %}checked{% endif %}>
+  {{ label }}
+</label>
+{%- endmacro %}
+
+{% macro configured(ok, text='configured') -%}
+{% if ok %}{{ ui.chip(text, 'positive') }}{% else %}{{ ui.chip('not set', 'neutral') }}{% endif %}
+{%- endmacro %}
+
+{% macro interval_options(values, current) -%}
+{% for h in values %}
+<option value="{{ h }}" {% if h == current %}selected{% endif %}>
+  {% if h < 1 %}Every {{ (h * 60) | round | int }} minutes{% else %}Every {{ h | int }} hour{% if h != 1 %}s{% endif %}{% endif %}
+</option>
+{% endfor %}
+{%- endmacro %}
+
 {% block content %}
 
-<div class="page-title-row">
-  <div>
-    <h2 class="page-heading">Settings</h2>
-    <p class="text-muted">Configure snap-dashboard</p>
-  </div>
-</div>
+{% call ui.page_header("Settings", "Accounts, credentials and automation. Tracked snaps are managed on the Snaps page.") %}
+  <a href="/snaps" class="p-button">Manage snaps</a>
+{% endcall %}
 
-<!-- Publisher Settings -->
-<div class="card">
-  <h3 class="section-label">Publisher Settings</h3>
+{% if saved %}
+<div class="p-notification--positive" role="status">
+  <div class="p-notification__content"><p class="p-notification__message">Settings saved.</p></div>
+</div>
+{% endif %}
+
+<div class="with-subnav">
+  <nav class="subnav" aria-label="Settings sections" id="settings-subnav">
+    {% for anchor, label in sections %}
+    <a href="#{{ anchor }}"{% if saved == anchor %} class="is-active" aria-current="true"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </nav>
+
+  <div>
+
+<!-- Snap Store ------------------------------------------------------- -->
+<section class="card settings-section" id="store" aria-labelledby="store-title">
+  <div class="card__header">
+    <h2 class="card__title" id="store-title">Snap Store</h2>
+  </div>
   <form method="post" action="/settings">
     <input type="hidden" name="section" value="publisher">
     <div class="form-row">
-      <label class="form-label" for="publisher">Snap Store Publisher</label>
-      <input
-        type="text"
-        id="publisher"
-        name="publisher"
-        class="form-input"
-        value="{{ config.publisher }}"
-        placeholder="e.g. ken-vandine"
-      >
-      <span class="form-hint">Your Snap Store account name for auto-discovery</span>
+      <label class="form-label" for="publisher">Publisher account</label>
+      <input type="text" id="publisher" name="publisher" class="form-input"
+             value="{{ config.publisher }}" placeholder="e.g. ken-vandine">
+      <span class="form-hint">Snaps this Store account publishes are discovered and tracked automatically.</span>
     </div>
-
     <div class="form-row">
-      <label class="form-label" for="interval">Collection Interval</label>
+      <label class="form-label" for="interval">Refresh data</label>
       <select id="interval" name="interval" class="form-input form-select">
-        {% for h in intervals %}
-        <option value="{{ h }}" {% if h == config.collect_interval_hours %}selected{% endif %}>
-          {% if h < 1 %}Every {{ (h * 60) | round | int }} minutes
-          {% else %}Every {{ h | int }} hour{% if h != 1 %}s{% endif %}
-          {% endif %}
-        </option>
-        {% endfor %}
+        {{ interval_options(intervals, config.collect_interval_hours) }}
       </select>
-      <span class="form-hint">How often to automatically refresh snap data</span>
+      <span class="form-hint">How often channel maps, issues and PRs are collected.</span>
     </div>
-
     <div class="form-actions">
-      <button type="submit" class="p-button--positive">Save Settings</button>
+      <button type="submit" class="p-button--positive">Save</button>
     </div>
   </form>
-</div>
 
-<!-- GitHub Token -->
-<div class="card">
-  <h3 class="section-label">GitHub Token</h3>
+  <hr class="card__divider">
+
+  <form method="post" action="/settings">
+    <input type="hidden" name="section" value="snapcraft_macaroon">
+    <div class="form-row">
+      <label class="form-label" for="snapcraft_macaroon">Store credential {{ configured(config.snapcraft_macaroon) }}</label>
+      <textarea id="snapcraft_macaroon" name="snapcraft_macaroon" class="form-input" rows="3"
+                placeholder="paste the output of: snapcraft export-login -" autocomplete="off"></textarea>
+      <span class="form-hint">
+        Used to promote revisions to <code>stable</code> through the Snap Store API, and pushed to every
+        tracked packaging repo as the <code>SNAPCRAFT_STORE_CREDENTIALS</code> Actions secret (or a legacy
+        name a workflow already uses, e.g. <code>STORE_LOGIN</code>). Generate one that covers your whole
+        fleet with <code>snapcraft export-login -</code>.
+        {% if config.snapcraft_macaroon %}To push it out right now, use
+        <a href="/snaps#fleet-actions" class="link-inline">Snaps → Fleet actions → Sync store credential</a>.{% endif %}
+      </span>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="p-button--positive">Save credential</button>
+    </div>
+  </form>
+</section>
+
+<!-- GitHub ------------------------------------------------------------ -->
+<section class="card settings-section" id="github" aria-labelledby="github-title">
+  <div class="card__header">
+    <h2 class="card__title" id="github-title">GitHub</h2>
+  </div>
   <form method="post" action="/settings">
     <input type="hidden" name="section" value="github_token">
     <div class="form-row">
-      <label class="form-label" for="github_token">Personal Access Token</label>
-      <input
-        type="password"
-        id="github_token"
-        name="github_token"
-        class="form-input"
-        placeholder="ghp_..."
-        autocomplete="off"
-      >
+      <label class="form-label" for="github_token">Your personal access token {{ configured(config.github_token) }}</label>
+      <input type="password" id="github_token" name="github_token" class="form-input"
+             placeholder="{% if config.github_token %}(saved — paste to replace){% else %}ghp_...{% endif %}" autocomplete="off">
       <span class="form-hint">
-        Optional token for higher GitHub API rate limits.
+        Used for reading repos, higher API rate limits, triggering rebuilds and syncing secrets.
         <a href="https://github.com/settings/tokens/new?scopes=repo&description=snap-dashboard"
            target="_blank" rel="noopener" class="link-inline">Create one &rarr;</a>
       </span>
     </div>
     <div class="form-actions">
-      <button type="submit" class="p-button--positive">Save Token</button>
+      <button type="submit" class="p-button--positive">Save token</button>
     </div>
   </form>
-</div>
 
-<!-- Snapcraft Store Credential -->
-<div class="card">
-  <h3 class="section-label">Snapcraft Store Credential</h3>
+  <hr class="card__divider">
+
   <form method="post" action="/settings">
-    <input type="hidden" name="section" value="snapcraft_macaroon">
+    <input type="hidden" name="section" value="bot">
+    <h3 class="section-label">Bot account</h3>
+    <p class="form-hint">A secondary GitHub account that opens version-bump PRs, so you can review them as yourself.</p>
     <div class="form-row">
-      <label class="form-label" for="snapcraft_macaroon">Store Login Credential</label>
-      <textarea
-        id="snapcraft_macaroon"
-        name="snapcraft_macaroon"
-        class="form-input"
-        rows="3"
-        placeholder="paste the output of: snapcraft export-login -"
-        autocomplete="off"
-      ></textarea>
-      <span class="form-hint">
-        Stored centrally and used for two things: (1) promoting revisions to <code>stable</code>
-        through the Snap Store API (the same call <code>snapcraft release</code> makes), and (2) automatically
-        pushed out as the <code>SNAPCRAFT_STORE_CREDENTIALS</code> GitHub Actions secret (or a
-        legacy secret name a repo's workflow already uses, e.g. <code>STORE_LOGIN</code>) on
-        every tracked packaging repo, so you don't have to add it to each repo by hand. Generate
-        one credential that covers your whole fleet with
-        <code>snapcraft export-login -</code>, then paste its output here.
-        {% if config.snapcraft_macaroon %}<span class="p-status-label p-status-label--positive">configured</span>{% endif %}
-      </span>
+      <label class="form-label" for="bot_github_login">Bot login</label>
+      <input type="text" id="bot_github_login" name="bot_github_login" class="form-input"
+             value="{{ config.bot_github_login }}" placeholder="my-bot-account">
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="bot_github_token">Bot token {{ configured(config.bot_github_token, 'configured for ' ~ config.bot_github_login if config.bot_github_login else 'configured') }}</label>
+      <input type="password" id="bot_github_token" name="bot_github_token" class="form-input"
+             placeholder="ghp_..." autocomplete="off">
+      <span class="form-hint">Needs <code>repo</code> scope to create branches and PRs.</span>
     </div>
     <div class="form-actions">
-      <button type="submit" class="p-button--positive">Save Credential</button>
+      <button type="submit" class="p-button--positive">Save bot account</button>
     </div>
   </form>
-  {% if config.snapcraft_macaroon %}
-  <form method="post" action="/settings/sync-snapcraft-credentials" style="margin-top: 8px;">
-    <button type="submit" class="p-button is-small">Sync to All Packaging Repos Now</button>
-  </form>
-  {% endif %}
-</div>
+</section>
 
-<!-- Testing Configuration -->
-<div class="card">
-  <h3 class="section-label">Testing Configuration</h3>
+<!-- Testing ----------------------------------------------------------- -->
+<section class="card settings-section" id="testing" aria-labelledby="testing-title">
+  <div class="card__header">
+    <h2 class="card__title" id="testing-title">Testing</h2>
+    <a href="/runners" class="link-inline small">Runners →</a>
+  </div>
   <form method="post" action="/settings">
     <input type="hidden" name="section" value="testing">
+    <p class="form-hint">
+      Tests run on your enrolled <a href="/runners" class="link-inline">runners</a> — real amd64 and arm64
+      machines that install the snap from the Store, launch it on a real desktop and take a screenshot.
+      Console apps run inside a terminal window instead.
+    </p>
     <div class="form-row">
+      {{ toggle('auto_test', 'Test new versions automatically', config.auto_test) }}
       <span class="form-hint">
-        Tests run on your enrolled <a href="/runners" class="link-inline">remote runners</a> —
-        real amd64 and arm64 machines that install the snap from the Store and run it on a
-        real desktop, launches it, and takes a screenshot (a smoke test). Snaps marked as a
-        console app run inside a terminal window instead. Only amd64 and arm64 are tested.
+        After each refresh, queue a test (one per architecture) for any new candidate or edge version.
+        Version-bump PRs are always tested regardless of this setting.
       </span>
     </div>
-
-    <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="auto_test"
-          value="true"
-          {% if config.auto_test %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Enable automatic testing
-      </label>
-      <span class="form-hint">
-        After each channel-map refresh, queue a test (one per architecture) for any new
-        candidate or edge version that hasn't been tested yet. Version-bump PRs are always
-        tested regardless of this setting.
-      </span>
-    </div>
-
     <div class="form-row">
       <label class="form-label" for="runner_job_timeout_minutes">Runner job timeout (minutes)</label>
       <input type="number" id="runner_job_timeout_minutes" name="runner_job_timeout_minutes"
-             class="form-input" style="max-width: 120px;" min="1" max="240"
+             class="form-input form-input--narrow" min="1" max="240"
              value="{{ config.runner_job_timeout_minutes }}">
-      <span class="form-hint">
-        A job that has been running this long without finishing is marked failed and its
-        runner freed. Measured from when a runner picks the job up, not from when it was queued.
-      </span>
+      <span class="form-hint">A job running this long is marked failed and its runner freed.</span>
     </div>
-
     <div class="form-actions">
-      <button type="submit" class="p-button--positive">Save Testing Config</button>
+      <button type="submit" class="p-button--positive">Save</button>
     </div>
   </form>
-</div>
+</section>
 
-<!-- Agents & AI -->
-<div class="card">
-  <h3 class="section-label">Agents &amp; AI</h3>
+<!-- Release automation ------------------------------------------------ -->
+<section class="card settings-section" id="release" aria-labelledby="release-title">
+  <div class="card__header">
+    <h2 class="card__title" id="release-title">Release automation</h2>
+    <a href="/releases" class="link-inline small">Releases →</a>
+  </div>
   <form method="post" action="/settings">
-    <input type="hidden" name="section" value="agents_ai">
+    <input type="hidden" name="section" value="release">
     <div class="form-row">
-      <label class="form-label" for="lemonade_backend">Lemonade Backend</label>
-      <select id="lemonade_backend" name="lemonade_backend" class="form-input form-select">
-        <option value="embedded" {% if (config.lemonade_backend or 'embedded') == 'embedded' %}selected{% endif %}>
-          Embedded Lemonade (default — bundled, private, zero-setup)
-        </option>
-        <option value="system" {% if config.lemonade_backend == 'system' %}selected{% endif %}>
-          System lemonade-server (self-managed, e.g. a beefier box)
-        </option>
-      </select>
-      <span class="form-hint">
-        <strong>Embedded</strong> downloads, runs, and pulls opinionated default models for its own private
-        <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener" class="link-inline">Lemonade</a>
-        instance automatically — no separate install needed. <strong>System</strong> instead talks to a
-        lemonade-server you run and manage yourself, using the URL/key below.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="lemonade_server_url">System Lemonade Server URL</label>
-      <input
-        type="text"
-        id="lemonade_server_url"
-        name="lemonade_server_url"
-        class="form-input"
-        value="{{ config.lemonade_server_url }}"
-        placeholder="http://localhost:8080"
-      >
-      <span class="form-hint">Only used when Lemonade Backend above is set to "System lemonade-server".</span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="lemonade_api_key">System Lemonade API Key</label>
-      <input
-        type="password"
-        id="lemonade_api_key"
-        name="lemonade_api_key"
-        class="form-input"
-        placeholder="optional — only if your server requires one"
-        autocomplete="off"
-      >
-      <span class="form-hint">
-        Only used with the "System lemonade-server" backend, and only if that server is configured to require a key.
-        {% if config.lemonade_api_key %}<span class="p-status-label p-status-label--positive">configured</span>{% endif %}
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="lemonade_model">Model Override (optional)</label>
-      <input
-        type="text"
-        id="lemonade_model"
-        name="lemonade_model"
-        class="form-input"
-        value="{{ config.lemonade_model }}"
-        placeholder="leave blank to use opinionated per-task defaults"
-      >
-      <span class="form-hint">
-        Leave blank to use opinionated per-task defaults tuned for AMD Strix Halo (128GB RAM) — a vision model for
-        screenshot review, a large reasoning model for PR descriptions, and a coding model reserved for the future
-        local coding backend. Set this to force a single model for all tasks instead (must be available in Lemonade's
-        model catalog; it's pulled automatically if needed).
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="bot_github_login">Bot GitHub Login</label>
-      <input
-        type="text"
-        id="bot_github_login"
-        name="bot_github_login"
-        class="form-input"
-        value="{{ config.bot_github_login }}"
-        placeholder="my-bot-account"
-      >
-      <span class="form-hint">GitHub login of the secondary account used to open version-bump PRs.</span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="bot_github_token">Bot GitHub Token</label>
-      <input
-        type="password"
-        id="bot_github_token"
-        name="bot_github_token"
-        class="form-input"
-        placeholder="ghp_..."
-        autocomplete="off"
-      >
-      <span class="form-hint">
-        PAT for the bot account — needs <code>repo</code> scope to create branches and PRs.
-        {% if config.bot_github_login %}<span class="p-status-label p-status-label--positive">configured for {{ config.bot_github_login }}</span>{% endif %}
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="agent_interval_hours">Release Scan Interval</label>
+      <label class="form-label" for="agent_interval_hours">Check for upstream releases</label>
       <select id="agent_interval_hours" name="agent_interval_hours" class="form-input form-select">
-        {% for h in agent_intervals %}
-        <option value="{{ h }}" {% if h == config.agent_interval_hours %}selected{% endif %}>
-          {% if h < 1 %}Every {{ (h * 60) | round | int }} minutes
-          {% else %}Every {{ h | int }} hour{% if h != 1 %}s{% endif %}
-          {% endif %}
-        </option>
-        {% endfor %}
+        {{ interval_options(agent_intervals, config.agent_interval_hours) }}
       </select>
-      <span class="form-hint">How often the release scanner checks packaging repos for upstream updates.</span>
+      <span class="form-hint">When a new upstream version is found, a version-bump PR is opened by the bot account.</span>
     </div>
-
     <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="auto_merge"
-          value="true"
-          {% if config.auto_merge %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Auto-merge agent-approved PRs
-      </label>
+      {{ toggle('auto_merge', 'Auto-merge approved version-bump PRs', config.auto_merge) }}
+      <span class="form-hint">Merge PRs the screenshot reviewer approves with high confidence. Off = you always click merge.</span>
+    </div>
+    <div class="form-row">
+      {{ toggle('auto_promote', 'Auto-promote to stable after approval', config.auto_promote) }}
       <span class="form-hint">
-        Automatically merge PRs that the screenshot reviewer approves with high confidence.
-        Leave off to always require a manual merge click in the dashboard.
+        Promote a candidate to <code>stable</code> once it passes and is approved on <em>every</em> tested
+        architecture — the whole set is released together. Merged bump PRs follow through: once CI publishes,
+        the new version is released to candidate if needed, tested and promoted. If any architecture is
+        missing or not approved nothing is promoted.
       </span>
     </div>
-
     <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="auto_promote"
-          value="true"
-          {% if config.auto_promote %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Auto-promote to stable after agent approval
-      </label>
-      <span class="form-hint">
-        When enabled, a candidate version is promoted to <code>stable</code> once the runner
-        test passes and the vision model approves it on <em>every</em> tested architecture
-        (amd64 and arm64) — the whole set is released together. Merged version-bump PRs
-        follow through too: once CI publishes the new version it's released from edge to
-        candidate if needed, tested there, and promoted. If one architecture is missing or not
-        approved, nothing is promoted; use the manual override if you really want to release
-        without it.
-      </span>
+      <label class="form-label" for="auto_promote_confidence">Minimum reviewer confidence</label>
+      <input type="number" id="auto_promote_confidence" name="auto_promote_confidence"
+             class="form-input form-input--narrow" min="0" max="1" step="0.05"
+             value="{{ config.auto_promote_confidence if config.auto_promote_confidence is not none else 0.85 }}">
+      <span class="form-hint">0–1. Required before an automatic merge or promotion is attempted.</span>
     </div>
-
-    <div class="form-row">
-      <label class="form-label" for="auto_promote_confidence">Auto-promote Confidence Threshold</label>
-      <input
-        type="number"
-        id="auto_promote_confidence"
-        name="auto_promote_confidence"
-        class="form-input"
-        min="0"
-        max="1"
-        step="0.05"
-        value="{{ config.auto_promote_confidence if config.auto_promote_confidence is not none else 0.85 }}"
-      >
-      <span class="form-hint">
-        Minimum vision confidence required before a stable promotion is attempted automatically.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="auto_rebuild_stale"
-          value="true"
-          {% if config.auto_rebuild_stale %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Auto-trigger builds for stale snaps
-      </label>
-      <span class="form-hint">
-        Automatically dispatch a snap-build workflow for snaps that haven't published a new
-        revision within the staleness window. Requires the <code>SNAPCRAFT_STORE_CREDENTIALS</code>
-        secret in each packaging repo — set up once above under "Snapcraft Store Credential" and
-        the dashboard provisions it into every repo automatically. The workflow file
-        (<code>.github/workflows/snap-build.yml</code>) will be created automatically if it
-        doesn't exist.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="stale_build_days">Staleness Window (days)</label>
-      <select id="stale_build_days" name="stale_build_days" class="form-input form-select">
-        {% for d in [7, 14, 30, 60, 90] %}
-        <option value="{{ d }}" {% if d == (config.stale_build_days or 30) %}selected{% endif %}>
-          {{ d }} days
-        </option>
-        {% endfor %}
-      </select>
-      <span class="form-hint">
-        Snaps with no new publication older than this threshold will have a rebuild triggered.
-      </span>
-      <button type="button" onclick="runBackgroundAction(event, '/settings/rebuild-all-snaps', 'rebuild-all-snaps-status')" class="p-button is-small" style="margin-top: 8px;">Rebuild All Snaps Now</button>
-      <span id="rebuild-all-snaps-status" class="form-hint"></span>
-      <span class="form-hint">
-        Immediately dispatches a rebuild for every snap that already has the
-        <code>automated-snap-build.yml</code> workflow in its packaging repo — regardless of
-        staleness, and without creating the workflow anywhere it's missing. Progress and results
-        show up on the <a href="/agents" class="link-inline">Agents</a> page. If
-        <a href="/docs#running-tests" class="link-inline">automatic testing</a> is enabled, the
-        newly published candidate revisions get tested automatically once the next scheduled
-        collection notices them in the Store — this button doesn't queue tests itself.
-      </span>
-    </div>
-
-    <h4 class="section-label">Delegated Coding Tasks</h4>
-    <p class="form-hint">
-      Fixing failing CI, upgrading dependencies, and fixing filed issues require a genuinely
-      capable coding model. GitHub Copilot cloud agent is the most capable option (multi-turn,
-      can run tests, iterate on CI failures). A local Lemonade model (Qwen3-Coder) is also
-      available as a no-subscription-required option — it works in a single best-effort pass
-      (no tool use or test iteration) using the repo's file contents and opens its own PR.
-      All three toggles below are opt-in and off by default — review the PRs they open before
-      merging.
-    </p>
-
-    <div class="form-row">
-      <label class="form-label" for="coding_task_backend">Coding Task Backend</label>
-      <select id="coding_task_backend" name="coding_task_backend" class="form-input form-select">
-        <option value="copilot_cloud_agent" {% if (config.coding_task_backend or 'copilot_cloud_agent') == 'copilot_cloud_agent' %}selected{% endif %}>
-          GitHub Copilot cloud agent (default)
-        </option>
-        <option value="local_lemonade" {% if config.coding_task_backend == 'local_lemonade' %}selected{% endif %}>
-          Local model (Lemonade / Qwen3-Coder — single-shot, no subscription needed)
-        </option>
-        <option value="external_api" {% if config.coding_task_backend == 'external_api' %}selected{% endif %}>
-          External API key (not yet implemented — reserved)
-        </option>
-      </select>
-      <span class="form-hint">
-        Which backend handles CI-fix / dependency-update / issue-fix / fleet-normalization tasks.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="external_coding_api_key">External Coding API Key</label>
-      <input
-        type="password"
-        id="external_coding_api_key"
-        name="external_coding_api_key"
-        class="form-input"
-        placeholder="{% if config.external_coding_api_key %}(saved){% else %}not set{% endif %}"
-      >
-      <span class="form-hint">
-        Reserved for a future hosted coding-model escalation path. Not used yet.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="external_coding_api_base_url">External Coding API Base URL</label>
-      <input
-        type="text"
-        id="external_coding_api_base_url"
-        name="external_coding_api_base_url"
-        class="form-input"
-        value="{{ config.external_coding_api_base_url or '' }}"
-      >
-    </div>
-
-    <div class="form-row">
-      <label class="form-label" for="external_coding_api_model">External Coding API Model</label>
-      <input
-        type="text"
-        id="external_coding_api_model"
-        name="external_coding_api_model"
-        class="form-input"
-        value="{{ config.external_coding_api_model or '' }}"
-      >
-    </div>
-
-    <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="auto_fix_ci_failures"
-          value="true"
-          {% if config.auto_fix_ci_failures %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Auto-fix failing CI on bot-opened PRs
-      </label>
-      <span class="form-hint">
-        When a bot-opened PR's build/test workflow fails — a version-bump PR, or a
-        dependency-update PR from "Auto-maintain upstream repos" below — dispatch the
-        configured coding backend to open a fix PR stacked on top of the failing branch.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="auto_fix_build_failures"
-          value="true"
-          {% if config.auto_fix_build_failures %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Auto-fix failing packaging repo builds
-      </label>
-      <span class="form-hint">
-        When a snap's own packaging repo build/publish workflow fails on its default
-        branch (not tied to any bot-opened PR — e.g. a snapcraft.yaml issue, a base
-        snap update breaking a part) so it stops publishing new revisions, dispatch
-        the configured coding backend to open a fix PR. Checked every 15 minutes.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="auto_maintain_upstream"
-          value="true"
-          {% if config.auto_maintain_upstream %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Auto-maintain upstream repos you personally own
-      </label>
-      <span class="form-hint">
-        For snaps whose upstream repo is owned by your own GitHub account, periodically dispatch
-        dependency-upgrade PRs, request Copilot reviews on your open PRs, and attempt fixes for a
-        small batch of open issues per run.
-      </span>
-    </div>
-
-    <div class="form-row">
-      <label class="form-label checkbox-label">
-        <input
-          type="checkbox"
-          name="fleet_normalization_enabled"
-          value="true"
-          {% if config.fleet_normalization_enabled %}checked{% endif %}
-          style="margin-right: 6px;"
-        >
-        Enable fleet normalization campaign
-      </label>
-      <span class="form-hint">
-        Allows manually triggering a one-time pass across all packaging repos: dispatches a
-        coding-backend task per repo to remove legacy <code>sync-release</code>-style
-        workflows, bring the build/publish workflow in line with the canonical
-        <code>automated-snap-build.yml</code>, add an <code>AGENTS.md</code>, and move the snap's YARF
-        suite (if a legacy shared testing repo has one) into <code>tests/</code>. Review each PR before merging.
-      </span>
-      {% if config.fleet_normalization_enabled %}
-      <button type="button" onclick="runBackgroundAction(event, '/settings/run-fleet-normalization', 'run-fleet-normalization-status')" class="p-button is-small" style="margin-top: 8px;">Run Fleet Normalization Now</button>
-      <span id="run-fleet-normalization-status" class="form-hint"></span>
-      {% endif %}
-    </div>
-
     <div class="form-actions">
-      <a href="/agents" class="p-button is-small">View Agent Activity</a>
-      <a href="/version-bumps" class="p-button is-small">View Version Bumps</a>
-      <button type="submit" class="p-button--positive">Save Agent Settings</button>
+      <button type="submit" class="p-button--positive">Save</button>
     </div>
   </form>
-</div>
+</section>
 
-<!-- Tracked Snaps -->
-<div class="card">
-  <div class="section-header-row">
-    <h3 class="section-label">Tracked Snaps</h3>
-    <a href="/snaps/add" class="p-button is-small">+ Add Snap</a>
+<!-- Maintenance automation -------------------------------------------- -->
+<section class="card settings-section" id="maintenance" aria-labelledby="maintenance-title">
+  <div class="card__header">
+    <h2 class="card__title" id="maintenance-title">Maintenance automation</h2>
+    <a href="/snaps#fleet-actions" class="link-inline small">Fleet actions →</a>
   </div>
-
-  <div class="table-wrapper" id="tracked-snaps-wrapper"{% if not snaps %} style="display:none;"{% endif %}>
-    <table class="snap-table">
-      <thead>
-        <tr>
-          <th>Snap</th>
-          <th>Publisher</th>
-          <th>Packaging Repo</th>
-          <th>Added</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody id="tracked-snaps-body">
-        {% for snap in snaps %}
-        <tr id="snap-row-{{ snap.name }}" data-snap-name="{{ snap.name }}">
-          <td>
-            <a href="/snap/{{ snap.name }}" class="snap-link">{{ snap.name }}</a>
-            {% if snap.manually_added %}
-            <span class="manual-badge">manual</span>
-            {% endif %}
-          </td>
-          <td class="muted">{{ snap.publisher or '—' }}</td>
-          <td class="muted small">
-            {% if snap.packaging_repo %}
-            <a href="{{ snap.packaging_repo }}" target="_blank" rel="noopener" class="link-inline small">
-              {{ snap.packaging_repo | truncate(40) }}
-            </a>
-            {% else %}
-            —
-            {% endif %}
-          </td>
-          <td class="muted">
-            {% if snap.manually_added %}Manual{% else %}Auto{% endif %}
-          </td>
-          <td>
-            <form onsubmit="return removeSnap(event, '{{ snap.name }}')">
-              <button type="submit" class="p-button--negative is-small">Remove</button>
-            </form>
-          </td>
-        </tr>
+  <form method="post" action="/settings">
+    <input type="hidden" name="section" value="maintenance">
+    <div class="form-row">
+      {{ toggle('auto_rebuild_stale', 'Rebuild stale snaps automatically', config.auto_rebuild_stale) }}
+      <span class="form-hint">
+        Dispatch a build for snaps that haven't published a new revision within the window below. Needs the
+        Store credential (see <a href="#store" class="link-inline">Snap Store</a>); the
+        <code>.github/workflows/snap-build.yml</code> workflow is created if it doesn't exist.
+      </span>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="stale_build_days">Stale after</label>
+      <select id="stale_build_days" name="stale_build_days" class="form-input form-select form-input--narrow">
+        {% for d in [7, 14, 30, 60, 90] %}
+        <option value="{{ d }}" {% if d == (config.stale_build_days or 30) %}selected{% endif %}>{{ d }} days</option>
         {% endfor %}
-      </tbody>
-    </table>
+      </select>
+    </div>
+    <p class="form-hint">The options below dispatch a <a href="#coding" class="link-inline">coding task</a>, which opens a PR for you to review. All are off by default.</p>
+    <div class="form-row">
+      {{ toggle('auto_fix_ci_failures', 'Fix failing CI on bot-opened PRs', config.auto_fix_ci_failures) }}
+      <span class="form-hint">Opens a fix PR stacked on a failing version-bump or dependency-update PR.</span>
+    </div>
+    <div class="form-row">
+      {{ toggle('auto_fix_build_failures', 'Fix failing packaging repo builds', config.auto_fix_build_failures) }}
+      <span class="form-hint">When the default-branch build/publish workflow fails (checked every 15 minutes).</span>
+    </div>
+    <div class="form-row">
+      {{ toggle('auto_maintain_upstream', 'Maintain upstream repos you own', config.auto_maintain_upstream) }}
+      <span class="form-hint">For upstreams owned by your account: dependency upgrades, Copilot reviews on your PRs, and fixes for a few open issues per run.</span>
+    </div>
+    <div class="form-row">
+      {{ toggle('fleet_normalization_enabled', 'Allow fleet normalization', config.fleet_normalization_enabled) }}
+      <span class="form-hint">
+        Enables the one-off <a href="/snaps#fleet-actions" class="link-inline">Normalize fleet</a> action: a
+        task per packaging repo that removes legacy <code>sync-release</code>-style workflows, aligns with
+        <code>automated-snap-build.yml</code>, adds an <code>AGENTS.md</code> and moves the YARF suite into
+        <code>tests/</code>.
+      </span>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="p-button--positive">Save</button>
+    </div>
+  </form>
+</section>
+
+<!-- Coding tasks ------------------------------------------------------ -->
+<section class="card settings-section" id="coding" aria-labelledby="coding-title">
+  <div class="card__header">
+    <h2 class="card__title" id="coding-title">Coding tasks</h2>
+    <a href="/agents/tasks" class="link-inline small">Coding tasks →</a>
   </div>
-  <div class="empty-state small-empty" id="tracked-snaps-empty"{% if snaps %} style="display:none;"{% endif %}>
-    <p>No snaps tracked yet. <a href="/snaps/add" class="link-inline">Add one</a> or run a collection.</p>
+  <form method="post" action="/settings">
+    <input type="hidden" name="section" value="coding">
+    <p class="form-hint">
+      CI fixes, dependency updates, issue fixes and fleet normalization need a capable coding model.
+      GitHub Copilot cloud agent is multi-turn and can run tests; the local Lemonade model (Qwen3-Coder)
+      makes a single best-effort pass with no subscription needed.
+    </p>
+    <div class="form-row">
+      <label class="form-label" for="coding_task_backend">Backend</label>
+      <select id="coding_task_backend" name="coding_task_backend" class="form-input form-select">
+        <option value="copilot_cloud_agent" {% if (config.coding_task_backend or 'copilot_cloud_agent') == 'copilot_cloud_agent' %}selected{% endif %}>GitHub Copilot cloud agent (default)</option>
+        <option value="local_lemonade" {% if config.coding_task_backend == 'local_lemonade' %}selected{% endif %}>Local model (Lemonade / Qwen3-Coder)</option>
+        <option value="external_api" {% if config.coding_task_backend == 'external_api' %}selected{% endif %}>External API (reserved — not yet implemented)</option>
+      </select>
+    </div>
+    <details class="inline-details">
+      <summary>External API (reserved)</summary>
+      <div class="form-row">
+        <label class="form-label" for="external_coding_api_key">API key</label>
+        <input type="password" id="external_coding_api_key" name="external_coding_api_key" class="form-input"
+               placeholder="{% if config.external_coding_api_key %}(saved){% else %}not set{% endif %}">
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="external_coding_api_base_url">Base URL</label>
+        <input type="text" id="external_coding_api_base_url" name="external_coding_api_base_url" class="form-input"
+               value="{{ config.external_coding_api_base_url or '' }}">
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="external_coding_api_model">Model</label>
+        <input type="text" id="external_coding_api_model" name="external_coding_api_model" class="form-input"
+               value="{{ config.external_coding_api_model or '' }}">
+      </div>
+    </details>
+    <div class="form-actions">
+      <button type="submit" class="p-button--positive">Save</button>
+    </div>
+  </form>
+</section>
+
+<!-- AI backend -------------------------------------------------------- -->
+<section class="card settings-section" id="ai" aria-labelledby="ai-title">
+  <div class="card__header">
+    <h2 class="card__title" id="ai-title">AI backend</h2>
+  </div>
+  <form method="post" action="/settings">
+    <input type="hidden" name="section" value="ai">
+    <p class="form-hint">
+      A <a href="https://github.com/lemonade-sdk/lemonade" target="_blank" rel="noopener" class="link-inline">Lemonade</a>
+      instance powers screenshot review, PR descriptions and the local coding backend.
+    </p>
+    <div class="form-row">
+      <label class="form-label" for="lemonade_backend">Lemonade</label>
+      <select id="lemonade_backend" name="lemonade_backend" class="form-input form-select">
+        <option value="embedded" {% if (config.lemonade_backend or 'embedded') == 'embedded' %}selected{% endif %}>Embedded (default — bundled, private, zero-setup)</option>
+        <option value="system" {% if config.lemonade_backend == 'system' %}selected{% endif %}>System lemonade-server (self-managed)</option>
+      </select>
+      <span class="form-hint"><strong>Embedded</strong> downloads and runs its own instance with default models. <strong>System</strong> uses a server you manage, configured below.</span>
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="lemonade_server_url">System server URL</label>
+      <input type="text" id="lemonade_server_url" name="lemonade_server_url" class="form-input"
+             value="{{ config.lemonade_server_url }}" placeholder="http://localhost:8080">
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="lemonade_api_key">System server API key {% if config.lemonade_api_key %}{{ ui.chip('configured', 'positive') }}{% endif %}</label>
+      <input type="password" id="lemonade_api_key" name="lemonade_api_key" class="form-input"
+             placeholder="optional — only if your server requires one" autocomplete="off">
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="lemonade_model">Model override</label>
+      <input type="text" id="lemonade_model" name="lemonade_model" class="form-input"
+             value="{{ config.lemonade_model }}" placeholder="leave blank for per-task defaults">
+      <span class="form-hint">
+        Blank uses per-task defaults tuned for AMD Strix Halo (128GB): a vision model for screenshot review,
+        a reasoning model for PR descriptions and a coding model for the local backend. Set this to force one
+        model for everything (pulled automatically if needed).
+      </span>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="p-button--positive">Save</button>
+    </div>
+  </form>
+</section>
+
   </div>
 </div>
 
-{% endblock %}
-
-{% block scripts %}
 <script>
-async function runBackgroundAction(evt, url, statusElId) {
-  // Dispatches a one-off background agent (rebuild-all-snaps /
-  // run-fleet-normalization) via fetch instead of a plain form POST, so
-  // the button doesn't navigate away / reload the whole Settings page.
-  const button = evt.target;
-  const statusEl = document.getElementById(statusElId);
-  button.disabled = true;
-  if (statusEl) statusEl.textContent = 'Starting…';
-
-  try {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'X-Requested-With': 'fetch' },
+(function () {
+  const nav = document.getElementById('settings-subnav');
+  if (!nav || !('IntersectionObserver' in window)) return;
+  const links = new Map([...nav.querySelectorAll('a')].map(a => [a.getAttribute('href').slice(1), a]));
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      links.forEach(a => { a.classList.remove('is-active'); a.removeAttribute('aria-current'); });
+      const a = links.get(e.target.id);
+      if (a) { a.classList.add('is-active'); a.setAttribute('aria-current', 'true'); }
     });
-    const body = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      if (statusEl) statusEl.textContent = `Failed to start: ${body.error || r.status}`;
-      return;
-    }
-    if (statusEl) {
-      statusEl.innerHTML = 'Started — track progress on the <a href="/agents" class="link-inline">Agents</a> page.';
-    }
-  } catch (err) {
-    if (statusEl) statusEl.textContent = `Network error: ${err}`;
-  } finally {
-    button.disabled = false;
-  }
-}
-
-async function removeSnap(evt, snapName) {
-  evt.preventDefault();
-  if (!confirm(`Remove ${snapName} from tracking?`)) return false;
-
-  const row = document.getElementById(`snap-row-${snapName}`);
-  const button = evt.target.querySelector('button');
-  if (button) button.disabled = true;
-
-  try {
-    const r = await fetch(`/settings/remove/${encodeURIComponent(snapName)}`, {
-      method: 'POST',
-      headers: { 'X-Requested-With': 'fetch' },
-    });
-    if (!r.ok) {
-      alert(`Failed to remove ${snapName} (HTTP ${r.status}).`);
-      if (button) button.disabled = false;
-      return false;
-    }
-  } catch (err) {
-    alert(`Network error removing ${snapName}: ${err}`);
-    if (button) button.disabled = false;
-    return false;
-  }
-
-  if (row) {
-    // Collapse the row in place instead of a full page reload/jump-to-top.
-    row.style.transition = 'opacity 0.2s ease, transform 0.2s ease';
-    row.style.opacity = '0';
-    row.style.transform = 'scaleY(0)';
-    row.style.transformOrigin = 'top';
-    row.addEventListener('transitionend', () => {
-      row.remove();
-      const body = document.getElementById('tracked-snaps-body');
-      if (body && body.children.length === 0) {
-        document.getElementById('tracked-snaps-wrapper').style.display = 'none';
-        document.getElementById('tracked-snaps-empty').style.display = '';
-      }
-    }, { once: true });
-  }
-  return false;
-}
+  }, { rootMargin: '-10% 0px -70% 0px' });
+  links.forEach((_, id) => { const el = document.getElementById(id); if (el) obs.observe(el); });
+})();
 </script>
+
 {% endblock %}

@@ -2691,3 +2691,12 @@ fieldset.form-row { border: 0; padding: 0; margin-left: 0; margin-right: 0; min-
 fieldset.form-row > legend { padding: 0; }
 .snap-tabs > .tab-bar { margin-bottom: 20px; }
 .tab-bar button.tab-bar__tab { margin: 0 0 -1px; font-family: inherit; line-height: inherit; }
+
+/* ---- Settings form helpers ---------------------------------- */
+.card__divider { border: 0; border-top: 1px solid var(--border); margin: 20px 0; }
+.form-input--narrow { max-width: 140px; }
+.checkbox-label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+.checkbox-label input[type="checkbox"] { margin: 0; }
+.form-label .p-chip, .form-label .chip { margin-left: 6px; vertical-align: middle; }
+details.inline-details { margin: 8px 0 16px; }
+details.inline-details > summary { cursor: pointer; color: var(--text-muted); font-size: 14px; margin-bottom: 8px; }
