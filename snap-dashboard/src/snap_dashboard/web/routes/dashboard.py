@@ -6,7 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, BackgroundTasks, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
@@ -185,4 +185,6 @@ async def refresh(background_tasks: BackgroundTasks, request: Request):
             logger.error("Background collection failed: %s", exc)
 
     background_tasks.add_task(_bg)
+    if request.headers.get("X-Requested-With"):
+        return JSONResponse({"ok": True, "message": "Collection queued — new data appears in a minute or two."})
     return RedirectResponse(url="/", status_code=303)

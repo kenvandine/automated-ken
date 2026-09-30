@@ -5,20 +5,16 @@ from __future__ import annotations
 import logging
 
 from fastapi import APIRouter, Form, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import (
     CollectionRun,
-    PromotionDismissal,
-    Runner,
     Snap,
-    StableScreenshotBaseline,
-    TestRun,
-    TestRunScreenshot,
     UserConfig,
 )
 from snap_dashboard.db.session import get_session
+from snap_dashboard.web.fleet_actions import run_fleet_action
 from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
@@ -208,162 +204,25 @@ async def settings_post(
     return RedirectResponse(url="/settings", status_code=303)
 
 
+# Legacy URLs — snap management moved to /snaps. Kept so bookmarks, scripts
+# and any cached pages keep working.
 @router.post("/settings/remove/{snap_name}")
 async def settings_remove_snap(snap_name: str, request: Request):
-    """Remove a snap from tracking.
+    from snap_dashboard.web.routes.snaps import snap_remove
 
-    Called via ``fetch()`` from the Settings page's Remove button, which
-    removes the row in place instead of a full page reload — respond with
-    a small JSON body rather than a redirect so that path doesn't need a
-    second round-trip to fetch/parse the whole page. Non-JS form
-    submissions (no ``X-Requested-With`` header) still get the old
-    redirect-to-/settings behavior as a fallback.
-    """
-    user = get_current_user(request)
-    if user is None:
-        if request.headers.get("X-Requested-With"):
-            return JSONResponse({"error": "not authenticated"}, status_code=401)
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    user_id = user["id"]
-
-    with get_session() as session:
-        snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
-        if snap:
-            # TestRun/StableScreenshotBaseline key off `snap_name` (a
-            # string) rather than `snap_id`, so they aren't covered by
-            # Snap's ORM cascade relationships (see models.py) and would
-            # otherwise survive this delete — leaving stale cards (e.g.
-            # "Pending Promotion" on /testing) for a snap that's no
-            # longer tracked. Clean those up explicitly so removing a
-            # snap here removes it everywhere.
-            runs = (
-                session.query(TestRun)
-                .filter_by(snap_name=snap_name, user_id=user_id)
-                .all()
-            )
-            run_ids = [r.id for r in runs]
-            if run_ids:
-                session.query(TestRunScreenshot).filter(
-                    TestRunScreenshot.test_run_id.in_(run_ids)
-                ).delete(synchronize_session=False)
-                # Runners can point at one of these runs as their
-                # "currently executing" job — clear that back-reference
-                # rather than leaving it dangling.
-                session.query(Runner).filter(
-                    Runner.user_id == user_id,
-                    Runner.current_test_run_id.in_(run_ids),
-                ).update({"current_test_run_id": None}, synchronize_session=False)
-                session.query(TestRun).filter(
-                    TestRun.id.in_(run_ids)
-                ).delete(synchronize_session=False)
-            session.query(StableScreenshotBaseline).filter_by(
-                snap_name=snap_name, user_id=user_id
-            ).delete(synchronize_session=False)
-            session.query(PromotionDismissal).filter_by(
-                snap_name=snap_name, user_id=user_id
-            ).delete(synchronize_session=False)
-            session.delete(snap)
-
-    if request.headers.get("X-Requested-With"):
-        return JSONResponse({"removed": snap_name})
-    return RedirectResponse(url="/settings", status_code=303)
+    return await snap_remove(snap_name, request)
 
 
 @router.post("/settings/run-fleet-normalization")
 async def settings_run_fleet_normalization(request: Request):
-    """Manually trigger the one-time fleet-normalization campaign.
-
-    Unlike the periodic agents, this is a deliberate one-off run — a user
-    clicks this after enabling ``fleet_normalization_enabled`` to kick off
-    the pass across all packaging repos.
-
-    Called via ``fetch()`` from the Settings page so it doesn't reload the
-    whole page — respond with JSON when ``X-Requested-With`` is present.
-    Non-JS form submissions still get the old redirect fallback.
-    """
-    is_fetch = bool(request.headers.get("X-Requested-With"))
-
-    user = get_current_user(request)
-    if user is None:
-        if is_fetch:
-            return JSONResponse({"error": "not authenticated"}, status_code=401)
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    user_id = user["id"]
-    uc = get_user_config(user_id)
-    if not uc or not getattr(uc, "fleet_normalization_enabled", False):
-        if is_fetch:
-            return JSONResponse({"error": "fleet_normalization_disabled"}, status_code=400)
-        return RedirectResponse(url="/settings?error=fleet_normalization_disabled", status_code=303)
-
-    from snap_dashboard.agents.repo_normalizer import RepoNormalizerAgent
-    from snap_dashboard.agents.runner import get_runner
-
-    get_runner().submit(RepoNormalizerAgent(user_id=user_id))
-    if is_fetch:
-        return JSONResponse({"started": True})
-    return RedirectResponse(url="/agents", status_code=303)
+    return run_fleet_action(request, "normalize-fleet", error_redirect="/snaps")
 
 
 @router.post("/settings/rebuild-all-snaps")
 async def settings_rebuild_all_snaps(request: Request):
-    """Manually trigger an immediate rebuild for every snap with a GitHub
-    packaging repo that already has the automated build/publish workflow.
-
-    Unlike the periodic Stale Build Scanner, this ignores publish staleness
-    and doesn't create the workflow anywhere it's missing — it just fires a
-    ``workflow_dispatch`` now for whatever's already there. Runs as a
-    background agent (``RebuildAllSnapsAgent``); progress/result is visible
-    on the Agents page.
-
-    Called via ``fetch()`` from the Settings page so it doesn't reload the
-    whole page — respond with JSON when ``X-Requested-With`` is present.
-    Non-JS form submissions still get the old redirect fallback.
-    """
-    is_fetch = bool(request.headers.get("X-Requested-With"))
-
-    user = get_current_user(request)
-    if user is None:
-        if is_fetch:
-            return JSONResponse({"error": "not authenticated"}, status_code=401)
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    user_id = user["id"]
-    uc = get_user_config(user_id)
-    if not uc or not (getattr(uc, "github_token", "") or ""):
-        if is_fetch:
-            return JSONResponse({"error": "rebuild_needs_github_token"}, status_code=400)
-        return RedirectResponse(url="/settings?error=rebuild_needs_github_token", status_code=303)
-
-    from snap_dashboard.agents.runner import get_runner
-    from snap_dashboard.agents.stale_build_scanner import RebuildAllSnapsAgent
-
-    get_runner().submit(RebuildAllSnapsAgent(user_id=user_id))
-    if is_fetch:
-        return JSONResponse({"started": True})
-    return RedirectResponse(url="/agents", status_code=303)
+    return run_fleet_action(request, "rebuild-all", error_redirect="/snaps")
 
 
 @router.post("/settings/sync-snapcraft-credentials")
-async def settings_sync_snapcraft_credentials(request: Request) -> RedirectResponse:
-    """Push the stored Snapcraft Store credential out to every packaging repo.
-
-    Runs as a background agent (see ``SnapcraftCredentialSyncAgent``) since
-    it makes GitHub API calls per repo and could take a little while across
-    the whole fleet — progress/result is visible on the Agents page.
-    """
-    user = get_current_user(request)
-    if user is None:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    user_id = user["id"]
-    uc = get_user_config(user_id)
-    if not uc or not getattr(uc, "snapcraft_macaroon", ""):
-        return RedirectResponse(url="/settings?error=no_snapcraft_credential", status_code=303)
-
-    from snap_dashboard.agents.snapcraft_credential_sync import SnapcraftCredentialSyncAgent
-    from snap_dashboard.agents.runner import get_runner
-
-    get_runner().submit(SnapcraftCredentialSyncAgent(user_id=user_id))
-    return RedirectResponse(url="/agents", status_code=303)
+async def settings_sync_snapcraft_credentials(request: Request):
+    return run_fleet_action(request, "sync-credentials", error_redirect="/snaps")

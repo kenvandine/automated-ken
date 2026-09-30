@@ -170,7 +170,7 @@
           var sel = form.getAttribute('data-remove-closest');
           var target = sel ? form.closest(sel) : null;
           if (target) target.remove();
-          if (data.redirect) window.location.href = data.redirect;
+          else if (data.redirect) window.location.href = data.redirect;
         }
       })
       .catch(function () { AK.toast('Network error — please try again.', 'negative'); })

@@ -2579,7 +2579,8 @@ details.more-menu > summary::after { content: " ▾"; font-size: 10px; }
   display: flex; gap: 16px; align-items: center; justify-content: space-between;
   flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border);
 }
-.action-row:first-of-type { border-top: 0; padding-top: 0; }
+.action-row:first-of-type,
+.card__header + .action-row { border-top: 0; padding-top: 0; }
 .action-row__text { flex: 1 1 320px; }
 .action-row__title { font-weight: 500; }
 .action-row__desc { font-size: 13px; color: var(--text-muted); }
@@ -2666,3 +2667,14 @@ a.pipeline-step:hover { background: var(--surface2); text-decoration: none; }
   padding: 10px 12px; border-radius: 6px;
   font-family: "Ubuntu Mono", monospace; font-size: 13px;
 }
+
+/* ---- Snaps list --------------------------------------------- */
+.snap-filter { max-width: 240px; margin: 0; }
+.snap-table .cluster { gap: 4px; margin-top: 2px; }
+.snap-table td { vertical-align: top; }
+.snap-meta { margin: -8px 0 20px; font-size: 13px; }
+.snap-meta .repo-link { margin: 0; }
+fieldset.form-row { border: 0; padding: 0; margin-left: 0; margin-right: 0; min-width: 0; }
+fieldset.form-row > legend { padding: 0; }
+.snap-tabs > .tab-bar { margin-bottom: 20px; }
+.tab-bar button.tab-bar__tab { margin: 0 0 -1px; font-family: inherit; line-height: inherit; }
