@@ -62,10 +62,11 @@ Python interpreter (classic snaps don't get the base snap's runtime).
 
 | Page | Path |
 |---|---|
-| Dashboard | `/` |
-| Testing | `/testing` |
+| Overview | `/` |
+| Snaps | `/snaps` |
+| Releases | `/releases` |
+| Version bumps | `/releases/bumps` |
 | Runners | `/runners` |
-| Version bumps | `/version-bumps` |
 | Agent activity | `/agents` |
 | Settings | `/settings` |
 | Help | `/docs` |

@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
 {% block title %}Test PR — {{ run.snap_name }} — Automated Ken{% endblock %}
 
@@ -11,7 +12,7 @@
     <h2 class="page-heading">{{ run.snap_name }}</h2>
     <p class="text-muted">
       Test results &mdash;
-      <span class="p-status-label p-status-label--caution">{{ run.from_channel }}</span>
+      {{ ui.chip(run.from_channel, 'caution') }}
       {{ run.version or '' }}
       {% if run.revision %}&nbsp;(rev {{ run.revision }}){% endif %}
     </p>
@@ -25,22 +26,10 @@
     </p>
   </div>
   <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-    {% if run.status == 'passed' and run.review_decision == 'reject' %}
-    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Rejected by AI review</span>
-    {% elif run.status == 'passed' and run.review_decision == 'needs_review' %}
-    <span class="p-status-label p-status-label--caution" style="font-size:13px; padding: 4px 12px;">Needs review</span>
-    {% elif run.status == 'passed' %}
-    <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">&#10003; Passed</span>
-    {% elif run.status == 'failed' %}
-    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">&#10007; Failed</span>
-    {% elif run.status == 'promoted' %}
-    <span class="p-status-label p-status-label--positive" style="font-size:13px; padding: 4px 12px;">Promoted to stable</span>
-    {% elif run.status == 'error' %}
-    <span class="p-status-label p-status-label--negative" style="font-size:13px; padding: 4px 12px;">Error</span>
-    {% elif run.status in ('pending', 'triggered', 'running') %}
-    <span class="p-status-label p-status-label--caution" style="font-size:13px; padding: 4px 12px;">{{ run.status | capitalize }}</span>
+    {% if run.status == 'passed' and run.review_decision in ('reject', 'needs_review') %}
+    {{ ui.status(run.review_decision) }}
     {% else %}
-    <span class="p-status-label" style="font-size:13px; padding: 4px 12px;">{{ run.status }}</span>
+    {{ ui.status(run.status) }}
     {% endif %}
     {% if pr_url %}
     <a href="{{ pr_url }}" target="_blank" rel="noopener" class="p-button is-small">
@@ -179,11 +168,11 @@
           </td>
           <td>
             {% if f.status == 'added' %}
-            <span class="p-status-label p-status-label--positive">added</span>
+            {{ ui.chip("added", "positive") }}
             {% elif f.status == 'removed' %}
-            <span class="p-status-label p-status-label--negative">removed</span>
+            {{ ui.chip("removed", "negative") }}
             {% elif f.status == 'modified' %}
-            <span class="p-status-label p-status-label--caution">modified</span>
+            {{ ui.chip("modified", "caution") }}
             {% else %}
             <span class="muted small">{{ f.status }}</span>
             {% endif %}

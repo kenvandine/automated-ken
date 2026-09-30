@@ -303,12 +303,14 @@ All under **Settings**:
 
 | Page | Path |
 |------|------|
-| Dashboard | `/` |
-| Testing | `/testing` |
+| Overview | `/` |
+| Snaps | `/snaps` |
+| Releases | `/releases` |
+| Version bumps | `/releases/bumps` |
+| Test runs | `/releases/runs` |
 | Runners | `/runners` |
-| Version bumps | `/version-bumps` |
 | Agent activity | `/agents` |
-| Copilot tasks | `/copilot-tasks` |
+| Coding tasks | `/agents/tasks` |
 | Settings | `/settings` |
 | Admin | `/admin` |
 | Help | `/docs` |
