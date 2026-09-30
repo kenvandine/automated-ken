@@ -2481,6 +2481,19 @@ a.stat-tile:hover { border-color: var(--accent); text-decoration: none; }
 .inbox__actions form { margin: 0; }
 .inbox__actions .p-button,
 .inbox__actions [class^="p-button--"] { margin: 0; }
+.inbox__title { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.inbox__item--negative { box-shadow: inset 3px 0 0 var(--red); padding-left: 12px; }
+.inbox__item--caution  { box-shadow: inset 3px 0 0 var(--amber); padding-left: 12px; }
+.inbox__item--positive { box-shadow: inset 3px 0 0 var(--green); padding-left: 12px; }
+.inbox--compact .inbox__item { padding: 8px 0; }
+.stat-tile--info .stat-tile__value { color: var(--blue); }
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  margin: 16px 0;
+}
+.overview-grid > .card { margin: 0; }
 
 .card__header {
   display: flex;

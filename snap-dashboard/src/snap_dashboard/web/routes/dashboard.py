@@ -9,8 +9,9 @@ from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import ChannelMap, CollectionRun, Issue, Snap, TestRun
+from snap_dashboard.db.models import CollectionRun, Snap
 from snap_dashboard.db.session import get_session
+from snap_dashboard.web.fleet import build_overview
 from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
@@ -34,81 +35,12 @@ def _get_last_run(user_id: int):
     return None
 
 
-def _build_snap_rows(session, user_id: int):
-    """Build the snap table rows with channel data and issue counts."""
-    snaps = session.query(Snap).filter_by(user_id=user_id).order_by(Snap.name).all()
-    rows = []
-    attention = []
-
-    for snap in snaps:
-        # Channel map keyed by (channel, arch) -> version
-        cm_rows = session.query(ChannelMap).filter_by(snap_id=snap.id).all()
-        channels: dict[str, dict[str, str | None]] = {}
-        for cm in cm_rows:
-            if cm.channel not in channels:
-                channels[cm.channel] = {}
-            channels[cm.channel][cm.architecture] = cm.version
-
-        def ver(ch: str) -> str | None:
-            return (channels.get(ch) or {}).get("amd64")
-
-        stable_ver = ver("stable")
-        candidate_ver = ver("candidate")
-        beta_ver = ver("beta")
-        edge_ver = ver("edge")
-
-        # Issue/PR counts
-        issue_count = (
-            session.query(Issue)
-            .filter_by(snap_id=snap.id, type="issue", state="open")
-            .count()
-        )
-        pr_count = (
-            session.query(Issue)
-            .filter_by(snap_id=snap.id, type="pr", state="open")
-            .count()
-        )
-
-        # Latest channel_map fetched_at
-        latest_cm = (
-            session.query(ChannelMap)
-            .filter_by(snap_id=snap.id)
-            .order_by(ChannelMap.fetched_at.desc())
-            .first()
-        )
-        last_collected = latest_cm.fetched_at if latest_cm else None
-
-        row = {
-            "snap": snap,
-            "stable": stable_ver,
-            "candidate": candidate_ver,
-            "beta": beta_ver,
-            "edge": edge_ver,
-            "issue_count": issue_count,
-            "pr_count": pr_count,
-            "last_collected": last_collected,
-        }
-        rows.append(row)
-
-        # Attention needed: edge/beta ahead of stable
-        if edge_ver and edge_ver != stable_ver:
-            label = "ready_to_promote" if (issue_count + pr_count) == 0 else "has_open_items"
-            attention.append(
-                {
-                    "snap": snap,
-                    "edge_ver": edge_ver,
-                    "stable_ver": stable_ver,
-                    "issue_count": issue_count,
-                    "pr_count": pr_count,
-                    "label": label,
-                }
-            )
-
-    return rows, attention
-
-
 @router.get("/", response_class=HTMLResponse)
 async def dashboard_index(request: Request) -> HTMLResponse:
+    """Overview: what needs you, what's in flight, what recently shipped.
+
+    The full per-snap table lives on /snaps now; this page is the inbox.
+    """
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
@@ -123,43 +55,19 @@ async def dashboard_index(request: Request) -> HTMLResponse:
         snap_count = session.query(Snap).filter_by(user_id=user_id).count()
         if snap_count == 0:
             return RedirectResponse(url="/onboarding", status_code=302)
+        overview = build_overview(session, user_id)
 
-        rows, attention = _build_snap_rows(session, user_id)
-        last_run = _get_last_run(user_id)
-
-        # Build a dict of snap_name → most recent non-promoted TestRun for badge display
-        active_runs = (
-            session.query(TestRun)
-            .filter_by(user_id=user_id)
-            .filter(TestRun.promoted.is_(False))
-            .order_by(TestRun.started_at.desc())
-            .all()
-        )
-        test_runs_by_snap: dict[str, dict] = {}
-        for run in active_runs:
-            if run.snap_name not in test_runs_by_snap:
-                test_runs_by_snap[run.snap_name] = {
-                    "id": run.id,
-                    "status": run.status,
-                    "pr_number": run.pr_number,
-                    "version": run.version,
-                    "review_decision": run.review_decision,
-                    "review_confidence": run.review_confidence,
-                }
-
-        return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {
-                "rows": rows,
-                "attention": attention,
-                "last_run": last_run,
-                "publisher": uc.publisher,
-                "config": uc,
-                "test_runs_by_snap": test_runs_by_snap,
-                "current_user": user,
-            },
-        )
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            **overview,
+            "last_run": _get_last_run(user_id),
+            "publisher": uc.publisher,
+            "config": uc,
+            "current_user": user,
+        },
+    )
 
 
 def _run_collection_sync(user_id: int):

@@ -1,256 +1,144 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
-{% block title %}Dashboard — Automated Ken{% endblock %}
+{% block title %}Overview — Automated Ken{% endblock %}
 
 {% block content %}
 
-<div class="page-title-row">
-  <div>
-    <h2 class="page-heading">{{ publisher }} snaps</h2>
-    <p class="text-muted">{{ rows|length }} tracked</p>
-  </div>
-  <form method="post" action="/refresh" class="refresh-form js-refresh-form">
-    <button type="submit" class="p-button--positive is-small">Refresh All</button>
+{% call ui.page_header("Overview", "What needs you, what's in progress, and what shipped this week.") %}
+  <form method="post" action="/refresh" data-async-action>
+    <button type="submit" class="p-button">Refresh data</button>
   </form>
+{% endcall %}
+
+<div class="stat-strip" role="list">
+  <a href="/snaps" class="stat-tile" role="listitem">
+    <span class="stat-tile__value">{{ stats.snaps }}</span>
+    <span class="stat-tile__label">Snaps tracked</span>
+  </a>
+  <a href="#needs-you" class="stat-tile {% if stats.needs %}stat-tile--caution{% else %}stat-tile--positive{% endif %}" role="listitem">
+    <span class="stat-tile__value">{{ stats.needs }}</span>
+    <span class="stat-tile__label">Need you</span>
+  </a>
+  <a href="#in-flight" class="stat-tile {% if stats.in_flight %}stat-tile--info{% endif %}" role="listitem">
+    <span class="stat-tile__value">{{ stats.in_flight }}</span>
+    <span class="stat-tile__label">In progress</span>
+  </a>
+  <a href="/runners" class="stat-tile {% if stats.runners_total and stats.runners_online < stats.runners_total %}stat-tile--caution{% endif %}" role="listitem">
+    <span class="stat-tile__value">{{ stats.runners_online }}/{{ stats.runners_total }}</span>
+    <span class="stat-tile__label">Runners online</span>
+  </a>
+  <a href="#shipped" class="stat-tile {% if stats.shipped %}stat-tile--positive{% endif %}" role="listitem">
+    <span class="stat-tile__value">{{ stats.shipped }}</span>
+    <span class="stat-tile__label">Shipped this week</span>
+  </a>
 </div>
 
-{% if attention %}
-<section class="attention-section">
-  <h3 class="section-label">Attention Needed</h3>
-  <div class="attention-scroll">
-    {% for item in attention %}
-    <div class="attention-card {% if item.label == 'ready_to_promote' %}attention-cyan{% else %}attention-orange{% endif %}">
-      <div class="attention-card-header">
-        {% if item.label == 'ready_to_promote' %}
-        <span class="attention-tag tag-cyan">Ready to promote</span>
-        {% else %}
-        <span class="attention-tag tag-orange">Has open items</span>
-        {% endif %}
-        <a href="/snap/{{ item.snap.name }}" class="attention-name">{{ item.snap.name }}</a>
-      </div>
-      <div class="attention-versions">
-        <div class="version-compare">
-          <span class="ver-label">edge</span>
-          <span class="ver-value ver-new">{{ item.edge_ver or '—' }}</span>
+<section class="card" id="needs-you" aria-labelledby="needs-title">
+  <div class="card__header">
+    <h2 class="card__title" id="needs-title">Needs you</h2>
+    {% if needs %}<span class="text-muted small">{{ needs|length }} item{{ '' if needs|length == 1 else 's' }}</span>{% endif %}
+  </div>
+  {% if needs %}
+  <ul class="inbox">
+    {% for item in needs %}
+    <li class="inbox__item inbox__item--{{ item.tone }}">
+      <div class="inbox__main">
+        <div class="inbox__title">
+          {{ ui.chip(item.label, item.tone) }}
+          {% if item.snap %}<a href="/snap/{{ item.snap }}">{{ item.title }}</a>{% else %}<span>{{ item.title }}</span>{% endif %}
+          {% if item.status %}{{ ui.status(item.status) }}{% endif %}
         </div>
-        <div class="ver-arrow">→</div>
-        <div class="version-compare">
-          <span class="ver-label">stable</span>
-          <span class="ver-value ver-old">{{ item.stable_ver or 'none' }}</span>
-        </div>
+        {% if item.meta %}<div class="inbox__meta">{{ item.meta }}</div>{% endif %}
       </div>
-      {% if item.label == 'has_open_items' %}
-      <div class="attention-counts">
-        {% if item.issue_count %}
-        <span class="p-status-label p-status-label--caution">{{ item.issue_count }} issues</span>
-        {% endif %}
-        {% if item.pr_count %}
-        <span class="p-status-label p-status-label--information">{{ item.pr_count }} PRs</span>
-        {% endif %}
+      <div class="inbox__actions">
+        {% if item.external %}<a href="{{ item.external }}" target="_blank" rel="noopener" class="p-button is-small">PR ↗</a>{% endif %}
+        <a href="{{ item.href }}" class="p-button--positive is-small">{{ item.action }}</a>
       </div>
-      {% endif %}
-      {% set snap_run = test_runs_by_snap.get(item.snap.name) %}
-      {% if snap_run %}
-      <div class="attention-test-status">
-        {% if snap_run.status == 'passed' %}
-        <a href="/testing/runs/{{ snap_run.id }}" class="p-status-label p-status-label--positive">Tests passed</a>
-        {% elif snap_run.status == 'failed' %}
-        <a href="/testing/runs/{{ snap_run.id }}" class="p-status-label p-status-label--negative">Tests failed</a>
-        {% elif snap_run.status in ('pending', 'triggered', 'running') %}
-        <span class="p-status-label p-status-label--caution">Tests running…</span>
-        {% elif snap_run.status == 'promoted' %}
-        <span class="p-status-label p-status-label--positive">Promoted</span>
-        {% endif %}
-        {% if snap_run.review_decision and snap_run.status in ('passed', 'failed') %}
-        {% if snap_run.review_decision == 'approve' %}
-        <span class="muted small" style="margin-left:4px;">AI: approved{% if snap_run.review_confidence is not none %} ({{ "%.0f"|format(snap_run.review_confidence * 100) }}%){% endif %}</span>
-        {% elif snap_run.review_decision == 'reject' %}
-        <span class="muted small" style="margin-left:4px;">AI: rejected{% if snap_run.review_confidence is not none %} ({{ "%.0f"|format(snap_run.review_confidence * 100) }}%){% endif %}</span>
-        {% else %}
-        <span class="muted small" style="margin-left:4px;">AI: needs review</span>
-        {% endif %}
-        {% endif %}
-      </div>
-      {% else %}
-      <a href="/testing" class="p-button is-small">Test on runners</a>
-      {% endif %}
-    </div>
+    </li>
     {% endfor %}
-  </div>
-</section>
-{% endif %}
-
-<div class="card snap-table-section">
-  <h3 class="section-label">All Snaps</h3>
-  {% if rows %}
-  <div class="table-wrapper">
-    <table class="snap-table">
-      <thead>
-        <tr>
-          <th>Snap</th>
-          <th>Stable</th>
-          <th>Candidate</th>
-          <th>Beta</th>
-          <th>Edge</th>
-          <th>Issues</th>
-          <th>PRs</th>
-          <th>Updated</th>
-          <th>Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for row in rows %}
-        <tr class="snap-row">
-          <td class="snap-name-cell">
-            <a href="/snap/{{ row.snap.name }}" class="snap-link">{{ row.snap.name }}</a>
-            {% if row.snap.manually_added %}
-            <span class="manual-badge">manual</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.stable %}
-            <span class="p-status-label p-status-label--positive">{{ row.stable }}</span>
-            {% else %}
-            <span class="p-status-label p-status-label--negative">—</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.candidate %}
-            {% if row.candidate == row.stable %}
-            <span class="p-status-label p-status-label--positive">{{ row.candidate }}</span>
-            {% else %}
-            <span class="p-status-label p-status-label--caution">{{ row.candidate }}</span>
-            {% endif %}
-            {% else %}
-            <span class="p-status-label">—</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.beta %}
-            {% if row.beta == row.stable %}
-            <span class="p-status-label p-status-label--positive">{{ row.beta }}</span>
-            {% else %}
-            <span class="p-status-label p-status-label--caution">{{ row.beta }}</span>
-            {% endif %}
-            {% else %}
-            <span class="p-status-label">—</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.edge %}
-            {% if row.edge == row.stable %}
-            <span class="p-status-label p-status-label--positive">{{ row.edge }}</span>
-            {% elif row.edge != row.stable %}
-            <span class="p-status-label p-status-label--caution">{{ row.edge }}</span>
-            {% endif %}
-            {% else %}
-            <span class="p-status-label">—</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.issue_count > 0 %}
-            <span class="p-status-label p-status-label--caution">{{ row.issue_count }}</span>
-            {% else %}
-            <span class="muted">0</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if row.pr_count > 0 %}
-            <span class="p-status-label p-status-label--information">{{ row.pr_count }}</span>
-            {% else %}
-            <span class="muted">0</span>
-            {% endif %}
-          </td>
-          <td class="muted small">
-            {% if row.last_collected %}
-            {{ row.last_collected.strftime('%m-%d %H:%M') }}
-            {% else %}
-            —
-            {% endif %}
-          </td>
-          <td>
-            {% if row.snap.packaging_repo %}
-            <form method="post" action="/snap/{{ row.snap.name }}/rebuild" class="js-rebuild-form" style="display:inline">
-              <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild via the packaging repo's automated-snap-build.yml workflow">Rebuild</button>
-            </form>
-            {% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
+  </ul>
   {% else %}
-  <div class="empty-state">
-    <h3>No snaps tracked yet</h3>
-    <p>Run a collection to discover your snaps, or add one manually.</p>
-    <div class="empty-actions">
-      <form method="post" action="/refresh" style="display:inline" class="js-refresh-form">
-        <button type="submit" class="p-button--positive">Run Collection</button>
-      </form>
-      <a href="/snaps#add" class="p-button">Add Snap</a>
-    </div>
-  </div>
+  {{ ui.empty("Nothing needs you right now. Automated Ken will surface promotions, failed tests and PRs that need a decision here.") }}
   {% endif %}
+</section>
+
+<div class="overview-grid">
+  <section class="card" id="in-flight" aria-labelledby="flight-title">
+    <div class="card__header">
+      <h2 class="card__title" id="flight-title">In progress</h2>
+      <a href="/agents" class="link-inline small">Agents →</a>
+    </div>
+    {% if running_agents or active_runs or in_flight_bumps or active_tasks %}
+    <ul class="inbox inbox--compact">
+      {% for a in running_agents %}
+      <li class="inbox__item">
+        <div class="inbox__main">
+          <div class="inbox__title">{{ ui.agent_badge(a.agent_type) }} {% if a.snap %}<a href="/snap/{{ a.snap }}">{{ a.snap }}</a>{% endif %}</div>
+          <div class="inbox__meta">started {{ ui.when(a.when) }}</div>
+        </div>
+      </li>
+      {% endfor %}
+      {% for r in active_runs %}
+      <li class="inbox__item">
+        <div class="inbox__main">
+          <div class="inbox__title">{{ ui.status(r.status) }} <a href="/testing/runs/{{ r.id }}">{{ r.snap }} {{ r.version or '' }}</a> <span class="text-muted small">{{ r.arch }}</span></div>
+          <div class="inbox__meta">smoke test · started {{ ui.when(r.when) }}</div>
+        </div>
+      </li>
+      {% endfor %}
+      {% for b in in_flight_bumps %}
+      <li class="inbox__item">
+        <div class="inbox__main">
+          <div class="inbox__title">{{ ui.status(b.status) }} <a href="{{ b.href }}"{% if b.href.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ b.title }}</a></div>
+          <div class="inbox__meta">version bump · updated {{ ui.when(b.when) }}</div>
+        </div>
+      </li>
+      {% endfor %}
+      {% for t in active_tasks %}
+      <li class="inbox__item">
+        <div class="inbox__main">
+          <div class="inbox__title">{{ ui.status(t.status) }} <a href="{{ t.href }}"{% if t.href.startswith('http') %} target="_blank" rel="noopener"{% endif %}>{{ t.title }}</a></div>
+          <div class="inbox__meta">coding task · queued {{ ui.when(t.when) }}</div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    {{ ui.empty("Nothing running right now.") }}
+    {% endif %}
+  </section>
+
+  <section class="card" id="shipped" aria-labelledby="shipped-title">
+    <div class="card__header">
+      <h2 class="card__title" id="shipped-title">Shipped this week</h2>
+      <a href="/releases" class="link-inline small">Releases →</a>
+    </div>
+    {% if shipped or shipped_bumps %}
+    <ul class="inbox inbox--compact">
+      {% for s in shipped %}
+      <li class="inbox__item">
+        <div class="inbox__main">
+          <div class="inbox__title">{{ ui.chip('stable', 'positive') }} <a href="/snap/{{ s.snap }}">{{ s.snap }} {{ s.version or '' }}</a></div>
+          <div class="inbox__meta">{{ s.arches|join(', ') }} · {{ ui.when(s.when) }}</div>
+        </div>
+      </li>
+      {% endfor %}
+      {% for b in shipped_bumps %}
+      <li class="inbox__item">
+        <div class="inbox__main">
+          <div class="inbox__title">{{ ui.status(b.status) }} <a href="/snap/{{ b.snap }}">{{ b.title }}</a></div>
+          <div class="inbox__meta">version bump · {{ ui.when(b.when) }}</div>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    {{ ui.empty("Nothing promoted to stable in the last 7 days.") }}
+    {% endif %}
+  </section>
 </div>
 
-{% endblock %}
+<p class="text-muted small">Looking for a specific snap? <a href="/snaps">See all snaps</a>.</p>
 
-{% block scripts %}
-<script>
-// Collection runs in the background and there's nothing new to show the
-// instant it's queued, so don't force a full page reload (or even an
-// htmx content swap) here — just confirm it's queued and let the next
-// natural page load pick up the results.
-document.querySelectorAll('.js-refresh-form').forEach(form => {
-  form.addEventListener('submit', evt => {
-    evt.preventDefault();
-    const button = form.querySelector('button[type="submit"]');
-    const original = button.textContent;
-    button.disabled = true;
-    button.textContent = 'Refreshing…';
-    fetch(form.action, { method: 'POST', headers: { 'X-Requested-With': 'fetch' }, redirect: 'manual' })
-      .then(() => {
-        button.textContent = 'Queued ✓';
-        setTimeout(() => { button.disabled = false; button.textContent = original; }, 4000);
-      })
-      .catch(() => {
-        button.disabled = false;
-        button.textContent = original;
-        alert('Failed to queue collection — check your connection and try again.');
-      });
-  });
-});
-
-// Same "don't navigate away, just confirm it's queued" treatment for the
-// per-row Rebuild button — it dispatches a background agent (see
-// RebuildOneSnapAgent), so there's nothing new to show immediately and no
-// reason to leave the dashboard (progress/result shows up on /agents).
-document.querySelectorAll('.js-rebuild-form').forEach(form => {
-  form.addEventListener('submit', evt => {
-    evt.preventDefault();
-    const button = form.querySelector('button[type="submit"]');
-    const original = button.textContent;
-    button.disabled = true;
-    button.textContent = 'Starting…';
-    fetch(form.action, { method: 'POST', headers: { 'X-Requested-With': 'fetch' } })
-      .then(r => r.json().catch(() => ({})).then(body => ({ ok: r.ok, body })))
-      .then(({ ok, body }) => {
-        if (!ok) {
-          alert(`Failed to trigger rebuild: ${body.error || 'unknown error'}`);
-          button.disabled = false;
-          button.textContent = original;
-          return;
-        }
-        button.textContent = 'Started ✓';
-        setTimeout(() => { button.disabled = false; button.textContent = original; }, 4000);
-      })
-      .catch(() => {
-        button.disabled = false;
-        button.textContent = original;
-        alert('Network error triggering rebuild — check your connection and try again.');
-      });
-  });
-});
-</script>
 {% endblock %}

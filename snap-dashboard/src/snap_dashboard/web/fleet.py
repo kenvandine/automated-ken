@@ -78,11 +78,10 @@ def build_snap_rows(session, user_id: int) -> list[dict]:
         session.query(func.max(TestRun.id))
         .filter(TestRun.user_id == user_id, TestRun.snap_name.in_(names))
         .group_by(TestRun.snap_name)
-        .subquery()
     )
     latest_runs = {
         r.snap_name: r
-        for r in session.query(TestRun).filter(TestRun.id.in_(latest_run_ids)).all()
+        for r in session.query(TestRun).filter(TestRun.id.in_(latest_run_ids.subquery().select())).all()
     }
 
     bumps: dict[int, VersionBumpPR] = {}
@@ -98,11 +97,10 @@ def build_snap_rows(session, user_id: int) -> list[dict]:
         session.query(func.max(StaleBuildTrigger.id))
         .filter(StaleBuildTrigger.snap_id.in_(ids))
         .group_by(StaleBuildTrigger.snap_id)
-        .subquery()
     )
     triggers = {
         t.snap_id: t
-        for t in session.query(StaleBuildTrigger).filter(StaleBuildTrigger.id.in_(latest_trigger_ids)).all()
+        for t in session.query(StaleBuildTrigger).filter(StaleBuildTrigger.id.in_(latest_trigger_ids.subquery().select())).all()
     }
 
     rows = []
@@ -176,3 +174,231 @@ def build_snap_rows(session, user_id: int) -> list[dict]:
             }
         )
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Overview (the "/" page): what needs you, what's in flight, what shipped.
+# ---------------------------------------------------------------------------
+
+_RUN_ACTIVE = ("pending", "triggered", "running", "reviewing")
+_TASK_ACTIVE = ("queued", "in_progress")
+_TASK_NEEDS_YOU = ("waiting_for_user", "failed", "timed_out", "dispatch_failed")
+_BUMP_IN_FLIGHT = (
+    "dispatched", "open", "ci_pending", "ci_passed", "yarf_running", "yarf_passed",
+    "merged", "awaiting_release", "candidate_testing",
+)
+
+
+def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dict:
+    """Everything the Overview page shows, as plain dicts."""
+    from datetime import datetime, timedelta, timezone
+
+    from snap_dashboard.db.models import AgentRun, CopilotTask, PromotionDismissal, Runner
+    from snap_dashboard.runners import effective_status
+    from snap_dashboard.testing.release_set import READY
+    from snap_dashboard.web.routes.testing import _build_pending_promotion
+
+    if rows is None:
+        rows = build_snap_rows(session, user_id)
+    tracked = {r["name"] for r in rows}
+    now = datetime.now(timezone.utc)
+    week_ago = (now - timedelta(days=7)).replace(tzinfo=None)
+    needs: list[dict] = []
+
+    # 1. Candidate sets ready to promote to stable.
+    candidate_runs = (
+        session.query(TestRun)
+        .filter(
+            TestRun.user_id == user_id,
+            TestRun.from_channel == "candidate",
+            TestRun.status == "passed",
+            TestRun.promoted.is_(False),
+        )
+        .order_by(TestRun.started_at.desc())
+        .limit(100)
+        .all()
+    )
+    runs_data = [
+        {
+            "snap_name": r.snap_name, "version": r.version, "status": r.status,
+            "promoted": r.promoted, "from_channel": r.from_channel,
+        }
+        for r in candidate_runs
+    ]
+    dismissed = {
+        (d.snap_name, d.version)
+        for d in session.query(PromotionDismissal).filter_by(user_id=user_id).all()
+    }
+    for card in _build_pending_promotion(session, user_id, runs_data, tracked, dismissed):
+        ready = [m["architecture"] for m in card["members"] if m["state"] == READY]
+        if not ready:
+            continue
+        needs.append({
+            "kind": "promotion",
+            "tone": "positive",
+            "label": "Ready to promote",
+            "title": f"{card['snap_name']} {card['version']}",
+            "meta": "Tested on " + ", ".join(ready) + " — promote candidate to stable",
+            "href": "/releases#promote",
+            "action": "Review & promote",
+            "snap": card["snap_name"],
+        })
+
+    # 2. Version-bump PRs waiting on a human.
+    snap_names = {s.id: s.name for s in session.query(Snap.id, Snap.name).filter_by(user_id=user_id)}
+    bumps = (
+        session.query(VersionBumpPR)
+        .filter(VersionBumpPR.snap_id.in_(list(snap_names) or [-1]))
+        .order_by(VersionBumpPR.updated_at.desc())
+        .all()
+    )
+    in_flight_bumps = []
+    shipped_bumps = []
+    for b in bumps:
+        name = snap_names.get(b.snap_id, "?")
+        info = {
+            "title": f"{name} → {b.new_version or '?'}",
+            "status": b.status,
+            "href": b.bot_pr_url or "/releases/bumps",
+            "snap": name,
+            "when": b.updated_at,
+        }
+        if b.status in BUMP_NEEDS_YOU:
+            needs.append({
+                "kind": "bump",
+                "tone": "negative" if b.status in ("ci_failed", "yarf_failed", "agent_rejected") else "caution",
+                "label": "Version bump",
+                "title": info["title"],
+                "meta": (b.agent_reasoning or "").strip()[:160] or None,
+                "status": b.status,
+                "href": "/releases/bumps",
+                "external": b.bot_pr_url,
+                "action": "Review",
+                "snap": name,
+            })
+        elif b.status in _BUMP_IN_FLIGHT:
+            in_flight_bumps.append(info)
+        elif b.status in ("stable_promoted", "stable_promoted_partial") and b.updated_at and b.updated_at >= week_ago:
+            shipped_bumps.append(info)
+
+    # 3. Latest test run per snap failed / needs a manual review.
+    for r in rows:
+        run = r["latest_run"]
+        if run is None or run["promoted"]:
+            continue
+        if run["status"] in ("failed", "error"):
+            needs.append({
+                "kind": "test", "tone": "negative", "label": "Test failed",
+                "title": f"{r['name']} {run['version'] or ''}".strip(),
+                "meta": f"{run['architecture'] or 'amd64'} smoke test {run['status']}",
+                "href": f"/testing/runs/{run['id']}", "action": "Investigate", "snap": r["name"],
+            })
+        elif run["review_decision"] == "needs_review":
+            needs.append({
+                "kind": "test", "tone": "caution", "label": "Screenshot review",
+                "title": f"{r['name']} {run['version'] or ''}".strip(),
+                "meta": "The AI reviewer wasn't sure — take a look at the screenshots",
+                "href": f"/testing/runs/{run['id']}", "action": "Review", "snap": r["name"],
+            })
+
+    # 4. Coding-agent tasks stuck on you (or failed).
+    tasks = (
+        session.query(CopilotTask)
+        .filter(CopilotTask.user_id == user_id)
+        .filter(CopilotTask.status.in_(_TASK_ACTIVE + _TASK_NEEDS_YOU))
+        .order_by(CopilotTask.updated_at.desc())
+        .limit(50)
+        .all()
+    )
+    active_tasks = []
+    for t in tasks:
+        if t.status in _TASK_NEEDS_YOU:
+            if t.status != "waiting_for_user" and (t.updated_at is None or t.updated_at < week_ago):
+                continue
+            needs.append({
+                "kind": "task",
+                "tone": "caution" if t.status == "waiting_for_user" else "negative",
+                "label": "Coding task",
+                "title": f"{t.kind.replace('_', ' ')} · {t.owner_repo}",
+                "meta": (t.error_msg or "").strip()[:160] or None,
+                "status": t.status,
+                "href": "/agents/tasks",
+                "external": t.pr_url,
+                "action": "Open",
+            })
+        else:
+            active_tasks.append({
+                "title": f"{t.kind.replace('_', ' ')} · {t.owner_repo}",
+                "status": t.status,
+                "href": t.pr_url or "/agents/tasks",
+                "when": t.created_at,
+            })
+
+    # 5. Runners that dropped off.
+    runners = session.query(Runner).filter(Runner.user_id == user_id, Runner.revoked_at.is_(None)).all()
+    runner_states = [effective_status(r) for r in runners]
+    for r, st in zip(runners, runner_states):
+        if st == "offline":
+            needs.append({
+                "kind": "runner", "tone": "caution", "label": "Runner offline",
+                "title": r.name, "meta": f"{r.arch or ''} — test runs for this architecture will queue",
+                "href": "/runners", "action": "Check",
+            })
+
+    # 6. Failed rebuilds.
+    for r in rows:
+        if "Rebuild failed" in r["attention"]:
+            needs.append({
+                "kind": "rebuild", "tone": "negative", "label": "Rebuild failed",
+                "title": r["name"], "meta": None,
+                "href": f"/snap/{r['name']}", "action": "Open", "snap": r["name"],
+            })
+
+    # In flight --------------------------------------------------------
+    running_agents = [
+        {"agent_type": a.agent_type, "snap": a.snap_name, "when": a.started_at, "id": a.id}
+        for a in session.query(AgentRun)
+        .filter(AgentRun.user_id == user_id, AgentRun.status == "running")
+        .order_by(AgentRun.started_at.desc())
+        .limit(20)
+    ]
+    active_runs = [
+        {"id": t.id, "snap": t.snap_name, "version": t.version, "arch": t.architecture or "amd64",
+         "status": t.status, "when": t.started_at}
+        for t in session.query(TestRun)
+        .filter(TestRun.user_id == user_id, TestRun.status.in_(_RUN_ACTIVE))
+        .order_by(TestRun.started_at.desc())
+        .limit(20)
+    ]
+
+    # Recently shipped -------------------------------------------------
+    promoted = {}
+    for t in (
+        session.query(TestRun)
+        .filter(TestRun.user_id == user_id, TestRun.promoted.is_(True), TestRun.promoted_at >= week_ago)
+        .order_by(TestRun.promoted_at.desc())
+        .limit(50)
+    ):
+        key = (t.snap_name, t.version)
+        entry = promoted.setdefault(key, {"snap": t.snap_name, "version": t.version, "arches": [], "when": t.promoted_at})
+        entry["arches"].append(t.architecture or "amd64")
+    shipped = list(promoted.values())[:10]
+
+    online = sum(1 for s in runner_states if s in ("idle", "busy", "locked"))
+    return {
+        "needs": needs,
+        "running_agents": running_agents,
+        "active_runs": active_runs,
+        "in_flight_bumps": in_flight_bumps[:10],
+        "active_tasks": active_tasks[:10],
+        "shipped": shipped,
+        "shipped_bumps": shipped_bumps[:10],
+        "stats": {
+            "snaps": len(rows),
+            "needs": len(needs),
+            "in_flight": len(running_agents) + len(active_runs) + len(in_flight_bumps) + len(active_tasks),
+            "runners_online": online,
+            "runners_total": len(runners),
+            "shipped": len(shipped),
+        },
+    }
