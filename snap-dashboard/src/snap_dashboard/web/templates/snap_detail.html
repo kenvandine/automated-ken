@@ -1,28 +1,31 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
 {% block title %}{{ snap.name }} — Automated Ken{% endblock %}
 
 {% block content %}
+{% set snap_kind = 'service' if snap.is_service else ('console' if snap.is_console_app else 'desktop') %}
 
 {% set notice = request.query_params.get('notice') %}
 {% set page_error = request.query_params.get('error') %}
 {% if notice %}
-<div class="p-notification--positive detail-section snap-detail-notice" style="border-radius:4px;">
-  {% if notice == 'test_queued' %}Test run queued — see it in the Test Run History below.
+<div class="p-notification--positive detail-section snap-detail-notice">
+  {% if notice == 'test_queued' %}Test run queued — see it on the <a href="#tests" class="link-inline">Tests</a> tab.
   {% elif notice == 'scan_started' %}Checking for a newer upstream version — a version-bump PR will open automatically if one is found.
   {% elif notice == 'rebuild_started' %}Rebuild triggered — see it on the <a href="/agents" class="link-inline">Agents</a> page.
-  {% elif notice == 'normalize_started' %}Normalizing this repo (workflow + AGENTS.md) — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
-  {% elif notice == 'stack_update_started' %}Reviewing the repo's stack/dependencies for updates — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
+  {% elif notice == 'normalize_started' %}Normalizing this repo (workflow + AGENTS.md) — see it on the <a href="/agents/tasks" class="link-inline">Coding tasks</a> page.
+  {% elif notice == 'stack_update_started' %}Reviewing the repo's stack/dependencies for updates — see it on the <a href="/agents/tasks" class="link-inline">Coding tasks</a> page.
   {% elif notice == 'review_started' %}Reviewing open issues/PRs — reload this page in a bit to see the summary below.
-  {% elif notice == 'address_started' %}Dispatched — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page.
-  {% elif notice == 'custom_task_started' %}Custom task dispatched — see it on the <a href="/copilot-tasks" class="link-inline">Copilot Tasks</a> page, or watch it live below.
+  {% elif notice == 'address_started' %}Dispatched — see it on the <a href="/agents/tasks" class="link-inline">Coding tasks</a> page.
+  {% elif notice == 'saved' %}Changes saved.
+  {% elif notice == 'custom_task_started' %}Custom task dispatched — see it on the <a href="/agents/tasks" class="link-inline">Coding tasks</a> page, or watch it live below.
   {% else %}{{ notice }}{% endif %}
 </div>
 {% endif %}
 {% if page_error %}
-<div class="p-notification--negative detail-section snap-detail-notice" style="border-radius:4px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+<div class="p-notification--negative detail-section snap-detail-notice">
   <span>
-  {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL below before checking for updates or triggering a rebuild.
+  {% if page_error == 'no_packaging_repo' %}Set a packaging repository URL on the <a href="#configuration" class="link-inline">Configuration</a> tab before checking for updates or triggering a rebuild.
   {% elif page_error == 'not_same_repo' %}Stack updates need the packaging repo and upstream repo to be the same GitHub repo.
   {% elif page_error == 'trigger_failed' %}Failed to queue the test run — check that a runner is enrolled and online.
   {% elif page_error == 'empty_prompt' %}Type an instruction before dispatching a custom task.
@@ -30,7 +33,7 @@
   </span>
   {% set retry_channel = request.query_params.get('retry_channel') %}
   {% if 'use Re-run' in page_error and retry_channel %}
-  <form method="post" action="/snap/{{ snap.name }}/trigger-test" style="margin:0;"
+  <form method="post" action="/snap/{{ snap.name }}/trigger-test"
         hx-post="/snap/{{ snap.name }}/trigger-test" hx-target="#page-content" hx-select="#page-content"
         hx-swap="innerHTML" hx-disabled-elt="find button">
     <input type="hidden" name="from_channel" value="{{ retry_channel }}">
@@ -44,24 +47,71 @@
 </div>
 {% endif %}
 
-<div class="page-title-row">
-  <div>
-    <a href="/" class="back-link">← Dashboard</a>
-    <h2 class="page-heading">{{ snap.name }}
-      {% if snap.manually_added %}
-      <span class="manual-badge">manually added</span>
-      {% endif %}
-    </h2>
-    {% if snap.publisher %}
-    <p class="text-muted">Publisher: {{ snap.publisher }}</p>
+{% set same_repo_hdr = snap.same_repo %}
+{% call ui.page_header(snap.name, back="/snaps", back_label="Snaps") %}
+    {% if snap.packaging_repo %}
+    <form method="post" action="/snap/{{ snap.name }}/check-updates"
+          hx-post="/snap/{{ snap.name }}/check-updates" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button--positive" title="Scan the packaging repo for a newer upstream version and open a version-bump PR if found">Check for updates</button>
+    </form>
+    <form method="post" action="/snap/{{ snap.name }}/rebuild"
+          hx-post="/snap/{{ snap.name }}/rebuild" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button">
+      <button type="submit" class="p-button" title="Dispatch the packaging repo's build/publish workflow now">Rebuild</button>
+    </form>
+    {% else %}
+    <a href="#configuration" class="p-button--positive">Set packaging repo</a>
     {% endif %}
-  </div>
-  <div class="snap-meta-badges">
-    {% if snap.same_repo %}
+    <details class="more-menu">
+      <summary class="p-button" aria-label="More actions">More</summary>
+      <div class="more-menu__panel" role="menu">
+        {% if snap.packaging_repo %}
+        <form method="post" action="/snap/{{ snap.name }}/normalize"
+              hx-post="/snap/{{ snap.name }}/normalize" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button">
+          <button type="submit" class="more-menu__item" role="menuitem">Normalize repo
+            <small>Bring the build workflow and AGENTS.md in line with the fleet</small></button>
+        </form>
+        {% if same_repo_hdr %}
+        <form method="post" action="/snap/{{ snap.name }}/stack-update"
+              hx-post="/snap/{{ snap.name }}/stack-update" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button">
+          <button type="submit" class="more-menu__item" role="menuitem">Check for stack updates
+            <small>Look for outdated dependencies or a stale framework version</small></button>
+        </form>
+        {% endif %}
+        {% endif %}
+        {% if snap.packaging_repo or snap.upstream_repo %}
+        <form method="post" action="/snap/{{ snap.name }}/review-issues"
+              hx-post="/snap/{{ snap.name }}/review-issues" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button">
+          <button type="submit" class="more-menu__item" role="menuitem">Review issues &amp; PRs
+            <small>Summarize what's open and flag what needs attention</small></button>
+        </form>
+        {% endif %}
+        <form method="post" action="/snap/{{ snap.name }}/refresh"
+              hx-post="/snap/{{ snap.name }}/refresh" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button">
+          <button type="submit" class="more-menu__item" role="menuitem">Refresh data
+            <small>Re-collect channels, issues and PRs for this snap</small></button>
+        </form>
+        <hr class="more-menu__sep">
+        <a href="/agents/runs?snap_name={{ snap.name | urlencode }}" class="more-menu__item" role="menuitem">Agent run history</a>
+        <a href="#configuration" class="more-menu__item" role="menuitem">Configure…</a>
+      </div>
+    </details>
+{% endcall %}
+
+<div class="snap-meta cluster">
+  {% if snap.publisher %}<span class="text-muted">Publisher <strong>{{ snap.publisher }}</strong></span>{% endif %}
+  {{ ui.chip({'desktop': 'Desktop app', 'console': 'Console app', 'service': 'Service'}[snap_kind], 'neutral') }}
+  {% if snap.manually_added %}{{ ui.chip('manually added', 'neutral') }}{% endif %}
+  {% if same_repo_hdr %}
     <a href="{{ snap.packaging_repo }}" target="_blank" rel="noopener" class="repo-link" title="Packaging and upstream repository are the same">
       Repository
     </a>
-    {% else %}
+  {% else %}
     {% if snap.packaging_repo %}
     <a href="{{ snap.packaging_repo }}" target="_blank" rel="noopener" class="repo-link">
       Packaging repo
@@ -72,50 +122,22 @@
       Upstream repo
     </a>
     {% endif %}
-    {% endif %}
-    {% if snap.packaging_repo %}
-    <form method="post" action="/snap/{{ snap.name }}/check-updates" style="display:inline"
-          hx-post="/snap/{{ snap.name }}/check-updates" hx-target="#page-content" hx-select="#page-content"
-          hx-swap="innerHTML" hx-disabled-elt="find button">
-      <button type="submit" class="p-button is-small" title="Scan the packaging repo for a newer upstream version and open a version-bump PR if found">Check for updates</button>
-    </form>
-    <form method="post" action="/snap/{{ snap.name }}/rebuild" style="display:inline"
-          hx-post="/snap/{{ snap.name }}/rebuild" hx-target="#page-content" hx-select="#page-content"
-          hx-swap="innerHTML" hx-disabled-elt="find button">
-      <button type="submit" class="p-button is-small" title="Immediately dispatch a rebuild — the dashboard inspects the packaging repo's GitHub Actions workflows and figures out which one builds/publishes the snap">Rebuild Now</button>
-    </form>
-    <form method="post" action="/snap/{{ snap.name }}/normalize" style="display:inline"
-          hx-post="/snap/{{ snap.name }}/normalize" hx-target="#page-content" hx-select="#page-content"
-          hx-swap="innerHTML" hx-disabled-elt="find button">
-      <button type="submit" class="p-button is-small" title="Ask Copilot to bring this repo's build/publish workflow and AGENTS.md in line with the rest of the fleet">Normalize Repo</button>
-    </form>
-    {% if snap.same_repo %}
-    <form method="post" action="/snap/{{ snap.name }}/stack-update" style="display:inline"
-          hx-post="/snap/{{ snap.name }}/stack-update" hx-target="#page-content" hx-select="#page-content"
-          hx-swap="innerHTML" hx-disabled-elt="find button">
-      <button type="submit" class="p-button is-small" title="Ask Copilot to check this repo's stack (Electron/Node, Rust, Python, Go, ...) for outdated dependencies or a stale framework version">Check for Stack Updates</button>
-    </form>
-    {% endif %}
-    {% endif %}
-    {% if snap.packaging_repo or snap.upstream_repo %}
-    <form method="post" action="/snap/{{ snap.name }}/review-issues" style="display:inline"
-          hx-post="/snap/{{ snap.name }}/review-issues" hx-target="#page-content" hx-select="#page-content"
-          hx-swap="innerHTML" hx-disabled-elt="find button">
-      <button type="submit" class="p-button is-small" title="Summarize open issues/PRs and flag what needs attention">Review Issues &amp; PRs</button>
-    </form>
-    {% endif %}
-    <form method="post" action="/snap/{{ snap.name }}/refresh" style="display:inline"
-          hx-post="/snap/{{ snap.name }}/refresh" hx-target="#page-content" hx-select="#page-content"
-          hx-swap="innerHTML" hx-disabled-elt="find button">
-      <button type="submit" class="p-button is-small">Refresh</button>
-    </form>
-  </div>
+  {% endif %}
 </div>
 
+<div data-tabs class="snap-tabs">
+  <div class="tab-bar" role="tablist" aria-label="Snap sections">
+    <button type="button" role="tab" class="tab-bar__tab" aria-controls="overview" aria-selected="true">Overview</button>
+    <button type="button" role="tab" class="tab-bar__tab" aria-controls="issues">Issues &amp; PRs{% if issues %} <span class="tab-bar__count">{{ issues|length }}</span>{% endif %}</button>
+    <button type="button" role="tab" class="tab-bar__tab" aria-controls="tests">Tests{% if test_runs %} <span class="tab-bar__count">{{ test_runs|length }}</span>{% endif %}</button>
+    <button type="button" role="tab" class="tab-bar__tab" aria-controls="configuration">Configuration</button>
+  </div>
+
+  <section id="overview" class="tab-panel" role="tabpanel" aria-label="Overview">
 <div class="card detail-section snap-activity-panel" id="snap-activity-panel" data-snap="{{ snap.name }}">
   <div class="section-header-row">
-    <h3 class="section-label">🤖 Agent Activity <span id="snap-activity-dot" class="text-muted small">●</span></h3>
-    <a href="/agents/runs?snap_name={{ snap.name | urlencode }}" class="p-button is-small">📜 View Full History</a>
+    <h2 class="section-label">Agent activity <span id="snap-activity-dot" class="text-muted small">●</span></h2>
+    <a href="/agents/runs?snap_name={{ snap.name | urlencode }}" class="p-button is-small">Full history</a>
   </div>
   <div id="snap-activity-active">
     <div class="text-muted small" style="padding:6px 0;">Checking for active agents…</div>
@@ -124,7 +146,7 @@
 
   {% if snap.packaging_repo %}
   <details class="snap-custom-task" style="margin-top:12px;">
-    <summary class="p-button is-small" style="display:inline-block;cursor:pointer;">✏️ Ask a coding agent to do something</summary>
+    <summary class="p-button is-small" style="display:inline-block;cursor:pointer;">Ask a coding agent to do something</summary>
     <form method="post" action="/snap/{{ snap.name }}/custom-task" style="margin-top:10px;"
           hx-post="/snap/{{ snap.name }}/custom-task" hx-target="#page-content" hx-select="#page-content"
           hx-swap="innerHTML" hx-disabled-elt="find button">
@@ -136,45 +158,8 @@
   {% endif %}
 </div>
 
-{% if rebuild_triggers %}
 <div class="card detail-section">
-  <h3 class="section-label">Recent Rebuild Attempts</h3>
-  <div class="table-wrapper">
-    <table class="snap-table">
-      <thead>
-        <tr>
-          <th>When</th>
-          <th>Status</th>
-          <th>Workflow</th>
-          <th>Detail</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for t in rebuild_triggers %}
-        <tr>
-          <td class="muted small">{{ t.triggered_at.strftime('%Y-%m-%d %H:%M') if t.triggered_at else '—' }}</td>
-          <td>
-            {% if t.status == 'triggered' %}
-            <span class="p-status-label p-status-label--positive">Triggered</span>
-            {% elif t.status == 'skipped' %}
-            <span class="p-status-label p-status-label--caution">Skipped</span>
-            {% else %}
-            <span class="p-status-label p-status-label--negative">Failed</span>
-            {% endif %}
-          </td>
-          <td class="muted small">{{ t.workflow_file or '—' }}</td>
-          <td class="muted small">{{ t.error_msg or '—' }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-</div>
-{% endif %}
-
-
-<div class="card detail-section">
-  <h3 class="section-label">Channel Map</h3>
+  <h2 class="section-label">Channel map</h2>
   {% if arch_map %}
   <div class="table-wrapper">
     <table class="snap-table">
@@ -240,10 +225,50 @@
   {% endif %}
 </div>
 
+{% if rebuild_triggers %}
+<div class="card detail-section">
+  <h2 class="section-label">Recent rebuild attempts</h2>
+  <div class="table-wrapper">
+    <table class="snap-table">
+      <thead>
+        <tr>
+          <th>When</th>
+          <th>Status</th>
+          <th>Workflow</th>
+          <th>Detail</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in rebuild_triggers %}
+        <tr>
+          <td class="muted small">{{ t.triggered_at.strftime('%Y-%m-%d %H:%M') if t.triggered_at else '—' }}</td>
+          <td>
+            {% if t.status == 'triggered' %}
+            <span class="p-status-label p-status-label--positive">Triggered</span>
+            {% elif t.status == 'skipped' %}
+            <span class="p-status-label p-status-label--caution">Skipped</span>
+            {% else %}
+            <span class="p-status-label p-status-label--negative">Failed</span>
+            {% endif %}
+          </td>
+          <td class="muted small">{{ t.workflow_file or '—' }}</td>
+          <td class="muted small">{{ t.error_msg or '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+
+  </section>
+
+  <section id="issues" class="tab-panel" role="tabpanel" aria-label="Issues and PRs" hidden>
 <!-- Issues & PRs Review summary -->
 {% if review_report %}
 <div class="card detail-section" id="review-section">
-  <h3 class="section-label">Issues &amp; PRs Review</h3>
+  <h2 class="section-label">AI review of open issues &amp; PRs</h2>
   {% if review_report.updated_at %}
   <p class="text-muted small">Last reviewed: {{ review_report.updated_at.strftime('%Y-%m-%d %H:%M') }}</p>
   {% endif %}
@@ -299,7 +324,7 @@
 
 <!-- Issues & PRs -->
 <div class="card detail-section">
-  <h3 class="section-label">Issues &amp; Pull Requests</h3>
+  <h2 class="section-label">Issues &amp; pull requests</h2>
 
   {% if issues %}
   <div class="filter-tabs" id="filter-tabs">
@@ -369,16 +394,19 @@
   <div class="empty-state small-empty">
     <p>No open issues or PRs found.
       {% if not snap.packaging_repo and not snap.upstream_repo %}
-      Add repository URLs below to enable issue tracking.
+      Add repository URLs on the <a href="#configuration" class="link-inline">Configuration</a> tab to enable issue tracking.
       {% endif %}
     </p>
   </div>
   {% endif %}
 </div>
 
+  </section>
+
+  <section id="tests" class="tab-panel" role="tabpanel" aria-label="Tests" hidden>
 <!-- Test Run History -->
 <div class="card detail-section">
-  <h3 class="section-label">Test Run History</h3>
+  <h2 class="section-label">Test run history</h2>
 
   {% if test_runs %}
   <div class="table-wrapper">
@@ -443,7 +471,7 @@
       </tbody>
     </table>
   </div>
-  <p class="text-muted small" style="margin-top:8px;">Showing the {{ test_runs|length }} most recent runs. See the <a href="/testing" class="link-inline">Testing</a> page for the full queue.</p>
+  <p class="text-muted small" style="margin-top:8px;">Showing the {{ test_runs|length }} most recent runs. See <a href="/releases" class="link-inline">Releases</a> for the full queue.</p>
   {% else %}
   <div class="empty-state small-empty">
     <p>No test runs recorded yet for this snap.</p>
@@ -451,114 +479,78 @@
   {% endif %}
 </div>
 
-<!-- Edit form (collapsible) -->
-<div class="detail-section">
-  <details class="collapsible">
-    <summary class="collapsible-trigger">
-      <span>Edit Snap Details</span>
-      <span class="chevron">▾</span>
-    </summary>
-    <div class="collapsible-body">
-      <form method="post" action="/snap/{{ snap.name }}/edit" class="edit-form">
-        <div class="form-row">
-          <label class="form-label" for="packaging_repo">Packaging Repository URL</label>
-          <input
-            type="url"
-            id="packaging_repo"
-            name="packaging_repo"
-            class="form-input"
-            value="{{ snap.packaging_repo or snap.packaging_repo_suggested or '' }}"
-            placeholder="https://github.com/owner/snap-repo"
-          >
-          {% if not snap.packaging_repo and snap.packaging_repo_suggested %}
-          <p class="form-hint">Auto-detected from Snap Store metadata — review and click Save to confirm.</p>
-          {% endif %}
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="upstream_repo">Upstream Repository URL</label>
-          <input
-            type="url"
-            id="upstream_repo"
-            name="upstream_repo"
-            class="form-input"
-            value="{{ snap.upstream_repo or snap.upstream_repo_suggested or '' }}"
-            placeholder="https://github.com/owner/upstream"
-          >
-          {% if not snap.upstream_repo and snap.upstream_repo_suggested %}
-          <p class="form-hint">Auto-detected from Snap Store metadata — review and click Save to confirm.</p>
-          {% endif %}
-        </div>
-        <div class="form-row">
-          <label class="form-label" for="notes">Notes</label>
-          <textarea
-            id="notes"
-            name="notes"
-            class="form-input form-textarea"
-            rows="3"
-            placeholder="Any notes about this snap..."
-          >{{ snap.notes or '' }}</textarea>
-        </div>
-        <div class="form-row">
-          <label class="form-label checkbox-label">
-            <input
-              type="checkbox"
-              id="is_console_app"
-              name="is_console_app"
-              value="true"
-              {% if snap.is_console_app %}checked{% endif %}
-              style="margin-right: 6px;"
-            >
-            Console app
-          </label>
-          <span class="form-hint">
-            Every snap gets the same generic desktop smoke test by default (launch,
-            screenshot, done) — check this only if this snap has a text/terminal UI
-            with nothing to screenshot when launched directly. The runner will launch
-            it inside a terminal window instead and screenshot that.
-          </span>
-        </div>
-        <div class="form-row">
-          <label class="form-label checkbox-label">
-            <input
-              type="checkbox"
-              id="is_service"
-              name="is_service"
-              value="true"
-              {% if snap.is_service %}checked{% endif %}
-              style="margin-right: 6px;"
-            >
-            Service (no UI)
-          </label>
-          <span class="form-hint">
-            For daemons with no user-facing UI at all — nothing to launch on a
-            desktop or in a terminal, and nothing to screenshot. Check this and the
-            runner skips the smoke test entirely: it still installs the snap to
-            confirm the package itself is good, then reports the run as passed.
-          </span>
-        </div>
-        <div class="form-actions">
-          <button type="submit" class="p-button--positive">Save Changes</button>
-        </div>
-      </form>
-    </div>
+  </section>
 
-  </details>
+  <section id="configuration" class="tab-panel" role="tabpanel" aria-label="Configuration" hidden>
+<section class="card detail-section" aria-labelledby="config-title">
+  <h2 class="section-label" id="config-title">Snap details</h2>
+  <form method="post" action="/snap/{{ snap.name }}/edit" class="edit-form">
+    <div class="form-row">
+      <label class="form-label" for="packaging_repo">Packaging repository URL</label>
+      <input type="url" id="packaging_repo" name="packaging_repo" class="form-input"
+             value="{{ snap.packaging_repo or snap.packaging_repo_suggested or '' }}"
+             placeholder="https://github.com/owner/snap-repo">
+      {% if not snap.packaging_repo and snap.packaging_repo_suggested %}
+      <p class="form-hint">Auto-detected from Snap Store metadata — review and click Save to confirm.</p>
+      {% else %}
+      <p class="form-hint">The repo holding <code>snapcraft.yaml</code> and the build workflow. Version bumps and rebuilds happen here.</p>
+      {% endif %}
+    </div>
+    <div class="form-row">
+      <label class="form-label" for="upstream_repo">Upstream repository URL</label>
+      <input type="url" id="upstream_repo" name="upstream_repo" class="form-input"
+             value="{{ snap.upstream_repo or snap.upstream_repo_suggested or '' }}"
+             placeholder="https://github.com/owner/upstream">
+      {% if not snap.upstream_repo and snap.upstream_repo_suggested %}
+      <p class="form-hint">Auto-detected from Snap Store metadata — review and click Save to confirm.</p>
+      {% else %}
+      <p class="form-hint">Where new releases are watched for. Leave it the same as the packaging repo if the app is packaged in its own repo.</p>
+      {% endif %}
+    </div>
+    <fieldset class="form-row">
+      <legend class="form-label">App type</legend>
+      <div class="segmented" role="radiogroup">
+        <input type="radio" id="snap_type_desktop" name="snap_type" value="desktop" {% if snap_kind == 'desktop' %}checked{% endif %}>
+        <label for="snap_type_desktop">Desktop</label>
+        <input type="radio" id="snap_type_console" name="snap_type" value="console" {% if snap_kind == 'console' %}checked{% endif %}>
+        <label for="snap_type_console">Console</label>
+        <input type="radio" id="snap_type_service" name="snap_type" value="service" {% if snap_kind == 'service' %}checked{% endif %}>
+        <label for="snap_type_service">Service</label>
+      </div>
+      <p class="form-hint">
+        Controls the smoke test. <strong>Desktop</strong>: launch the app and screenshot it.
+        <strong>Console</strong>: launch it inside a terminal window and screenshot that.
+        <strong>Service</strong>: no UI — install the snap to confirm the package is good, then pass.
+      </p>
+    </fieldset>
+    <div class="form-row">
+      <label class="form-label" for="notes">Notes</label>
+      <textarea id="notes" name="notes" class="form-input form-textarea" rows="3"
+                placeholder="Any notes about this snap...">{{ snap.notes or '' }}</textarea>
+    </div>
+    <div class="form-actions">
+      <button type="submit" class="p-button--positive">Save changes</button>
+    </div>
+  </form>
+</section>
+
+<section class="card card--danger detail-section" aria-labelledby="danger-title">
+  <h2 class="section-label" id="danger-title">Danger zone</h2>
+  <div class="danger-row">
+    <div>
+      <strong>Stop tracking this snap</strong>
+      <p class="text-muted small">Removes it from Automated Ken along with its test history and screenshots. Nothing changes in the Store or on GitHub. Snaps your Store account publishes come back on the next collection.</p>
+    </div>
+    <form method="post" action="/snap/{{ snap.name }}/remove" data-async-action
+          data-confirm="Stop tracking {{ snap.name }}? Its test history and screenshots are deleted too.">
+      <button type="submit" class="p-button--negative">Stop tracking</button>
+    </form>
+  </div>
+</section>
+  </section>
 </div>
 
 <script>
-// Console app / Service are mutually exclusive — a snap can't be both.
-(function () {
-  const consoleBox = document.getElementById('is_console_app');
-  const serviceBox = document.getElementById('is_service');
-  if (!consoleBox || !serviceBox) return;
-  consoleBox.addEventListener('change', function () {
-    if (this.checked) serviceBox.checked = false;
-  });
-  serviceBox.addEventListener('change', function () {
-    if (this.checked) consoleBox.checked = false;
-  });
-})();
-
 // Filter tabs for issues
 document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
   const tab = e.target.closest('.filter-tab');
@@ -598,13 +590,13 @@ document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
     if (!el) return;
     const items = [];
     (data.active || []).forEach(a => {
-      items.push(`<div class="snap-activity-item snap-activity-running"><span class="agent-type-badge agent-${a.agent_type}">${escapeHtml(a.agent_type.replace(/_/g, ' '))}</span> <span>${escapeHtml(a.task)}</span></div>`);
+      items.push(`<div class="snap-activity-item snap-activity-running">${AK.agentBadge(a.agent_type)} <span>${escapeHtml(a.task)}</span></div>`);
     });
     (data.queued_tasks || []).forEach(t => {
-      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="agent-type-badge">${escapeHtml(t.kind.replace(/_/g, ' '))}</span> <span>Coding task ${escapeHtml(t.status)} — queued ${escapeHtml(t.created_at)}</span></div>`);
+      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="chip chip--info">${escapeHtml(t.kind.replace(/_/g, ' '))}</span> <span>Coding task ${escapeHtml(t.status)} — queued ${escapeHtml(t.created_at)}</span></div>`);
     });
     (data.pending_tests || []).forEach(t => {
-      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="agent-type-badge">test run</span> <span>${escapeHtml(t.architecture)} — ${escapeHtml(t.status)} (started ${escapeHtml(t.started_at)})</span></div>`);
+      items.push(`<div class="snap-activity-item snap-activity-queued"><span class="chip chip--neutral">test run</span> <span>${escapeHtml(t.architecture)} — ${escapeHtml(t.status)} (started ${escapeHtml(t.started_at)})</span></div>`);
     });
     el.innerHTML = items.length
       ? items.join('')
@@ -621,15 +613,15 @@ document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
     const el = document.getElementById('snap-activity-recent');
     if (!el) return;
     const rows = (data.recent || []).map(r => {
-      const statusClass = r.status === 'done' ? 'p-status-label--positive'
-        : (r.status === 'error' ? 'p-status-label--negative' : 'p-status-label--caution');
+      const statusClass = r.status === 'done' ? 'chip--positive'
+        : (r.status === 'error' ? 'chip--negative' : 'chip--caution');
       const log = r.has_log
         ? `<a href="/agents/runs/${r.id}/log" target="_blank" rel="noopener" class="p-button is-small">Log</a>`
         : '<span class="muted small">—</span>';
       const dur = (r.duration_s !== null && r.duration_s !== undefined) ? `${r.duration_s}s` : '…';
       return `<tr>
-        <td><span class="agent-type-badge agent-${r.agent_type}">${escapeHtml(r.agent_type.replace(/_/g, ' '))}</span></td>
-        <td><span class="p-status-label ${statusClass}">${escapeHtml(r.status)}</span></td>
+        <td>${AK.agentBadge(r.agent_type)}</td>
+        <td><span class="chip ${statusClass}">${escapeHtml(r.status)}</span></td>
         <td class="muted small" style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.summary) || '—'}</td>
         <td class="muted small">${escapeHtml(r.started_at)}</td>
         <td class="muted small">${dur}</td>

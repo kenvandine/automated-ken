@@ -1,32 +1,27 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
-{% block title %}Agent Run Logs — Automated Ken{% endblock %}
+{% block title %}Run history — Agents — Automated Ken{% endblock %}
 
 {% block content %}
 
-<a href="/agents" class="back-link">&larr; Back to Agent Fleet</a>
+{% call ui.page_header("Agents", "Every background agent execution — " ~ total ~ " run" ~ ("s" if total != 1 else "") ~ " total. Open a log to see exactly what it did.") %}{% endcall %}
+{{ ui.agents_tabs("/agents/runs") }}
 
-<div class="page-title-row">
-  <div>
-    <h2 class="page-heading">Agent Run Logs</h2>
-    <p class="text-muted">Every background agent execution — {{ total }} run{{ "s" if total != 1 else "" }} total. Open any run to see exactly what it did.</p>
-  </div>
-</div>
-
-<div class="card" style="margin-bottom:16px;">
-  <form method="get" action="/agents/runs" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;">
+<div class="card">
+  <form method="get" action="/agents/runs" class="filter-bar">
     <div>
-      <label class="text-muted small" style="display:block;margin-bottom:4px;">Agent</label>
-      <select name="agent_type" class="p-form-control">
+      <label class="form-label" for="f-agent">Agent</label>
+      <select id="f-agent" name="agent_type" class="form-input form-select">
         <option value="">All agents</option>
         {% for t in agent_types %}
-        <option value="{{ t }}" {% if t == selected_agent_type %}selected{% endif %}>{{ t | replace('_', ' ') }}</option>
+        <option value="{{ t }}" {% if t == selected_agent_type %}selected{% endif %}>{{ agent_info(t).name }}</option>
         {% endfor %}
       </select>
     </div>
     <div>
-      <label class="text-muted small" style="display:block;margin-bottom:4px;">Status</label>
-      <select name="status" class="p-form-control">
+      <label class="form-label" for="f-status">Status</label>
+      <select id="f-status" name="status" class="form-input form-select">
         <option value="">All statuses</option>
         {% for s in ("running", "done", "error") %}
         <option value="{{ s }}" {% if s == selected_status %}selected{% endif %}>{{ s | capitalize }}</option>
@@ -34,8 +29,8 @@
       </select>
     </div>
     <div>
-      <label class="text-muted small" style="display:block;margin-bottom:4px;">Snap</label>
-      <select name="snap_name" class="p-form-control">
+      <label class="form-label" for="f-snap">Snap</label>
+      <select id="f-snap" name="snap_name" class="form-input form-select">
         <option value="">All snaps</option>
         {% for n in snap_names %}
         <option value="{{ n }}" {% if n == selected_snap_name %}selected{% endif %}>{{ n }}</option>
@@ -51,9 +46,7 @@
 
 <div class="card">
   {% if not runs %}
-  <div class="empty-state">
-    <p>No agent runs match this filter yet.</p>
-  </div>
+  {{ ui.empty("No agent runs match this filter yet.") }}
   {% else %}
   <div class="table-wrapper">
     <table class="snap-table">
@@ -71,23 +64,15 @@
       <tbody>
         {% for r in runs %}
         <tr>
-          <td><span class="agent-type-badge agent-{{ r.agent_type }}">{{ r.agent_type | replace('_', ' ') }}</span></td>
+          <td>{{ ui.agent_badge(r.agent_type) }}</td>
           <td class="muted">{% if r.snap_name %}<a href="/snap/{{ r.snap_name }}" class="link-inline">{{ r.snap_name }}</a>{% else %}—{% endif %}</td>
-          <td>
-            {% if r.status == 'done' %}
-            <span class="p-status-label p-status-label--positive">done</span>
-            {% elif r.status == 'error' %}
-            <span class="p-status-label p-status-label--negative">error</span>
-            {% else %}
-            <span class="p-status-label p-status-label--caution">{{ r.status }}</span>
-            {% endif %}
-          </td>
-          <td class="muted small" style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.summary or '—' }}</td>
+          <td>{{ ui.status(r.status) }}</td>
+          <td class="muted small cell-truncate" title="{{ r.summary or '' }}">{{ r.summary or '—' }}</td>
           <td class="muted small">{{ r.started_at }}</td>
           <td class="muted small">{{ (r.duration_s ~ 's') if r.duration_s is not none else '…' }}</td>
           <td>
             {% if r.has_log %}
-            <a href="/agents/runs/{{ r.id }}/log" target="_blank" rel="noopener" class="p-button is-small">View Log</a>
+            <a href="/agents/runs/{{ r.id }}/log" target="_blank" rel="noopener" class="p-button is-small">Log</a>
             {% else %}
             <span class="muted small">—</span>
             {% endif %}
@@ -99,7 +84,7 @@
   </div>
 
   {% if total_pages > 1 %}
-  <div style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:16px;">
+  <nav class="pager" aria-label="Pagination">
     {% set qs = "&agent_type=" ~ selected_agent_type ~ "&status=" ~ selected_status ~ "&snap_name=" ~ selected_snap_name %}
     {% if page > 1 %}
     <a class="p-button is-small" href="/agents/runs?page={{ page - 1 }}{{ qs }}">&larr; Prev</a>
@@ -108,7 +93,7 @@
     {% if page < total_pages %}
     <a class="p-button is-small" href="/agents/runs?page={{ page + 1 }}{{ qs }}">Next &rarr;</a>
     {% endif %}
-  </div>
+  </nav>
   {% endif %}
   {% endif %}
 </div>

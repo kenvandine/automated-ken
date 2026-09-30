@@ -310,13 +310,18 @@ async def agent_run_log(run_id: int, request: Request) -> PlainTextResponse:
 
 
 @router.post("/agents/scan-now")
-async def scan_now(request: Request) -> RedirectResponse:
+async def scan_now(request: Request):
+    is_fetch = bool(request.headers.get("X-Requested-With"))
     user = get_current_user(request)
     if user is None:
+        if is_fetch:
+            return JSONResponse({"ok": False, "error": "Not signed in."}, status_code=401)
         return RedirectResponse(url="/auth/login", status_code=302)
     from snap_dashboard.agents.release_scanner import ReleaseScannerAgent
     from snap_dashboard.agents.runner import get_runner
     get_runner().submit(ReleaseScannerAgent(user_id=user["id"]))
+    if is_fetch:
+        return JSONResponse({"ok": True, "message": "Checking all snaps for upstream updates…"})
     return RedirectResponse(url="/agents", status_code=303)
 
 

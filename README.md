@@ -143,20 +143,24 @@ Everything else is per user, on the **Settings** page:
 
 | Path | Description |
 |------|-------------|
-| `/` | Dashboard — channel comparison and attention-needed cards |
+| `/` | Overview — what needs you, fleet summary, and recent activity |
+| `/snaps` | Snaps you maintain — channel comparison, add/remove, fleet actions |
 | `/snap/<name>` | Snap detail — channel map, issues/PRs, repo URLs |
-| `/snaps/add` | Add a snap manually |
-| `/testing` | Needs-testing list (one row per version, all architectures), pending release sets, run history |
+| `/releases` | To release — pending release sets to promote, plus candidate/edge versions that need testing |
+| `/releases/bumps` | Version-bump PRs grouped by status, needs-you first |
+| `/releases/runs` | Test-run history |
 | `/testing/runs/<id>` | One run — screenshots, AI review, and its release set |
-| `/runners` | Enroll/revoke runners; job queue with priorities and cancel |
-| `/version-bumps` | Version-bump PRs grouped by status |
 | `/version-bumps/<id>` | One bump — pre-merge results and screenshots per architecture, merge/reject, and after merge its candidate release set with promote |
 | `/agents` | Live agent status and activity feed |
-| `/copilot-tasks` | Delegated coding tasks and their PRs |
-| `/stats` | Model usage stats |
+| `/agents/runs` | Agent run history with filters |
+| `/agents/tasks` | Delegated coding tasks and their PRs |
+| `/agents/stats` | Model usage stats |
+| `/runners` | Enroll/revoke runners; job queue with priorities and cancel |
 | `/settings` | Per-user configuration |
 | `/admin` | Allowlist and admin users (admins only) |
 | `/docs` | Built-in help |
+
+The old `/testing`, `/version-bumps`, `/copilot-tasks` and `/stats` URLs redirect to their new homes.
 
 ## Data and network access
 

@@ -6,11 +6,7 @@
    has_baseline (bool). #}
 
 {% if review_decision or review_reasoning %}
-<div class="card" style="border-left: 3px solid
-  {%- if review_decision == 'approve' %} #4ade80
-  {%- elif review_decision == 'reject' %} #f87171
-  {%- elif review_decision == 'needs_review' %} #facc15
-  {%- else %} var(--border) {%- endif -%};">
+<div class="card{% if review_decision %} card--tone-{{ status_info(review_decision).tone }}{% endif %}">
   <h3 class="section-label">AI Screenshot Review</h3>
   <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px; flex-wrap:wrap;">
     {% if review_decision == 'approve' %}

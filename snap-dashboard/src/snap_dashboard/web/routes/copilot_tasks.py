@@ -39,6 +39,7 @@ def _serialise(task: CopilotTask) -> dict:
         "pr_url": task.pr_url,
         "issue_number": task.issue_number,
         "error_msg": task.error_msg,
+        "ci_status": task.ci_status,
         "created_at": task.created_at,
         "updated_at": task.updated_at,
         "is_terminal": (task.status or "") in _TERMINAL_STATUSES,
@@ -46,7 +47,12 @@ def _serialise(task: CopilotTask) -> dict:
     }
 
 
-@router.get("/copilot-tasks", response_class=HTMLResponse)
+@router.get("/copilot-tasks")
+async def copilot_tasks_legacy() -> RedirectResponse:
+    return RedirectResponse(url="/agents/tasks", status_code=301)
+
+
+@router.get("/agents/tasks", response_class=HTMLResponse)
 async def copilot_tasks_page(request: Request) -> HTMLResponse:
     user = get_current_user(request)
     if user is None:
@@ -106,7 +112,7 @@ async def refresh_copilot_task(task_id: int, request: Request) -> RedirectRespon
                             if remote.get("error"):
                                 task.error_msg = str(remote.get("error"))[:2000]
 
-    return RedirectResponse(url="/copilot-tasks", status_code=303)
+    return RedirectResponse(url="/agents/tasks", status_code=303)
 
 
 @router.post("/copilot-tasks/refresh-all")
@@ -120,7 +126,7 @@ async def refresh_all_copilot_tasks(request: Request) -> RedirectResponse:
     uc = get_user_config(user_id)
     token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "") if uc else ""
     if not token:
-        return RedirectResponse(url="/copilot-tasks", status_code=303)
+        return RedirectResponse(url="/agents/tasks", status_code=303)
 
     with get_session() as session:
         pending = [
@@ -149,7 +155,7 @@ async def refresh_all_copilot_tasks(request: Request) -> RedirectResponse:
                 if remote.get("error"):
                     task.error_msg = str(remote.get("error"))[:2000]
 
-    return RedirectResponse(url="/copilot-tasks", status_code=303)
+    return RedirectResponse(url="/agents/tasks", status_code=303)
 
 
 @router.post("/copilot-tasks/{task_id}/retry")
@@ -183,7 +189,7 @@ async def retry_copilot_task(task_id: int, request: Request) -> RedirectResponse
     with get_session() as session:
         original = session.query(CopilotTask).filter_by(id=task_id, user_id=user_id).first()
         if not original or not original.prompt or not original.owner_repo:
-            return RedirectResponse(url="/copilot-tasks", status_code=303)
+            return RedirectResponse(url="/agents/tasks", status_code=303)
         owner_repo = original.owner_repo
         prompt = original.prompt
         base_ref = original.base_ref or "main"
@@ -193,7 +199,7 @@ async def retry_copilot_task(task_id: int, request: Request) -> RedirectResponse
 
     owner_repo_parts = parse_owner_repo(owner_repo)
     if not owner_repo_parts:
-        return RedirectResponse(url="/copilot-tasks", status_code=303)
+        return RedirectResponse(url="/agents/tasks", status_code=303)
     owner, repo = owner_repo_parts
 
     with get_session() as session:
@@ -220,4 +226,4 @@ async def retry_copilot_task(task_id: int, request: Request) -> RedirectResponse
         )
     )
 
-    return RedirectResponse(url="/copilot-tasks", status_code=303)
+    return RedirectResponse(url="/agents/tasks", status_code=303)

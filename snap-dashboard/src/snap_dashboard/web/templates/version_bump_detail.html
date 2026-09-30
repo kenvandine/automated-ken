@@ -1,12 +1,13 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
-{% block title %}{{ bump.snap_name }} {{ bump.new_version }} — Version Bump{% endblock %}
+{% block title %}{{ bump.snap_name }} {{ bump.new_version }} — Version bump — Automated Ken{% endblock %}
 
 {% block content %}
 
 <div class="page-title-row">
   <div>
-    <a href="/version-bumps" class="link-inline small" style="margin-bottom:6px;display:block;">← All Version Bumps</a>
+    <a href="/releases/bumps" class="back-link">&larr; Version bumps</a>
     <h2 class="page-heading">{{ bump.snap_name }} {{ bump.old_version }} → {{ bump.new_version }}</h2>
     <p class="text-muted">
       {% if bump.part_name %}Part: <code>{{ bump.part_name }}</code> &middot; {% endif %}
@@ -48,12 +49,7 @@
   <div style="display:flex;gap:24px;flex-wrap:wrap;align-items:center;">
     <div>
       <span class="text-muted small">Status</span><br>
-      <span class="p-status-label
-        {% if bump.status in ('agent_approved', 'stable_promoted', 'merged') %}p-status-label--positive
-        {% elif bump.status in ('agent_rejected', 'yarf_failed', 'ci_failed') %}badge-fail
-        {% elif bump.status in ('needs_review', 'stable_promoted_partial', 'awaiting_release', 'candidate_testing') %}p-status-label--caution
-        {% else %}badge-muted{% endif %}
-      ">{{ bump.status | replace('_', ' ') }}{% if bump.status == 'stable_promoted_partial' %} ⚠{% endif %}</span>
+      {{ ui.status(bump.status) }}
     </div>
     {% if bump.agent_decision %}
     <div>

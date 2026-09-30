@@ -1,37 +1,30 @@
 {% extends "base.html" %}
+{% import "_ui.html" as ui %}
 
-{% block title %}Agent Fleet — Automated Ken{% endblock %}
+{% block title %}Agents — Automated Ken{% endblock %}
 
 {% block content %}
 
-<!-- ── Hero header ──────────────────────────────────────────── -->
-<div class="fleet-hero">
-  <div class="fleet-hero-left">
-    <h2 class="fleet-title">Agent Fleet</h2>
-    <p class="fleet-subtitle">Automated snap maintenance powered by local AI</p>
-  </div>
-  <div class="fleet-hero-right">
-    <div id="lemonade-hero" class="lemonade-hero">
-      <div class="lemonade-orb" id="lemonade-orb"></div>
-      <div>
-        <div class="lemonade-label">Lemonade AI</div>
-        <div class="lemonade-status" id="lemonade-status-text">checking…</div>
-      </div>
-      <button class="p-button is-small" onclick="testLemonade()">Test Connection</button>
+{% call ui.page_header("Agents", "Background workers that keep your snaps up to date, tested and released.") %}
+  <div id="lemonade-hero" class="lemonade-hero" title="Local AI used for screenshot review, PR descriptions and failure analysis">
+    <div class="lemonade-orb" id="lemonade-orb" aria-hidden="true"></div>
+    <div>
+      <div class="lemonade-label">Lemonade AI</div>
+      <div class="lemonade-status" id="lemonade-status-text" aria-live="polite">checking…</div>
     </div>
-    <div class="fleet-actions">
-      <form method="post" action="/agents/scan-now">
-        <button type="submit" class="p-button--positive">⟳ Scan Now</button>
-      </form>
-    </div>
+    <button type="button" class="p-button is-small" onclick="testLemonade()">Test</button>
   </div>
-</div>
+  <form method="post" action="/agents/scan-now" data-async-action>
+    <button type="submit" class="p-button--positive">Check for updates</button>
+  </form>
+{% endcall %}
+{{ ui.agents_tabs("/agents") }}
 
 <!-- ── Pipeline flow ────────────────────────────────────────── -->
 <div class="pipeline-card card">
-  <div class="pipeline-label-row">
-    <span class="section-label">Pipeline</span>
-    <span class="text-muted small">work flowing right →</span>
+  <div class="card__header">
+    <h2 class="card__title">Release pipeline</h2>
+    <a href="/releases" class="link-inline small">Releases →</a>
   </div>
   <div class="pipeline">
     <div class="pipeline-stage" id="stage-releases">
@@ -78,185 +71,65 @@
   </div>
 </div>
 
-<!-- ── Agent cards ──────────────────────────────────────────── -->
-<h3 class="section-label agent-group-label">Coding Agents</h3>
-<div class="agent-grid">
-
-  <div class="agent-card" id="card-release_scanner" data-type="release_scanner">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">🔍</span>
-      <div>
-        <div class="agent-card-name">Release Scanner</div>
-        <div class="agent-card-desc">Checks packaging repos for new upstream versions</div>
+<!-- ── Agent cards (from agents/registry.py) ─────────────────── -->
+{% for group in agent_groups() %}
+<section class="agent-group" aria-labelledby="group-{{ group.key }}">
+  <div class="agent-group__head">
+    <h2 id="group-{{ group.key }}">{{ group.label }}</h2>
+    <p>{{ group.description }}</p>
+  </div>
+  <div class="agent-grid">
+    {% for a in group.agents %}
+    <div class="agent-card agent-palette-{{ a.palette }}" id="card-{{ a.agent_type }}" data-type="{{ a.agent_type }}">
+      <div class="agent-card-glow"></div>
+      <div class="agent-card-header">
+        <div>
+          <div class="agent-card-name">{{ a.name }}{% if a.uses_ai %} {{ ui.chip('AI', 'info', 'Uses the Lemonade model') }}{% endif %}</div>
+          <div class="agent-card-desc">{{ a.description }}</div>
+        </div>
+        <div class="agent-status-dot" id="dot-{{ a.agent_type }}" aria-hidden="true"></div>
       </div>
-      <div class="agent-status-dot" id="dot-release_scanner"></div>
-    </div>
-    <div class="agent-card-task" id="task-release_scanner">Idle</div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-release_scanner">—</span>
-      <span class="agent-card-badge" id="badge-release_scanner">IDLE</span>
-    </div>
-  </div>
-
-  <div class="agent-card" id="card-version_bumper" data-type="version_bumper">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">🔧</span>
-      <div>
-        <div class="agent-card-name">Version Bumper</div>
-        <div class="agent-card-desc">Opens version-bump PRs via bot account</div>
+      <div class="agent-card-task" id="task-{{ a.agent_type }}">Idle</div>
+      {% if a.uses_ai %}
+      <div class="agent-thinking" id="thinking-{{ a.agent_type }}" hidden>
+        <span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>
+        <span class="agent-thinking__label">Inference</span>
       </div>
-      <div class="agent-status-dot" id="dot-version_bumper"></div>
-    </div>
-    <div class="agent-card-task" id="task-version_bumper">Idle</div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-version_bumper">On demand</span>
-      <span class="agent-card-badge" id="badge-version_bumper">IDLE</span>
-    </div>
-  </div>
-
-  <div class="agent-card" id="card-upstream_maintainer" data-type="upstream_maintainer">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">🧑‍💻</span>
-      <div>
-        <div class="agent-card-name">Upstream Maintainer</div>
-        <div class="agent-card-desc">Delegates dep upgrades &amp; issue fixes to the coding backend</div>
+      {% endif %}
+      <div class="agent-card-footer">
+        <span class="agent-card-stat" id="sched-{{ a.agent_type }}">{{ a.schedule }}</span>
+        <span class="agent-card-badge" id="badge-{{ a.agent_type }}">Idle</span>
       </div>
-      <div class="agent-status-dot" id="dot-upstream_maintainer"></div>
     </div>
-    <div class="agent-card-task" id="task-upstream_maintainer">Idle</div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-upstream_maintainer">—</span>
-      <span class="agent-card-badge" id="badge-upstream_maintainer">IDLE</span>
+    {% endfor %}
+  </div>
+</section>
+{% endfor %}
+
+<!-- ── Live activity ─────────────────────────────────────────── -->
+<section class="card activity-card" aria-labelledby="activity-title">
+  <div class="card__header">
+    <h2 class="card__title" id="activity-title">Live activity</h2>
+    <div class="card__header-actions">
+      <span id="sse-dot" class="text-muted small">● connecting</span>
+      <button type="button" class="p-button is-small" onclick="clearLog()">Clear</button>
     </div>
   </div>
-
-  <div class="agent-card" id="card-repo_normalizer" data-type="repo_normalizer">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">📐</span>
-      <div>
-        <div class="agent-card-name">Repo Normalizer</div>
-        <div class="agent-card-desc">Fleet-wide repo cleanup via the coding backend</div>
-      </div>
-      <div class="agent-status-dot" id="dot-repo_normalizer"></div>
-    </div>
-    <div class="agent-card-task" id="task-repo_normalizer">Idle</div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-repo_normalizer">On demand</span>
-      <span class="agent-card-badge" id="badge-repo_normalizer">IDLE</span>
-    </div>
-  </div>
-
-</div>
-
-<h3 class="section-label agent-group-label">Test Runners</h3>
-<div class="agent-grid">
-
-  <div class="agent-card" id="card-pr_monitor" data-type="pr_monitor">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">👁</span>
-      <div>
-        <div class="agent-card-name">PR Monitor</div>
-        <div class="agent-card-desc">Tracks CI status and triggers YARF tests</div>
-      </div>
-      <div class="agent-status-dot" id="dot-pr_monitor"></div>
-    </div>
-    <div class="agent-card-task" id="task-pr_monitor">Idle</div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-pr_monitor">Every 5 min</span>
-      <span class="agent-card-badge" id="badge-pr_monitor">IDLE</span>
-    </div>
-  </div>
-
-  <div class="agent-card agent-card-lemonade" id="card-screenshot_reviewer" data-type="screenshot_reviewer">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">⚡</span>
-      <div>
-        <div class="agent-card-name">Screenshot Reviewer</div>
-        <div class="agent-card-desc">LLM vision comparison via Lemonade AI</div>
-      </div>
-      <div class="agent-status-dot" id="dot-screenshot_reviewer"></div>
-    </div>
-    <div class="agent-card-task" id="task-screenshot_reviewer">Idle</div>
-    <div class="agent-thinking" id="thinking-screenshot_reviewer" style="display:none;">
-      <span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>
-      <span style="margin-left:6px;font-size:11px;color:var(--accent);">INFERENCE</span>
-    </div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-screenshot_reviewer">On demand</span>
-      <span class="agent-card-badge" id="badge-screenshot_reviewer">IDLE</span>
-    </div>
-  </div>
-
-  <div class="agent-card agent-card-lemonade" id="card-test_run_auto_promoter" data-type="test_run_auto_promoter">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">🚦</span>
-      <div>
-        <div class="agent-card-name">Test Run Auto-Promoter</div>
-        <div class="agent-card-desc">Reviews runner screenshots, promotes candidate builds</div>
-      </div>
-      <div class="agent-status-dot" id="dot-test_run_auto_promoter"></div>
-    </div>
-    <div class="agent-card-task" id="task-test_run_auto_promoter">Idle</div>
-    <div class="agent-thinking" id="thinking-test_run_auto_promoter" style="display:none;">
-      <span class="thinking-dot"></span><span class="thinking-dot"></span><span class="thinking-dot"></span>
-      <span style="margin-left:6px;font-size:11px;color:var(--accent);">INFERENCE</span>
-    </div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-test_run_auto_promoter">On demand</span>
-      <span class="agent-card-badge" id="badge-test_run_auto_promoter">IDLE</span>
-    </div>
-  </div>
-
-  <div class="agent-card" id="card-test_failure_analyzer" data-type="test_failure_analyzer">
-    <div class="agent-card-glow"></div>
-    <div class="agent-card-header">
-      <span class="agent-card-icon">🩺</span>
-      <div>
-        <div class="agent-card-name">Test Failure Analyzer</div>
-        <div class="agent-card-desc">Infers a plain-English root cause for failed runs</div>
-      </div>
-      <div class="agent-status-dot" id="dot-test_failure_analyzer"></div>
-    </div>
-    <div class="agent-card-task" id="task-test_failure_analyzer">Idle</div>
-    <div class="agent-card-footer">
-      <span class="agent-card-stat" id="sched-test_failure_analyzer">On demand</span>
-      <span class="agent-card-badge" id="badge-test_failure_analyzer">IDLE</span>
-    </div>
-  </div>
-
-</div>
-
-<!-- ── Live activity ticker ─────────────────────────────────── -->
-<div class="card activity-card">
-  <div class="section-header-row">
-    <h3 class="section-label">Live Activity</h3>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span id="sse-dot" style="font-size:10px;color:var(--text-muted);">● connecting</span>
-      <button class="p-button is-small" onclick="clearLog()">Clear</button>
-    </div>
-  </div>
-  <div class="activity-log" id="activity-log">
+  <div class="activity-log" id="activity-log" aria-live="polite">
     <div class="activity-empty" id="activity-empty">Waiting for agent activity…</div>
   </div>
-</div>
+</section>
 
-<!-- ── Run history ──────────────────────────────────────────── -->
-<div class="card">
-  <div class="section-header-row">
-    <h3 class="section-label">Recent Runs</h3>
-    <a href="/agents/runs" class="p-button is-small">📜 View All Runs &amp; Logs</a>
+<!-- ── Run history ───────────────────────────────────────────── -->
+<section class="card" aria-labelledby="recent-title">
+  <div class="card__header">
+    <h2 class="card__title" id="recent-title">Recent runs</h2>
+    <a href="/agents/runs" class="link-inline small">Full run history →</a>
   </div>
   <div id="history-container">
-    <div class="text-muted small" style="padding:12px 0;">Loading…</div>
+    <div class="text-muted small">Loading…</div>
   </div>
-</div>
+</section>
 
 {% endblock %}
 
@@ -354,62 +227,31 @@ function highlightStage(id, active) {
 }
 
 /* ── Agent cards ────────────────────────────────────────────── */
-const AGENT_COLORS = {
-  release_scanner:      '#7c6af9',
-  version_bumper:       '#38bd82',
-  upstream_maintainer:  '#e0607e',
-  repo_normalizer:      '#c98a3e',
-  pr_monitor:           '#f5a623',
-  screenshot_reviewer:  '#52b6ff',
-  test_run_auto_promoter:'#52b6ff',
-  test_failure_analyzer:'#9f7ae0',
-};
-
 function updateAgentCards(active, schedules) {
-  const types = [
-    'release_scanner','version_bumper','upstream_maintainer','repo_normalizer',
-    'pr_monitor','screenshot_reviewer','test_run_auto_promoter','test_failure_analyzer',
-  ];
-
-  // Build schedule lookup
   const schedMap = {};
   (schedules || []).forEach(s => { schedMap[s.agent_type] = s; });
 
-  types.forEach(type => {
+  Object.keys(AK.agents).forEach(type => {
+    const card = document.getElementById('card-' + type);
+    if (!card) return;
     const isActive = type in active;
-    const card  = document.getElementById('card-' + type);
-    const dot   = document.getElementById('dot-' + type);
-    const task  = document.getElementById('task-' + type);
-    const badgeLabel = document.getElementById('badge-' + type);
+    const dot = document.getElementById('dot-' + type);
+    const task = document.getElementById('task-' + type);
+    const badge = document.getElementById('badge-' + type);
     const sched = document.getElementById('sched-' + type);
     const thinking = document.getElementById('thinking-' + type);
 
-    if (!card) return;
-
-    // Active state
     card.classList.toggle('agent-running', isActive);
-    if (dot) {
-      dot.style.background = isActive ? AGENT_COLORS[type] : '#3a3f52';
-      dot.classList.toggle('dot-pulse', isActive);
-    }
+    if (dot) dot.classList.toggle('dot-pulse', isActive);
     if (task) task.textContent = isActive ? (active[type].task || 'Running…') : 'Idle';
-    if (badgeLabel) {
-      badgeLabel.textContent = isActive ? 'RUNNING' : 'IDLE';
-      badgeLabel.style.color = isActive ? AGENT_COLORS[type] : 'var(--text-muted)';
-    }
+    if (badge) badge.textContent = isActive ? 'Running' : 'Idle';
+    if (thinking) thinking.hidden = !(isActive && (active[type].task || '').includes('⚡'));
 
-    // Lemonade inference indicator
-    if (thinking) {
-      const inferencing = isActive && (active[type].task || '').includes('⚡');
-      thinking.style.display = inferencing ? 'flex' : 'none';
-    }
-
-    // Schedule countdown
     if (sched && schedMap[type]) {
       const sec = schedMap[type].next_run_in_seconds;
-      sched.textContent = sec < 120 ? `next run in ${sec}s` :
-                          sec < 3600 ? `next run in ${Math.round(sec/60)}m` :
-                          `next run in ${(sec/3600).toFixed(1)}h`;
+      sched.textContent = sec < 120 ? `Next run in ${sec}s` :
+                          sec < 3600 ? `Next run in ${Math.round(sec / 60)}m` :
+                          `Next run in ${(sec / 3600).toFixed(1)}h`;
     }
   });
 }
@@ -423,7 +265,7 @@ function updateLemonade(lem) {
   if (lem.inferencing) {
     orb.className = 'lemonade-orb orb-inferencing';
     text.textContent = '⚡ INFERENCE ACTIVE';
-    text.style.color = '#52b6ff';
+    text.style.color = 'var(--blue)';
   } else if (lem.available) {
     orb.className = 'lemonade-orb orb-connected';
     const backend = lem.backend === 'system' ? 'System' : 'Embedded';
@@ -435,7 +277,7 @@ function updateLemonade(lem) {
       text.textContent = `Connected (${backend}) · ${models[0] || lem.model}`;
       text.title = '';
     }
-    text.style.color = '#38bd82';
+    text.style.color = 'var(--green)';
   } else {
     orb.className = 'lemonade-orb orb-offline';
     text.textContent = 'Offline — start lemonade-server';
@@ -449,17 +291,17 @@ function updateHistory(history) {
   if (!container || !history || !history.length) return;
 
   const rows = history.map(r => {
-    const statusClass = r.status === 'done' ? 'p-status-label--positive' :
-                        r.status === 'error' ? 'badge-fail' : 'badge-running';
+    const statusClass = r.status === 'done' ? 'chip--positive' :
+                        r.status === 'error' ? 'chip--negative' : 'chip--info';
     const dur = r.duration_s !== null ? `${r.duration_s}s` : '…';
     const logLink = r.has_log
-      ? `<a href="/agents/runs/${r.id}/log" target="_blank" rel="noopener" class="p-button is-small">View Log</a>`
+      ? `<a href="/agents/runs/${r.id}/log" target="_blank" rel="noopener" class="p-button is-small">Log</a>`
       : '<span class="muted small">—</span>';
     return `<tr>
-      <td><span class="agent-type-badge agent-${r.agent_type}">${r.agent_type.replace(/_/g,' ')}</span></td>
-      <td class="muted">${r.snap_name || '—'}</td>
-      <td><span class="p-status-label ${statusClass}">${r.status}</span></td>
-      <td class="muted small" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(r.summary || '—')}</td>
+      <td>${AK.agentBadge(r.agent_type)}</td>
+      <td class="muted">${r.snap_name ? `<a href="/snap/${encodeURIComponent(r.snap_name)}">${escHtml(r.snap_name)}</a>` : '—'}</td>
+      <td><span class="chip ${statusClass}">${escHtml(r.status)}</span></td>
+      <td class="muted small cell-truncate" title="${escHtml(r.summary || '')}">${escHtml(r.summary || '—')}</td>
       <td class="muted small">${r.started_at}</td>
       <td class="muted small">${dur}</td>
       <td>${logLink}</td>
@@ -473,44 +315,30 @@ function updateHistory(history) {
 }
 
 /* ── Activity log ───────────────────────────────────────────── */
-const AGENT_GLYPHS = {
-  release_scanner: '🔍', version_bumper: '🔧',
-  pr_monitor: '👁', screenshot_reviewer: '⚡', version_bump: '🔀',
-};
-
 function appendLog(ts, agentType, message, snapName) {
   const log = document.getElementById('activity-log');
   const empty = document.getElementById('activity-empty');
   if (empty) empty.style.display = 'none';
 
-  const glyph = AGENT_GLYPHS[agentType] || '•';
-  const color = AGENT_COLORS[agentType] || 'var(--text-muted)';
   const lemonade = message.includes('⚡') || message.includes('Lemonade');
-
   const entry = document.createElement('div');
   entry.className = 'log-entry log-entry-new' + (lemonade ? ' log-entry-lemonade' : '');
   entry.innerHTML =
-    `<span class="log-ts">${ts}</span>` +
-    `<span class="log-glyph">${glyph}</span>` +
-    `<span class="log-type" style="color:${color}">${agentType.replace(/_/g,' ')}</span>` +
+    `<span class="log-ts">${escHtml(ts)}</span>` +
+    AK.agentBadge(agentType) +
     `<span class="log-msg">${escHtml(message)}</span>` +
     (snapName ? `<span class="log-snap">${escHtml(snapName)}</span>` : '');
 
   log.insertBefore(entry, log.firstChild);
   logCount++;
-
-  // Remove oldest entries beyond cap
-  while (log.children.length > MAX_LOG + 1) {
-    log.removeChild(log.lastChild);
-  }
-
-  // Fade in
+  const entries = log.querySelectorAll('.log-entry');
+  for (let i = MAX_LOG; i < entries.length; i++) entries[i].remove();
   requestAnimationFrame(() => entry.classList.remove('log-entry-new'));
 }
 
 function clearLog() {
   const log = document.getElementById('activity-log');
-  while (log.children.length > 1) log.removeChild(log.lastChild);
+  log.querySelectorAll('.log-entry').forEach(e => e.remove());
   const empty = document.getElementById('activity-empty');
   if (empty) empty.style.display = '';
 }
@@ -538,7 +366,7 @@ function now() {
   return new Date().toTimeString().slice(0,8);
 }
 function escHtml(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 {% endblock %}

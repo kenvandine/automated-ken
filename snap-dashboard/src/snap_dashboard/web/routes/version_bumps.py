@@ -13,6 +13,7 @@ from snap_dashboard.db.models import ScreenshotComparison, VersionBumpPR
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.utils import parse_owner_repo
 from snap_dashboard.testing.release_set import candidate_release_set, member_state
+from snap_dashboard.web.fleet import BUMP_NEEDS_YOU
 from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
@@ -21,29 +22,35 @@ router = APIRouter()
 
 _GH_API = "https://api.github.com"
 
-# Statuses in priority display order
+# Display order: things waiting on you first, then work in flight, then
+# finished/closed history.
 _STATUS_GROUPS = [
-    ("stable_promoted", "Stable Promoted"),
-    ("stable_promoted_partial", "Partially Promoted (Override)"),
-    ("candidate_testing", "Merged — Testing Candidate for Stable"),
-    ("awaiting_release", "Merged — Waiting for Candidate Release"),
-    ("agent_approved", "Agent Approved"),
-    ("needs_review", "Needs Your Review"),
-    ("agent_rejected", "Agent Rejected"),
-    ("yarf_passed", "YARF Passed — Awaiting Review"),
-    ("yarf_failed", "YARF Failed"),
-    ("yarf_running", "YARF Running"),
-    ("ci_passed", "CI Passed"),
-    ("ci_failed", "CI Failed"),
-    ("ci_pending", "CI Pending"),
+    ("needs_review", "Needs your review"),
+    ("agent_approved", "Ready to merge"),
+    ("ci_failed", "CI failed"),
+    ("yarf_failed", "Tests failed"),
+    ("agent_rejected", "Agent rejected"),
+    ("yarf_passed", "Tests passed — awaiting review"),
+    ("dispatched", "Coding agent working"),
     ("open", "Open"),
-    ("dispatched", "Coding Agent Working…"),
+    ("ci_pending", "CI running"),
+    ("ci_passed", "CI passed"),
+    ("yarf_running", "Testing"),
+    ("awaiting_release", "Merged — waiting for candidate build"),
+    ("candidate_testing", "Merged — testing candidate"),
+    ("stable_promoted_partial", "Partly promoted (override)"),
+    ("stable_promoted", "Promoted to stable"),
     ("merged", "Merged"),
     ("closed", "Closed"),
 ]
 
 
-@router.get("/version-bumps", response_class=HTMLResponse)
+@router.get("/version-bumps")
+async def version_bumps_legacy() -> RedirectResponse:
+    return RedirectResponse(url="/releases/bumps", status_code=301)
+
+
+@router.get("/releases/bumps", response_class=HTMLResponse)
 async def version_bumps_page(request: Request) -> HTMLResponse:
     user = get_current_user(request)
     if user is None:
@@ -72,12 +79,7 @@ async def version_bumps_page(request: Request) -> HTMLResponse:
         items = [b for b in bump_list if b["status"] == status_key]
         groups.append({"status": status_key, "label": status_key.replace("_", " ").title(), "bumps": items})
 
-    # Count summary for nav badge
-    actionable = sum(
-        1
-        for b in bump_list
-        if b["status"] in ("agent_approved", "needs_review")
-    )
+    actionable = sum(1 for b in bump_list if b["status"] in BUMP_NEEDS_YOU)
 
     return templates.TemplateResponse(
         request,
@@ -100,7 +102,7 @@ async def version_bump_detail(bump_id: int, request: Request) -> HTMLResponse:
     with get_session() as session:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump:
-            return RedirectResponse(url="/version-bumps", status_code=302)
+            return RedirectResponse(url="/releases/bumps", status_code=302)
 
         bump_data = _serialise_bump(session, bump)
 
@@ -169,12 +171,12 @@ def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
     with get_session() as session:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump or not bump.packaging_repo or not bump.bot_pr_number:
-            return RedirectResponse(url="/version-bumps", status_code=302)
+            return RedirectResponse(url="/releases/bumps", status_code=302)
         owner_repo = parse_owner_repo(bump.packaging_repo)
         pr_number = bump.bot_pr_number
 
     if not owner_repo:
-        return RedirectResponse(url="/version-bumps", status_code=302)
+        return RedirectResponse(url="/releases/bumps", status_code=302)
     owner, repo = owner_repo
     url = f"{_GH_API}/repos/{owner}/{repo}/pulls/{pr_number}/merge"
     headers = {
@@ -191,7 +193,7 @@ def merge_bump(bump_id: int, request: Request) -> RedirectResponse:
     except Exception as exc:
         logger.warning("merge PR %s failed: %s", bump_id, exc)
 
-    return RedirectResponse(url="/version-bumps", status_code=303)
+    return RedirectResponse(url="/releases/bumps", status_code=303)
 
 
 @router.post("/version-bumps/{bump_id}/reject")
@@ -207,7 +209,7 @@ def reject_bump(bump_id: int, request: Request) -> RedirectResponse:
     with get_session() as session:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump:
-            return RedirectResponse(url="/version-bumps", status_code=302)
+            return RedirectResponse(url="/releases/bumps", status_code=302)
         owner_repo = parse_owner_repo(bump.packaging_repo or "")
         pr_number = bump.bot_pr_number
 
@@ -229,7 +231,7 @@ def reject_bump(bump_id: int, request: Request) -> RedirectResponse:
         if bump:
             bump.status = "closed"
 
-    return RedirectResponse(url="/version-bumps", status_code=303)
+    return RedirectResponse(url="/releases/bumps", status_code=303)
 
 
 @router.post("/version-bumps/{bump_id}/request-review")
@@ -255,7 +257,7 @@ async def re_run_yarf(bump_id: int, request: Request) -> RedirectResponse:
     with get_session() as session:
         bump = session.query(VersionBumpPR).filter_by(id=bump_id, user_id=user["id"]).first()
         if not bump:
-            return RedirectResponse(url="/version-bumps", status_code=302)
+            return RedirectResponse(url="/releases/bumps", status_code=302)
         snap_id = bump.snap_id
         snap_name = bump.snap.name if bump.snap else ""
         new_version = bump.new_version or ""

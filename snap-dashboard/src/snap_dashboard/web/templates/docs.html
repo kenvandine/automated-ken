@@ -151,7 +151,7 @@
     <!-- ================================================================ ADDING SNAPS -->
     <section class="docs-section" id="adding-snaps">
       <h2 class="docs-h2">Adding snaps</h2>
-      <p>Snaps published by your Store account are discovered automatically on the first collection. Use <a href="/snaps/add">Add Snap</a> to track any other snap by name.</p>
+      <p>Snaps published by your Store account are discovered automatically on the first collection. Use <a href="/snaps#add">Add snap</a> on the <a href="/snaps">Snaps</a> page to track any other snap by name.</p>
       <p>Each snap has two repository URLs, filled in from Store metadata (or by finding a <code>snapcraft.yaml</code> with that name in your GitHub repos) and editable on its detail page:</p>
       <ul class="docs-list">
         <li><strong>Packaging repo</strong> — where the snapcraft recipe lives. Needed for version bumps and rebuilds.</li>
@@ -226,7 +226,7 @@ systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
     <!-- ================================================================ RUNNING TESTS -->
     <section class="docs-section" id="running-tests">
       <h2 class="docs-h2">Running tests</h2>
-      <p>The <a href="/testing">Testing</a> page's <strong>Needs testing</strong> list shows every snap whose candidate or edge version differs from stable — one row per version with all its architectures. <strong>Run Tests (amd64, arm64)</strong> queues one job per architecture; each row shows every architecture's latest run.</p>
+      <p>The <a href="/releases">Releases</a> page's <strong>To release</strong> tab shows every snap whose candidate or edge version differs from stable — one row per version with all its architectures. <strong>Run tests</strong> queues one job per architecture; each row shows every architecture's latest run.</p>
       <p>Statuses: <span class="p-status-label p-status-label--caution">pending</span> (queued) → <span class="p-status-label p-status-label--caution">triggered</span> (claimed by a runner) → <span class="p-status-label p-status-label--caution">running</span> → <span class="p-status-label p-status-label--positive">passed</span> / <span class="p-status-label p-status-label--negative">failed</span>. Candidate runs then go through <span class="p-status-label p-status-label--caution">reviewing</span>. A failed run's page has a <strong>log</strong> link with everything the runner captured.</p>
       <h3 class="docs-h3">Automatic testing</h3>
       <p>With <strong>Enable automatic testing</strong> (Settings → Testing), every collection queues tests for any candidate or edge version and architecture that hasn't been tested yet. Version-bump PRs are always tested, regardless of this setting. This includes new revisions from a manual <strong>Rebuild All Snaps Now</strong> or the Stale Build Scanner — publishing itself doesn't queue a test, but the next scheduled collection (or a manual "Refresh Now") will notice the new candidate/edge revision and queue one if this setting is on.</p>
@@ -300,7 +300,7 @@ systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
         <li><strong>Stable</strong> — once every architecture is approved, the set is promoted. If any fails or isn't approved, the bump stops at <em>needs review</em> with the reason.</li>
       </ol>
       <p>With auto-promote off, a merged bump stops at <em>merged</em>, and its page shows the candidate release set to promote by hand.</p>
-      <p>On <a href="/version-bumps">Version Bumps</a>, open a PR to see each architecture's pre-merge status and screenshots side by side, then <strong>Merge</strong>, <strong>Reject</strong> or <strong>Re-run Tests</strong> (re-tests every architecture; only the newest run per architecture counts). After merge it shows the candidate release set with <strong>Promote</strong> (all architectures, or a confirmed override) and <strong>Re-run candidate tests</strong>. PRs merged or closed on GitHub are picked up automatically, and a merged bump never blocks the next bump for the same part.</p>
+      <p>On <a href="/releases/bumps">Releases → Version bumps</a>, open a PR to see each architecture's pre-merge status and screenshots side by side, then <strong>Merge</strong>, <strong>Reject</strong> or <strong>Re-run Tests</strong> (re-tests every architecture; only the newest run per architecture counts). After merge it shows the candidate release set with <strong>Promote</strong> (all architectures, or a confirmed override) and <strong>Re-run candidate tests</strong>. PRs merged or closed on GitHub are picked up automatically, and a merged bump never blocks the next bump for the same part.</p>
     </section>
 
     <!-- ================================================================ CODING TASKS -->
@@ -312,7 +312,7 @@ systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
         <li><strong>Auto-maintain upstream repos you own</strong> — dependency updates, review requests on your open PRs, and fixes for a few issues per run.</li>
         <li><strong>Fleet normalization</strong> — a one-off pass (run from Settings) opening a PR per packaging repo to drop legacy <code>sync-release</code>-style workflows, normalise the build/publish workflow and add an <code>AGENTS.md</code>.</li>
       </ul>
-      <p>Every dispatched task and its PR is listed on <a href="/copilot-tasks">Coding Tasks</a>.</p>
+      <p>Every dispatched task and its PR is listed on <a href="/agents/tasks">Agents → Coding tasks</a>.</p>
     </section>
 
     <!-- ================================================================ LEMONADE -->

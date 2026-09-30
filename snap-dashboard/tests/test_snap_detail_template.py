@@ -116,8 +116,9 @@ def test_same_repo_consolidates_packaging_and_upstream_display() -> None:
     html = templates.env.get_template("snap_detail.html").render(ctx)
 
     assert ">\n      Repository\n    </a>" in html
-    assert "Packaging repo" not in html
-    assert "Upstream repo" not in html
+    # Header repo links (form labels like "Packaging repository URL" are fine).
+    assert ">\n      Packaging repo\n    </a>" not in html
+    assert ">\n      Upstream repo\n    </a>" not in html
     assert html.count('data-filter="packaging"') == 1
     assert 'data-filter="upstream"' not in html
     assert '<span class="repo-badge">' not in html
@@ -141,8 +142,8 @@ def test_different_repos_keeps_separate_packaging_and_upstream_display() -> None
     ]
     html = templates.env.get_template("snap_detail.html").render(ctx)
 
-    assert "Packaging repo" in html
-    assert "Upstream repo" in html
+    assert ">\n      Packaging repo\n    </a>" in html
+    assert ">\n      Upstream repo\n    </a>" in html
     assert 'data-filter="packaging"' in html
     assert 'data-filter="upstream"' in html
     assert '<span class="repo-badge">' in html

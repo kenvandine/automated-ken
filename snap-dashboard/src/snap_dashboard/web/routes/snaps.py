@@ -30,6 +30,8 @@ from snap_dashboard.github.repo_discovery import (
 )
 from snap_dashboard.github.utils import parse_repo_slug
 from snap_dashboard.store.client import extract_repo_urls, get_snap_info
+from snap_dashboard.web.fleet import build_snap_rows
+from snap_dashboard.web.fleet_actions import remove_snap, run_fleet_action
 from snap_dashboard.web.templating import templates
 
 logger = logging.getLogger(__name__)
@@ -48,21 +50,60 @@ def _get_last_run(user_id: int):
         return run.finished_at if run and run.finished_at else None
 
 
-@router.get("/snaps/add", response_class=HTMLResponse)
-async def snap_add_get(request: Request) -> HTMLResponse:
+@router.get("/snaps", response_class=HTMLResponse)
+def snaps_index(request: Request) -> HTMLResponse:
+    """The fleet: every tracked snap plus Add Snap and fleet-wide actions."""
     user = get_current_user(request)
     if user is None:
         return RedirectResponse(url="/auth/login", status_code=302)
-
+    user_id = user["id"]
+    uc = get_user_config(user_id)
+    with get_session() as session:
+        rows = build_snap_rows(session, user_id)
     return templates.TemplateResponse(
         request,
-        "snap_add.html",
+        "snaps.html",
         {
-            "last_run": _get_last_run(user["id"]),
-            "search_result": None,
+            "rows": rows,
+            "last_run": _get_last_run(user_id),
             "current_user": user,
+            "publisher": getattr(uc, "publisher", "") if uc else "",
+            "has_github_token": bool(getattr(uc, "github_token", "") if uc else ""),
+            "has_store_credential": bool(getattr(uc, "snapcraft_macaroon", "") if uc else ""),
+            "fleet_normalization_enabled": bool(getattr(uc, "fleet_normalization_enabled", False)) if uc else False,
+            "error": request.query_params.get("error"),
         },
     )
+
+
+@router.get("/snaps/add")
+async def snap_add_get(request: Request) -> RedirectResponse:
+    return RedirectResponse(url="/snaps#add", status_code=301)
+
+
+@router.post("/snaps/actions/{action}")
+async def snaps_fleet_action(action: str, request: Request):
+    return run_fleet_action(request, action)
+
+
+@router.post("/snap/{name}/remove")
+async def snap_remove(name: str, request: Request):
+    """Stop tracking a snap (and drop its test history)."""
+    is_fetch = bool(request.headers.get("X-Requested-With"))
+    user = get_current_user(request)
+    if user is None:
+        if is_fetch:
+            return JSONResponse({"ok": False, "error": "not authenticated"}, status_code=401)
+        return RedirectResponse(url="/auth/login", status_code=302)
+    with get_session() as session:
+        removed = remove_snap(session, user["id"], name)
+    if is_fetch:
+        if not removed:
+            return JSONResponse(
+                {"ok": False, "error": "not_found", "message": f"{name} isn't tracked."}, status_code=404
+            )
+        return JSONResponse({"ok": True, "removed": name, "message": f"Stopped tracking {name}.", "redirect": "/snaps"})
+    return RedirectResponse(url="/snaps", status_code=303)
 
 
 @router.post("/snaps/search", response_class=HTMLResponse)
@@ -83,8 +124,9 @@ def snap_search(
 
     if not info:
         html = (
-            '<div id="search-results" class="search-result not-found">'
-            f'<p class="error-msg">Snap <strong>{escape(snap_name)}</strong> not found in the store.</p>'
+            '<div id="search-results" class="search-result not-found" role="status">'
+            f'<p class="error-msg">Snap <strong>{escape(snap_name)}</strong> not found in the store. '
+            "You can still add it manually.</p>"
             "</div>"
         )
         return HTMLResponse(content=html)
@@ -98,23 +140,12 @@ def snap_search(
     packaging_repo = escape(repos.get("packaging_repo") or "")
     upstream_repo = escape(repos.get("upstream_repo") or "")
 
-    html = f"""<div id="search-results" class="search-result found">
-  <div class="result-badge">Found in Snap Store</div>
-  <div class="form-row">
-    <label class="form-label">Publisher</label>
-    <input type="text" class="form-input" value="{publisher}" readonly>
-  </div>
-  <input type="hidden" name="publisher" value="{publisher}">
-  <div class="form-row">
-    <label class="form-label" for="packaging_repo">Packaging Repository</label>
-    <input type="text" class="form-input" id="packaging_repo" name="packaging_repo"
-           value="{packaging_repo}" placeholder="https://github.com/owner/repo">
-  </div>
-  <div class="form-row">
-    <label class="form-label" for="upstream_repo">Upstream Repository</label>
-    <input type="text" class="form-input" id="upstream_repo" name="upstream_repo"
-           value="{upstream_repo}" placeholder="https://github.com/owner/upstream">
-  </div>
+    name_html = escape(snap_name)
+    html = f"""<div id="search-results" class="search-result found" role="status"
+     data-publisher="{publisher}" data-packaging-repo="{packaging_repo}" data-upstream-repo="{upstream_repo}">
+  <span class="chip chip--positive">Found in Snap Store</span>
+  <strong>{name_html}</strong> <span class="text-muted">by {publisher or "unknown publisher"}</span>
+  <p class="form-hint">Repository links below were filled in from the Store listing — check them before saving.</p>
 </div>"""
     return HTMLResponse(content=html)
 
@@ -518,7 +549,7 @@ async def snap_check_updates(name: str, request: Request) -> RedirectResponse:
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
-            return RedirectResponse(url="/", status_code=303)
+            return RedirectResponse(url="/snaps", status_code=303)
         if not snap.packaging_repo:
             return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
         snap_id = snap.id
@@ -555,11 +586,14 @@ async def snap_rebuild(name: str, request: Request):
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
             if is_fetch:
-                return JSONResponse({"error": "snap not found"}, status_code=404)
-            return RedirectResponse(url="/", status_code=303)
+                return JSONResponse({"ok": False, "error": "snap not found", "message": "Snap not found."}, status_code=404)
+            return RedirectResponse(url="/snaps", status_code=303)
         if not snap.packaging_repo:
             if is_fetch:
-                return JSONResponse({"error": "no_packaging_repo"}, status_code=400)
+                return JSONResponse(
+                    {"ok": False, "error": "no_packaging_repo", "message": f"Set a packaging repo for {name} first."},
+                    status_code=400,
+                )
             return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
         snap_id = snap.id
 
@@ -568,7 +602,7 @@ async def snap_rebuild(name: str, request: Request):
 
     get_runner().submit(RebuildOneSnapAgent(user_id=user_id, snap_id=snap_id, snap_name=name))
     if is_fetch:
-        return JSONResponse({"started": True})
+        return JSONResponse({"ok": True, "started": True, "message": f"Rebuild started for {name}."})
     return RedirectResponse(url=f"/snap/{name}?notice=rebuild_started", status_code=303)
 
 
@@ -589,7 +623,7 @@ async def snap_normalize(name: str, request: Request) -> RedirectResponse:
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
-            return RedirectResponse(url="/", status_code=303)
+            return RedirectResponse(url="/snaps", status_code=303)
         if not snap.packaging_repo:
             return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
         snap_id = snap.id
@@ -617,7 +651,7 @@ async def snap_stack_update(name: str, request: Request) -> RedirectResponse:
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
-            return RedirectResponse(url="/", status_code=303)
+            return RedirectResponse(url="/snaps", status_code=303)
         if not snap.packaging_repo:
             return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
         if not snap.upstream_repo or parse_repo_slug(snap.packaging_repo).lower() != parse_repo_slug(snap.upstream_repo).lower():
@@ -653,7 +687,7 @@ async def snap_custom_task(
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
-            return RedirectResponse(url="/", status_code=303)
+            return RedirectResponse(url="/snaps", status_code=303)
         if not snap.packaging_repo:
             return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
         snap_id = snap.id
@@ -680,7 +714,7 @@ async def snap_review_issues(name: str, request: Request) -> RedirectResponse:
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
-            return RedirectResponse(url="/", status_code=303)
+            return RedirectResponse(url="/snaps", status_code=303)
         if not snap.packaging_repo and not snap.upstream_repo:
             return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
         snap_id = snap.id
@@ -714,7 +748,7 @@ async def snap_review_issues_address(
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
-            return RedirectResponse(url="/", status_code=303)
+            return RedirectResponse(url="/snaps", status_code=303)
         snap_id = snap.id
 
     from snap_dashboard.agents.issue_pr_reviewer import AddressReviewItemAgent
@@ -795,6 +829,7 @@ async def snap_edit(
     notes: str = Form(default=""),
     is_console_app: str = Form(default=""),
     is_service: str = Form(default=""),
+    snap_type: str = Form(default=""),
 ) -> RedirectResponse:
     """Update snap metadata."""
     user = get_current_user(request)
@@ -806,7 +841,7 @@ async def snap_edit(
     with get_session() as session:
         snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
         if not snap:
-            return RedirectResponse(url="/", status_code=303)
+            return RedirectResponse(url="/snaps", status_code=303)
         new_packaging_repo = packaging_repo.strip() or None
         new_upstream_repo = upstream_repo.strip() or None
         # Once the user has explicitly set a repo URL here, stop letting the
@@ -818,10 +853,13 @@ async def snap_edit(
         snap.packaging_repo = new_packaging_repo
         snap.upstream_repo = new_upstream_repo
         snap.notes = notes.strip() or None
+        if snap_type in ("desktop", "console", "service"):
+            is_service = "true" if snap_type == "service" else ""
+            is_console_app = "true" if snap_type == "console" else ""
         snap.is_service = is_service == "true"
         # A snap can't be both a console app and a service — service wins
         # if the form somehow submits both (shouldn't happen; the UI
         # treats them as mutually exclusive).
         snap.is_console_app = is_console_app == "true" and not snap.is_service
 
-    return RedirectResponse(url=f"/snap/{name}", status_code=303)
+    return RedirectResponse(url=f"/snap/{name}?notice=saved#configuration", status_code=303)

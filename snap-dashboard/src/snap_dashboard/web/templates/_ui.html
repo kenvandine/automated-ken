@@ -1,0 +1,90 @@
+{#- Shared UI building blocks. Import with:
+      {% import "_ui.html" as ui %}
+    Keep page templates free of one-off colours / inline styles by using
+    these instead. -#}
+
+{#- Page header: title, optional subtitle, optional back link, and a
+    caller block for right-aligned actions. -#}
+{% macro page_header(title, subtitle=None, back=None, back_label=None) -%}
+<div class="page-header">
+  <div class="page-header__text">
+    {% if back %}<a href="{{ back }}" class="back-link">&larr; {{ back_label or 'Back' }}</a>{% endif %}
+    <h1 class="page-heading">{{ title }}</h1>
+    {% if subtitle %}<p class="page-subtitle">{{ subtitle }}</p>{% endif %}
+  </div>
+  {% if caller is defined %}
+  <div class="page-header__actions">{{ caller() }}</div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{#- Status chip using the shared status map in templating.py. -#}
+{% macro status(value, label=None, title=None) -%}
+{%- set info = status_info(value) -%}
+<span class="chip chip--{{ info.tone }}"{% if title %} title="{{ title }}"{% endif %}>{{ label or info.label }}</span>
+{%- endmacro %}
+
+{#- Arbitrary chip with an explicit tone. -#}
+{% macro chip(text, tone='neutral', title=None) -%}
+<span class="chip chip--{{ tone }}"{% if title %} title="{{ title }}"{% endif %}>{{ text }}</span>
+{%- endmacro %}
+
+{#- Agent badge, coloured from the agent registry palette. -#}
+{% macro agent_badge(agent_type) -%}
+{%- set a = agent_info(agent_type) -%}
+<span class="agent-badge agent-palette-{{ a.palette }}" title="{{ a.description }}">{{ a.name }}</span>
+{%- endmacro %}
+
+{#- Tab bar. ``tabs`` is a list of (href, label, count-or-None). The active
+    tab is ``active`` (matched against href). -#}
+{% macro tabs(items, active, label='Sections') -%}
+<nav class="tab-bar" aria-label="{{ label }}">
+  {% for href, text, count in items %}
+  <a href="{{ href }}" class="tab-bar__tab{% if href == active %} is-active{% endif %}"{% if href == active %} aria-current="page"{% endif %}>
+    {{ text }}{% if count %} <span class="tab-bar__count">{{ count }}</span>{% endif %}
+  </a>
+  {% endfor %}
+</nav>
+{%- endmacro %}
+
+{#- Empty state with optional call to action. -#}
+{% macro empty(message, action_href=None, action_label=None, secondary_href=None, secondary_label=None) -%}
+<div class="empty-state">
+  <p>{{ message }}</p>
+  {% if action_href or secondary_href %}
+  <div class="empty-state__actions">
+    {% if action_href %}<a href="{{ action_href }}" class="p-button--positive is-small">{{ action_label }}</a>{% endif %}
+    {% if secondary_href %}<a href="{{ secondary_href }}" class="p-button is-small">{{ secondary_label }}</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{%- endmacro %}
+
+{#- Architecture pill with a state (ok / fail / pending / none). -#}
+{% macro arch(name, state='none', title=None) -%}
+<span class="arch-pill arch-pill--{{ state }}"{% if title %} title="{{ title }}"{% endif %}>{{ name }}</span>
+{%- endmacro %}
+
+{#- Relative timestamp with the absolute time on hover. -#}
+{% macro when(value) -%}
+{% if value %}<time datetime="{{ value }}" title="{{ value | dt('long') }}">{{ value | dt('relative') }}</time>{% else %}<span class="muted">—</span>{% endif %}
+{%- endmacro %}
+
+{#- Section tabs shared by every page under /agents. -#}
+{% macro agents_tabs(active) -%}
+{{ tabs([
+  ("/agents", "Overview", None),
+  ("/agents/runs", "Run history", None),
+  ("/agents/tasks", "Coding tasks", None),
+  ("/agents/stats", "Stats", None),
+], active, "Agents sections") }}
+{%- endmacro %}
+
+{#- Section tabs shared by every page under /releases. -#}
+{% macro releases_tabs(active, bumps=None) -%}
+{{ tabs([
+  ("/releases", "To release", None),
+  ("/releases/bumps", "Version bumps", bumps),
+  ("/releases/runs", "Test runs", None),
+], active, "Releases sections") }}
+{%- endmacro %}

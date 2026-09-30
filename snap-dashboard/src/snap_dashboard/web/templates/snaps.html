@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+{% import "_ui.html" as ui %}
+
+{% block title %}Snaps — Automated Ken{% endblock %}
+
+{% block content %}
+
+{% call ui.page_header("Snaps", "Every snap Automated Ken maintains for you" ~ (" (publisher " ~ publisher ~ ")" if publisher else "") ~ ".") %}
+  <form method="post" action="/refresh" data-async-action>
+    <button type="submit" class="p-button">Refresh data</button>
+  </form>
+  <a href="#add" class="p-button--positive js-open-add">Add snap</a>
+{% endcall %}
+
+{% if error %}
+<div class="p-notification--negative" role="alert">
+  <div class="p-notification__content">
+    <p class="p-notification__message">
+      {% if error == 'rebuild_needs_github_token' %}Add a GitHub token in <a href="/settings#github">Settings</a> before rebuilding.
+      {% elif error == 'no_snapcraft_credential' %}Add a Snap Store credential in <a href="/settings#store">Settings</a> first.
+      {% elif error == 'fleet_normalization_disabled' %}Enable fleet normalization in <a href="/settings#maintenance">Settings</a> first.
+      {% else %}{{ error }}{% endif %}
+    </p>
+  </div>
+</div>
+{% endif %}
+
+<details id="add" class="inline-panel">
+  <summary><span>Add a snap <span class="text-muted small">— track any snap by name, even one you don't publish</span></span></summary>
+  <div class="inline-panel__body">
+    <div class="form-row">
+      <label class="form-label" for="search-input">Snap name</label>
+      <div class="search-input-row">
+        <input type="text" id="search-input" name="snap_name" class="form-input"
+               placeholder="e.g. firefox, gimp, vlc" autocomplete="off">
+        <button type="button" class="p-button"
+                hx-post="/snaps/search"
+                hx-include="#search-input"
+                hx-target="#search-results"
+                hx-swap="outerHTML">Look up in Store</button>
+      </div>
+    </div>
+
+    <div id="search-results" aria-live="polite"></div>
+
+    <form method="post" action="/snaps/add" id="add-form" class="add-form">
+      <input type="hidden" id="snap_name_hidden" name="snap_name" value="">
+      <input type="hidden" id="publisher_hidden" name="publisher" value="">
+      <div class="form-row">
+        <label class="form-label" for="packaging_repo_main">Packaging repository URL</label>
+        <input type="url" id="packaging_repo_main" name="packaging_repo" class="form-input"
+               placeholder="https://github.com/owner/snap-repo">
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="upstream_repo_main">Upstream repository URL</label>
+        <input type="url" id="upstream_repo_main" name="upstream_repo" class="form-input"
+               placeholder="https://github.com/owner/upstream">
+      </div>
+      <div class="form-row">
+        <label class="form-label" for="notes_main">Notes</label>
+        <textarea id="notes_main" name="notes" class="form-input form-textarea" rows="2"
+                  placeholder="Optional notes about this snap"></textarea>
+      </div>
+      <div class="form-actions">
+        <button type="submit" class="p-button--positive" id="save-btn" disabled>Add snap</button>
+      </div>
+    </form>
+  </div>
+</details>
+
+<section class="card" aria-labelledby="snaps-table-title">
+  <div class="card__header">
+    <h2 class="card__title" id="snaps-table-title">Tracked snaps <span class="text-muted">({{ rows|length }})</span></h2>
+    {% if rows %}
+    <label class="visually-hidden" for="snap-filter">Filter snaps</label>
+    <input type="search" id="snap-filter" class="form-input snap-filter" placeholder="Filter by name…" autocomplete="off">
+    {% endif %}
+  </div>
+
+  {% if rows %}
+  <div class="table-wrapper">
+    <table class="snap-table" id="snaps-table">
+      <thead>
+        <tr>
+          <th scope="col">Snap</th>
+          <th scope="col">Stable</th>
+          <th scope="col">Architectures</th>
+          <th scope="col">Pipeline</th>
+          <th scope="col">Issues / PRs</th>
+          <th scope="col">Updated</th>
+          <th scope="col"><span class="visually-hidden">Actions</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr data-snap="{{ r.name }}">
+          <td>
+            <a href="/snap/{{ r.name }}" class="snap-name">{{ r.name }}</a>
+            <div class="cluster small">
+              {% if r.type != 'desktop' %}{{ ui.chip(r.type, 'neutral') }}{% endif %}
+              {% if r.manually_added %}{{ ui.chip('manual', 'neutral', 'Added by hand (or repos edited by hand)') }}{% endif %}
+              {% for a in r.attention %}{{ ui.chip(a, 'caution') }}{% endfor %}
+            </div>
+          </td>
+          <td class="nowrap">{% if r.stable %}{{ r.stable }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>
+            <div class="cluster">
+            {% for a in r.arches %}
+              {{ ui.arch(a, 'ok' if r.stable_by_arch.get(a) else 'pending', ('stable ' ~ r.stable_by_arch.get(a)) if r.stable_by_arch.get(a) else 'not in stable') }}
+            {% else %}<span class="muted">—</span>{% endfor %}
+            </div>
+          </td>
+          <td>
+            <div class="stack small">
+              {% if r.bump %}
+              <span>{{ ui.status(r.bump.status) }} bump to {{ r.bump.new_version or '?' }}</span>
+              {% endif %}
+              {% if r.ahead %}
+              <span>{{ ui.chip(r.ahead.channel, 'info') }} {{ r.ahead.version }}</span>
+              {% endif %}
+              {% if r.latest_run %}
+              <a href="/testing/runs/{{ r.latest_run.id }}" class="link-inline">
+                {{ ui.status('promoted' if r.latest_run.promoted else r.latest_run.status) }}
+                <span class="muted">test {{ r.latest_run.version or '' }}</span>
+              </a>
+              {% endif %}
+              {% if not r.bump and not r.ahead and not r.latest_run %}<span class="muted">Up to date</span>{% endif %}
+            </div>
+          </td>
+          <td class="nowrap">
+            <a href="/snap/{{ r.name }}#issues" class="link-inline">{{ r.issue_count }} / {{ r.pr_count }}</a>
+          </td>
+          <td class="nowrap small">{{ ui.when(r.last_collected) }}</td>
+          <td class="nowrap">
+            <div class="action-row__actions">
+              {% if r.packaging_repo %}
+              <form method="post" action="/snap/{{ r.name }}/rebuild" data-async-action>
+                <button type="submit" class="p-button is-small" title="Trigger the build workflow now">Rebuild</button>
+              </form>
+              {% endif %}
+              <details class="more-menu">
+                <summary class="p-button is-small" aria-label="More actions for {{ r.name }}">⋯</summary>
+                <div class="more-menu__panel" role="menu">
+                  <a href="/snap/{{ r.name }}" class="more-menu__item" role="menuitem">Open</a>
+                  <a href="/snap/{{ r.name }}#configuration" class="more-menu__item" role="menuitem">Configure</a>
+                  {% if r.packaging_repo %}<a href="{{ r.packaging_repo }}" target="_blank" rel="noopener" class="more-menu__item" role="menuitem">Packaging repo ↗</a>{% endif %}
+                  <hr class="more-menu__sep">
+                  <form method="post" action="/snap/{{ r.name }}/remove" data-async-action data-remove-closest="tr"
+                        data-confirm="Stop tracking {{ r.name }}? Its test history and screenshots are deleted too. It will reappear on the next collection if your Store account publishes it.">
+                    <button type="submit" class="more-menu__item more-menu__item--danger" role="menuitem">Stop tracking…</button>
+                  </form>
+                </div>
+              </details>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small" id="snap-filter-empty" hidden>No snaps match that filter.</p>
+  {% else %}
+  {{ ui.empty("You're not tracking any snaps yet. Snaps your Store account publishes are discovered on the next collection, or add one by name.", "#add", "Add a snap", "/settings#store", "Store settings") }}
+  {% endif %}
+</section>
+
+<section class="card" id="fleet-actions" aria-labelledby="fleet-actions-title">
+  <div class="card__header">
+    <h2 class="card__title" id="fleet-actions-title">Fleet actions</h2>
+    <span class="text-muted small">Run once across every tracked snap. Progress shows under <a href="/agents">Agents</a>.</span>
+  </div>
+
+  <div class="action-row">
+    <div class="action-row__text">
+      <strong>Rebuild all snaps</strong>
+      <p class="text-muted small">Dispatch the build workflow now for every packaging repo that already has one. Doesn't add missing workflows.</p>
+    </div>
+    <div class="action-row__actions">
+      <form method="post" action="/snaps/actions/rebuild-all" data-async-action
+            data-confirm="Trigger a rebuild for every tracked snap now?">
+        <button type="submit" class="p-button" {% if not has_github_token %}disabled title="Needs a GitHub token (Settings → GitHub)"{% endif %}>Rebuild all</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="action-row">
+    <div class="action-row__text">
+      <strong>Sync Store credential</strong>
+      <p class="text-muted small">Push your Snap Store credential to every packaging repo as the <code>SNAPCRAFT_STORE_CREDENTIALS</code> secret.</p>
+    </div>
+    <div class="action-row__actions">
+      <form method="post" action="/snaps/actions/sync-credentials" data-async-action
+            data-confirm="Overwrite the Store credential secret in every packaging repo?">
+        <button type="submit" class="p-button" {% if not has_store_credential %}disabled title="Needs a Store credential (Settings → Snap Store)"{% endif %}>Sync credential</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="action-row">
+    <div class="action-row__text">
+      <strong>Normalize packaging repos</strong>
+      <p class="text-muted small">One-off pass that opens PRs to bring every packaging repo's workflows and layout in line.
+        {% if not fleet_normalization_enabled %}Enable it under <a href="/settings#maintenance">Settings → Maintenance automation</a>.{% endif %}</p>
+    </div>
+    <div class="action-row__actions">
+      <form method="post" action="/snaps/actions/normalize-fleet" data-async-action
+            data-confirm="Start fleet normalization? This may open a PR in every packaging repo.">
+        <button type="submit" class="p-button" {% if not fleet_normalization_enabled %}disabled{% endif %}>Run normalization</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var panel = document.getElementById('add');
+  var searchInput = document.getElementById('search-input');
+  var nameHidden = document.getElementById('snap_name_hidden');
+  var publisherHidden = document.getElementById('publisher_hidden');
+  var saveBtn = document.getElementById('save-btn');
+
+  function openAdd() {
+    if (!panel) return;
+    panel.open = true;
+    if (searchInput) searchInput.focus();
+  }
+  if (location.hash === '#add') openAdd();
+  window.addEventListener('hashchange', function () { if (location.hash === '#add') openAdd(); });
+  document.querySelectorAll('.js-open-add').forEach(function (a) {
+    a.addEventListener('click', function (e) { e.preventDefault(); history.replaceState(null, '', '#add'); openAdd(); panel.scrollIntoView({block: 'start'}); });
+  });
+
+  if (searchInput) {
+    searchInput.addEventListener('input', function () {
+      var val = this.value.trim();
+      nameHidden.value = val;
+      saveBtn.disabled = val.length === 0;
+      // Store lookup results belong to the previous name.
+      var results = document.getElementById('search-results');
+      if (results && results.classList.contains('found')) {
+        results.outerHTML = '<div id="search-results" aria-live="polite"></div>';
+        document.getElementById('packaging_repo_main').value = '';
+        document.getElementById('upstream_repo_main').value = '';
+        publisherHidden.value = '';
+      }
+    });
+    searchInput.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); panel.querySelector('[hx-post]').click(); }
+    });
+  }
+
+  document.body.addEventListener('htmx:afterSwap', function (evt) {
+    if (evt.detail.target.id !== 'search-results') return;
+    var result = document.getElementById('search-results');
+    if (!result || !result.classList.contains('found')) return;
+    document.getElementById('packaging_repo_main').value = result.dataset.packagingRepo || '';
+    document.getElementById('upstream_repo_main').value = result.dataset.upstreamRepo || '';
+    publisherHidden.value = result.dataset.publisher || '';
+    nameHidden.value = searchInput.value.trim().toLowerCase();
+    saveBtn.disabled = false;
+  });
+
+  var filter = document.getElementById('snap-filter');
+  if (filter) {
+    filter.addEventListener('input', function () {
+      var q = this.value.trim().toLowerCase();
+      var shown = 0;
+      document.querySelectorAll('#snaps-table tbody tr').forEach(function (tr) {
+        var match = !q || tr.dataset.snap.toLowerCase().indexOf(q) !== -1;
+        tr.hidden = !match;
+        if (match) shown++;
+      });
+      document.getElementById('snap-filter-empty').hidden = shown !== 0;
+    });
+  }
+})();
+</script>
+{% endblock %}
