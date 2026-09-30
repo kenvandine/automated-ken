@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="color-scheme" content="dark">
   <title>{% block title %}Automated Ken{% endblock %}</title>
   <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
   <link rel="stylesheet" href="https://assets.ubuntu.com/v1/vanilla_framework_version_4.59.0.min.css">
@@ -12,6 +11,7 @@
   <script src="/static/app.js" defer></script>
 </head>
 <body>
+<a class="p-link--skip" href="#page-content">Skip to content</a>
 <div class="app">
   <header class="p-navigation is-dark" id="navigation">
     <div class="p-navigation__row">
@@ -37,7 +37,7 @@
           <span class="p-contextual-menu__dropdown" id="nav-user-dropdown" aria-hidden="true">
             <span class="p-contextual-menu__group">
               {% if last_run %}
-              <span class="p-contextual-menu__item nav-last-updated">Data updated {{ last_run.strftime('%Y-%m-%d %H:%M') }} UTC</span>
+              <span class="p-contextual-menu__item nav-last-updated">Data updated {{ last_run | dt('long') }}</span>
               {% endif %}
             </span>
             <span class="p-contextual-menu__group">
@@ -51,20 +51,24 @@
       </div>
       <nav class="p-navigation__nav" aria-label="Main navigation">
         <ul class="p-navigation__items">
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/">Dashboard</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/snaps/add">Add Snap</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/testing">Testing</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/runners">Runners</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/version-bumps">Version Bumps</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/copilot-tasks">Coding Tasks</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/agents">Agents</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/agents/runs">Agent Logs</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/stats">Stats</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/settings">Settings</a></li>
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/docs">Help</a></li>
+          {% set nav_items = [
+            ("/", "Overview", ["/"]),
+            ("/snaps", "Snaps", ["/snaps", "/snap"]),
+            ("/releases", "Releases", ["/releases", "/testing", "/version-bumps"]),
+            ("/agents", "Agents", ["/agents", "/copilot-tasks", "/stats"]),
+            ("/runners", "Runners", ["/runners"]),
+            ("/settings", "Settings", ["/settings"]),
+            ("/docs", "Help", ["/docs"]),
+          ] %}
           {% if current_user and current_user.is_admin %}
-          <li class="p-navigation__item"><a class="p-navigation__link" href="/admin">Admin</a></li>
+          {% set nav_items = nav_items + [("/admin", "Admin", ["/admin"])] %}
           {% endif %}
+          {% for href, label, prefixes in nav_items %}
+          {% set active = nav_active(request, prefixes) %}
+          <li class="p-navigation__item{% if active %} is-selected{% endif %}">
+            <a class="p-navigation__link" href="{{ href }}"{% if active %} aria-current="page"{% endif %}>{{ label }}</a>
+          </li>
+          {% endfor %}
         </ul>
       </nav>
     </div>
@@ -76,10 +80,12 @@
          this same id, so the POST's normal redirect-to-GET response can be
          re-rendered in place instead of navigating. See individual template
          hx-post attributes. -->
-    <div class="row" id="page-content">
+    <main class="row" id="page-content" tabindex="-1">
       {% block content %}{% endblock %}
-    </div>
+    </main>
   </div>
+
+  <div id="toast-region" class="toast-region" role="status" aria-live="polite"></div>
 
   {% block scripts %}{% endblock %}
 
