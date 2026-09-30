@@ -271,6 +271,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
             "status": b.status,
             "href": b.bot_pr_url or "/releases/bumps",
             "snap": name,
+            "version": b.new_version,
             "when": b.updated_at,
         }
         if b.status in BUMP_NEEDS_YOU:
@@ -398,6 +399,11 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
         entry = promoted.setdefault(key, {"snap": t.snap_name, "version": t.version, "arches": [], "when": t.promoted_at})
         entry["arches"].append(t.architecture or "amd64")
     shipped = list(promoted.values())[:10]
+    # Promoting a bump's release set also marks its TestRuns promoted, so
+    # drop bumps already listed from the TestRun side.
+    shipped_bumps = [
+        b for b in shipped_bumps if (b["snap"], b["version"]) not in promoted
+    ]
 
     online = sum(1 for s in runner_states if s in ("idle", "busy", "locked"))
     return {

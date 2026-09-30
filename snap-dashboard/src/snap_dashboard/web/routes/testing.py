@@ -116,8 +116,12 @@ async def testing_index(request: Request, view: str = "queue") -> HTMLResponse:
     user_id = user["id"]
     uc = get_user_config(user_id)
 
+    view = "runs" if view == "runs" else "queue"
     with get_session() as session:
-        snaps_needing_raw = find_snaps_needing_tests(session, user_id=user_id)
+        # The runs tab only shows history, so skip the fleet-wide queue work.
+        snaps_needing_raw = (
+            find_snaps_needing_tests(session, user_id=user_id) if view == "queue" else []
+        )
 
         # Gather plain data only (no network calls) while the session/lock
         # is held. Suite existence is checked lazily by the page's JS via
@@ -228,16 +232,18 @@ async def testing_index(request: Request, view: str = "queue") -> HTMLResponse:
         # see settings.settings_remove_snap — and this is keyed by the
         # snap_name string, not a live FK, so it needs an explicit check)
         # and not explicitly dismissed for this exact version.
-        tracked_snap_names = {
-            s.name for s in session.query(Snap.name).filter_by(user_id=user_id).all()
-        }
-        dismissed = {
-            (d.snap_name, d.version)
-            for d in session.query(PromotionDismissal).filter_by(user_id=user_id).all()
-        }
-        pending_promotion = _build_pending_promotion(
-            session, user_id, runs_data, tracked_snap_names, dismissed
-        )
+        pending_promotion = []
+        if view == "queue":
+            tracked_snap_names = {
+                s.name for s in session.query(Snap.name).filter_by(user_id=user_id).all()
+            }
+            dismissed = {
+                (d.snap_name, d.version)
+                for d in session.query(PromotionDismissal).filter_by(user_id=user_id).all()
+            }
+            pending_promotion = _build_pending_promotion(
+                session, user_id, runs_data, tracked_snap_names, dismissed
+            )
         bumps_needing = bumps_needing_you_count(session, user_id)
 
     return templates.TemplateResponse(
@@ -248,7 +254,7 @@ async def testing_index(request: Request, view: str = "queue") -> HTMLResponse:
             "snaps_needing": prepared,
             "all_runs": runs_data,
             "pending_promotion": pending_promotion,
-            "view": "runs" if view == "runs" else "queue",
+            "view": view,
             "bumps_needing": bumps_needing,
             "last_run": None,
             "current_user": user,

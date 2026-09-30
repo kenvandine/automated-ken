@@ -161,3 +161,45 @@ def test_bumps_page_orders_needs_you_first(db):
     assert "card--tone-caution" in body
     assert 'href="/releases/bumps" class="tab-bar__tab is-active"' in body
 
+
+
+def test_releases_runs_view_skips_queue_work(db, monkeypatch):
+    uid = _seed(db)
+
+    def _boom(*a, **k):
+        raise AssertionError("queue-only work ran for the runs tab")
+
+    monkeypatch.setattr(testing_module, "find_snaps_needing_tests", _boom)
+    monkeypatch.setattr(testing_module, "_build_pending_promotion", _boom)
+    resp = asyncio.run(testing_module.releases_runs(_get(uid, "/releases/runs")))
+    assert resp.status_code == 200
+
+
+def test_snaps_add_redirects_permanently():
+    from snap_dashboard.web.routes import snaps as snaps_module
+
+    r = asyncio.run(snaps_module.snap_add_get(_get(1, "/snaps/add")))
+    assert (r.status_code, r.headers["location"]) == (301, "/snaps#add")
+
+
+def test_task_failure_statuses_are_negative():
+    from snap_dashboard.web.templating import status_info
+
+    assert status_info("dispatch_failed")["tone"] == "negative"
+    assert status_info("timed_out")["tone"] == "negative"
+
+
+def test_overview_does_not_list_promoted_bump_twice(db):
+    from snap_dashboard.web import fleet
+
+    uid = _seed(db)
+    s = db()
+    s.add(TestRun(user_id=uid, snap_name="alpha", version="1.9", architecture="amd64",
+                  from_channel="candidate", status="passed", started_at=_now(),
+                  promoted=True, promoted_at=_now()))
+    s.query(VersionBumpPR).filter_by(new_version="1.9").update({"updated_at": _now()})
+    s.commit()
+    overview = fleet.build_overview(s, uid, rows=[])
+    s.close()
+    assert [(x["snap"], x["version"]) for x in overview["shipped"]] == [("alpha", "1.9")]
+    assert overview["shipped_bumps"] == []

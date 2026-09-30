@@ -78,7 +78,7 @@ def snaps_index(request: Request) -> HTMLResponse:
 
 @router.get("/snaps/add")
 async def snap_add_get(request: Request) -> RedirectResponse:
-    return RedirectResponse(url="/snaps#add", status_code=302)
+    return RedirectResponse(url="/snaps#add", status_code=301)
 
 
 @router.post("/snaps/actions/{action}")

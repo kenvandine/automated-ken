@@ -238,6 +238,14 @@
       var val = this.value.trim();
       nameHidden.value = val;
       saveBtn.disabled = val.length === 0;
+      // Store lookup results belong to the previous name.
+      var results = document.getElementById('search-results');
+      if (results && results.classList.contains('found')) {
+        results.outerHTML = '<div id="search-results" aria-live="polite"></div>';
+        document.getElementById('packaging_repo_main').value = '';
+        document.getElementById('upstream_repo_main').value = '';
+        publisherHidden.value = '';
+      }
     });
     searchInput.addEventListener('keydown', function (e) {
       if (e.key === 'Enter') { e.preventDefault(); panel.querySelector('[hx-post]').click(); }

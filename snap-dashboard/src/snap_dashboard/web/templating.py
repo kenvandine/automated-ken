@@ -69,6 +69,8 @@ STATUS_TONES: dict[str, tuple[str, str]] = {
     "queued": ("neutral", "Queued"),
     "in_progress": ("info", "In progress"),
     "waiting_for_user": ("caution", "Waiting for you"),
+    "dispatch_failed": ("negative", "Dispatch failed"),
+    "timed_out": ("negative", "Timed out"),
     "completed": ("positive", "Completed"),
     "success": ("positive", "Success"),
     "failure": ("negative", "Failed"),

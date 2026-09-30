@@ -157,9 +157,11 @@
       credentials: 'same-origin'
     })
       .then(function (resp) {
-        return resp.json().catch(function () { return { ok: resp.ok }; }).then(function (data) {
+        // A non-JSON body (e.g. the login page after a redirect on an
+        // expired session) means the action did not run.
+        return resp.json().catch(function () { return { ok: false }; }).then(function (data) {
           data = data || {};
-          if (data.ok === undefined) data.ok = resp.ok;
+          data.ok = resp.ok && data.ok !== false && !data.error;
           return data;
         });
       })
