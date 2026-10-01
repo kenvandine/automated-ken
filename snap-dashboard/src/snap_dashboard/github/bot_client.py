@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import logging
 import re
+import time
 
 import httpx
 
@@ -233,20 +234,39 @@ class BotGitHubClient:
     ) -> tuple[bool, str]:
         """Dispatch a workflow_dispatch event.
 
+        GitHub's dispatches endpoint occasionally returns a bare 500
+        ("Failed to run workflow dispatch") for an otherwise well-formed
+        request — a known transient flake, not a sign of a bad token/ref/
+        workflow (those get a proper 403/404/422). Retry a couple of times
+        with a short backoff before giving up, since an immediate retry
+        has been observed to succeed.
+
         Returns (success, error_message).
         """
         url = f"{_GH_API}/repos/{owner}/{repo}/actions/workflows/{workflow_file}/dispatches"
         payload: dict = {"ref": ref}
         if inputs:
             payload["inputs"] = inputs
-        try:
-            with httpx.Client(timeout=15) as client:
-                resp = client.post(url, json=payload, headers=_headers(self.token))
-            if resp.status_code == 204:
-                return True, ""
-            return False, f"GitHub API returned {resp.status_code}: {resp.text[:300]}"
-        except Exception as exc:
-            return False, str(exc)
+        attempts = 3
+        last_err = ""
+        for attempt in range(attempts):
+            try:
+                with httpx.Client(timeout=15) as client:
+                    resp = client.post(url, json=payload, headers=_headers(self.token))
+                if resp.status_code == 204:
+                    return True, ""
+                last_err = f"GitHub API returned {resp.status_code}: {resp.text[:300]}"
+                if resp.status_code < 500:
+                    return False, last_err
+            except Exception as exc:
+                last_err = str(exc)
+            if attempt < attempts - 1:
+                logger.warning(
+                    "dispatch_workflow %s/%s %s: transient failure (%s), retrying…",
+                    owner, repo, workflow_file, last_err,
+                )
+                time.sleep(2 * (attempt + 1))
+        return False, last_err
 
     def list_tree(self, owner: str, repo: str, ref: str | None = None) -> list[str]:
         """Return every file path in the repo at ``ref`` (recursive git tree), or ``[]``.
