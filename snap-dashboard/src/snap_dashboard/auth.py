@@ -71,6 +71,7 @@ def get_user_config(user_id: int) -> "UserConfigView":
                 auto_rebuild_stale=uc.auto_rebuild_stale or False,
                 stale_build_days=uc.stale_build_days or 30,
                 auto_fix_ci_failures=uc.auto_fix_ci_failures or False,
+                auto_fix_build_failures=uc.auto_fix_build_failures or False,
                 auto_maintain_upstream=uc.auto_maintain_upstream or False,
                 fleet_normalization_enabled=uc.fleet_normalization_enabled or False,
                 coding_task_backend=uc.coding_task_backend or "copilot_cloud_agent",
@@ -106,6 +107,7 @@ class UserConfigView:
         auto_rebuild_stale: bool = False,
         stale_build_days: int = 30,
         auto_fix_ci_failures: bool = False,
+        auto_fix_build_failures: bool = False,
         auto_maintain_upstream: bool = False,
         fleet_normalization_enabled: bool = False,
         coding_task_backend: str = "copilot_cloud_agent",
@@ -133,6 +135,7 @@ class UserConfigView:
         self.auto_rebuild_stale = auto_rebuild_stale
         self.stale_build_days = stale_build_days
         self.auto_fix_ci_failures = auto_fix_ci_failures
+        self.auto_fix_build_failures = auto_fix_build_failures
         self.auto_maintain_upstream = auto_maintain_upstream
         self.fleet_normalization_enabled = fleet_normalization_enabled
         self.coding_task_backend = coding_task_backend
