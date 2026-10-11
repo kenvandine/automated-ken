@@ -52,6 +52,94 @@ def _is_newer_build(rev: int | None, other_rev: int | None, ver: str | None, oth
     return is_newer(ver, other_ver)
 
 
+# Runs in these statuses are still "live" in some sense — either sitting in
+# the queue or holding a conclusive-but-unpromoted result — and so are
+# candidates to be marked superseded once a newer version/revision of the
+# same snap+channel+architecture shows up. Already-terminal statuses
+# (promoted, cancelled, superseded) are left alone: a promoted run is real
+# history, and the other two are already out of everyone's way.
+_SUPERSEDABLE_STATUSES = ("pending", "triggered", "running", "reviewing", "passed", "failed", "error")
+# Runs actually executing on a runner right now can't just have their
+# status overwritten here — update_job (runner_api.py) blindly trusts
+# whatever the runner reports next and would stomp it right back. Instead
+# these only get cancel_requested set, same as the manual "cancel" button,
+# so the runner notices and reports its own terminal status.
+_IN_FLIGHT_STATUSES = ("triggered", "running", "reviewing")
+
+
+def supersede_stale_runs(
+    session,
+    user_id: int | None = None,
+    snap_name: str | None = None,
+    from_channel: str | None = None,
+    architecture: str | None = None,
+) -> int:
+    """Mark runs as ``superseded`` once a newer version/revision exists.
+
+    A snap can accumulate several candidate (or edge) versions before any
+    of them actually gets promoted — each queued, tested, and left
+    "passed, unpromoted" when the next version bump landed before a human
+    got to it. Left alone, every one of those older versions keeps
+    showing up as its own "ready to promote" card (see
+    ``testing._build_pending_promotion``) and, if still queued, keeps
+    occupying a runner slot a newer version actually needs tested.
+
+    Grouped by (user, snap, channel, architecture) — the same scope
+    :func:`candidate_release_set` reasons about one version at a time —
+    the newest run per group (by Store revision, falling back to the
+    version-string heuristic; see :func:`_is_newer_build`) is left as-is;
+    every strictly older run in the group still in a "live" status (see
+    :data:`_SUPERSEDABLE_STATUSES`) is superseded. Runs still in-flight on
+    a runner only get ``cancel_requested`` set (see
+    :data:`_IN_FLIGHT_STATUSES`) rather than a direct status change.
+
+    Pass ``snap_name``/``from_channel``/``architecture`` to scope the scan
+    to the one group a caller just added a run to (cheap, called on every
+    queue); omit them to sweep every group for ``user_id`` (a full queue
+    review, e.g. on page load). Returns how many runs were superseded or
+    flagged for cancellation.
+    """
+    query = session.query(TestRun).filter(TestRun.status.in_(_SUPERSEDABLE_STATUSES))
+    if user_id is not None:
+        query = query.filter_by(user_id=user_id)
+    if snap_name is not None:
+        query = query.filter_by(snap_name=snap_name)
+    if from_channel is not None:
+        query = query.filter_by(from_channel=from_channel)
+    if architecture is not None:
+        query = query.filter_by(architecture=architecture)
+
+    groups: dict[tuple, list[TestRun]] = {}
+    for run in query.all():
+        key = (run.user_id, run.snap_name, run.from_channel, run.architecture or "amd64")
+        groups.setdefault(key, []).append(run)
+
+    now = datetime.now(timezone.utc)
+    changed = 0
+    for runs in groups.values():
+        if len(runs) < 2:
+            continue
+        newest = runs[0]
+        for run in runs[1:]:
+            if _is_newer_build(run.revision, newest.revision, run.version, newest.version):
+                newest = run
+        for run in runs:
+            if run is newest:
+                continue
+            # A tie (same version/revision, e.g. a duplicate manual
+            # re-trigger) isn't "older" — leave those to the existing
+            # most-conclusive-wins handling in release_set._precedence.
+            if not _is_newer_build(newest.revision, run.revision, newest.version, run.version):
+                continue
+            if run.status in _IN_FLIGHT_STATUSES:
+                run.cancel_requested = True
+            else:
+                run.status = "superseded"
+                run.finished_at = run.finished_at or now
+            changed += 1
+    return changed
+
+
 def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
     """Return snaps where candidate or edge version differs from stable, as a set.
 
@@ -236,6 +324,16 @@ def queue_auto_tests(user_id: int) -> int:
             queued += 1
         else:
             logger.warning("auto-test: failed to queue %s %s (%s): %s", snap_name, version, arch, err)
+
+    # trigger_remote_run above already supersedes stale runs within the
+    # exact group each new run belongs to, but a channel-map refresh can
+    # also move a version ahead without this user needing a new run queued
+    # at all (e.g. every architecture already has a passed, unpromoted run
+    # for the new version from an earlier manual trigger) — sweep the
+    # whole queue so an older version's cards/jobs don't linger in that
+    # case either.
+    with get_session() as session:
+        supersede_stale_runs(session, user_id=user_id)
     return queued
 
 
@@ -424,6 +522,14 @@ def trigger_remote_run(
         )
         session.add(run)
         session.flush()
+        # This run is, by construction, the newest thing queued for this
+        # snap/channel/architecture — immediately supersede whatever older
+        # version was still queued or sitting passed-but-unpromoted so the
+        # backlog doesn't keep growing one card per un-promoted version.
+        supersede_stale_runs(
+            session, user_id=user_id, snap_name=snap_name,
+            from_channel=from_channel, architecture=architecture,
+        )
         return True, "", run.id
 
 

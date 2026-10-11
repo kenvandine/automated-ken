@@ -15,6 +15,7 @@ from snap_dashboard.db.session import get_session
 from snap_dashboard.testing.orchestrator import (
     find_snaps_needing_tests,
     suite_exists_in_repo,
+    supersede_stale_runs,
     sync_test_runs,
     trigger_remote_run,
 )
@@ -118,6 +119,13 @@ async def testing_index(request: Request, view: str = "queue") -> HTMLResponse:
 
     view = "runs" if view == "runs" else "queue"
     with get_session() as session:
+        if view == "queue":
+            # Review the whole queue for this user before deciding what's
+            # "ready to promote": a backlog of older candidate versions
+            # left passed-but-unpromoted (or still queued) once a newer
+            # version showed up would otherwise keep showing one card per
+            # version forever — see supersede_stale_runs.
+            supersede_stale_runs(session, user_id=user_id)
         # The runs tab only shows history, so skip the fleet-wide queue work.
         snaps_needing_raw = (
             find_snaps_needing_tests(session, user_id=user_id) if view == "queue" else []

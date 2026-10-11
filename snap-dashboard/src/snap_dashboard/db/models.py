@@ -282,7 +282,10 @@ class TestRun(Base):
     # packaging repo when it has colocated YARF tests (tests/suite/), or the
     # legacy shared testing repo as a fallback for snaps not yet migrated.
     repo = Column(String(500), nullable=True)
-    # statuses: pending, triggered, running, reviewing, passed, failed, error, promoted
+    # statuses: pending, triggered, running, reviewing, passed, failed, error,
+    # promoted, cancelled, superseded (a newer version/revision of the same
+    # snap+channel+architecture came along — see
+    # testing.orchestrator.supersede_stale_runs)
     status = Column(String(32), nullable=False, default="pending")
     gh_run_id = Column(String(128), nullable=True)  # GitHub Actions run ID
     pr_number = Column(Integer, nullable=True)

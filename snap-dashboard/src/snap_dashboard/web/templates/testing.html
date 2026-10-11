@@ -313,7 +313,7 @@ This is an intentional override of the normal all-architectures gate. Continue?{
 {% block scripts %}
 <script>
 (function () {
-  const TERMINAL = new Set(['passed', 'failed', 'error', 'promoted']);
+  const TERMINAL = new Set(['passed', 'failed', 'error', 'promoted', 'superseded']);
 
   function setChip(el, status) {
     const info = AK.statusInfo(status);

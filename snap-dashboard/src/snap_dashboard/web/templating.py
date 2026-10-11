@@ -42,6 +42,7 @@ STATUS_TONES: dict[str, tuple[str, str]] = {
     "error": ("negative", "Error"),
     "promoted": ("positive", "Promoted"),
     "cancelled": ("neutral", "Cancelled"),
+    "superseded": ("neutral", "Superseded"),
     "ready": ("positive", "Ready"),
     # AI review decisions
     "approve": ("positive", "AI approved"),
