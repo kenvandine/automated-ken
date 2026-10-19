@@ -215,7 +215,7 @@ def test_edit_snap_type_radio(db):
     async def _edit(**kw):
         return await snaps_module.snap_edit(
             request=_request(uid), name="alpha", packaging_repo="https://github.com/k/alpha",
-            upstream_repo="", notes="", **kw,
+            upstream_repo="", notes="", **{"required_architectures": [], **kw},
         )
 
     asyncio.run(_edit(is_console_app="", is_service="", snap_type="service"))

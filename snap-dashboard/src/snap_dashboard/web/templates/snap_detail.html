@@ -523,6 +523,19 @@
         <strong>Service</strong>: no UI — install the snap to confirm the package is good, then pass.
       </p>
     </fieldset>
+    <fieldset class="form-row">
+      <legend class="form-label">Required architectures</legend>
+      {% for arch in ['amd64', 'arm64'] %}
+      <label style="margin-right:1rem">
+        <input type="checkbox" name="required_architectures" value="{{ arch }}" {% if arch in snap.required_architectures %}checked{% endif %}> {{ arch }}
+      </label>
+      {% endfor %}
+      <p class="form-hint">
+        Tests must pass on these architectures before a release set is promoted to stable.
+        Unchecked architectures aren't tested; they're promoted along with the required ones,
+        even if their tests would fail. Leave both checked to require every architecture.
+      </p>
+    </fieldset>
     <div class="form-row">
       <label class="form-label" for="notes">Notes</label>
       <textarea id="notes" name="notes" class="form-input form-textarea" rows="3"

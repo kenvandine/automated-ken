@@ -52,6 +52,11 @@ revisions, tested on every architecture after merge.
   and (for auto-promotion) been approved by the vision review. You can
   override a missing architecture manually, but the override has to be
   confirmed and is recorded.
+- **Required architectures (per snap).** On a snap's page you can limit
+  which architectures must pass. The others aren't tested; once the required
+  ones are approved, they're promoted with the set regardless of results
+  (e.g. require amd64 only for a game that won't launch on a Raspberry Pi).
+  Snaps without this setting require every architecture.
 
 ## Features
 

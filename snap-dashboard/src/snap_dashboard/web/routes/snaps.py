@@ -29,6 +29,7 @@ from snap_dashboard.github.repo_discovery import (
     get_cached_packaging_repo_map,
 )
 from snap_dashboard.github.utils import parse_repo_slug
+from snap_dashboard.testing.orchestrator import TESTABLE_ARCHITECTURES, parse_required_architectures
 from snap_dashboard.store.client import extract_repo_urls, get_snap_info
 from snap_dashboard.web.fleet import build_snap_rows
 from snap_dashboard.web.fleet_actions import remove_snap, run_fleet_action
@@ -378,6 +379,8 @@ def snap_detail(request: Request, name: str, background_tasks: BackgroundTasks) 
             "notes": snap.notes,
             "is_console_app": snap.is_console_app,
             "is_service": snap.is_service,
+            "required_architectures": parse_required_architectures(snap.required_architectures)
+            or set(TESTABLE_ARCHITECTURES),
             "created_at": snap.created_at,
             "updated_at": snap.updated_at,
             "packaging_repo_suggested": None,
@@ -830,6 +833,7 @@ async def snap_edit(
     is_console_app: str = Form(default=""),
     is_service: str = Form(default=""),
     snap_type: str = Form(default=""),
+    required_architectures: list[str] = Form(default=[]),
 ) -> RedirectResponse:
     """Update snap metadata."""
     user = get_current_user(request)
@@ -857,6 +861,11 @@ async def snap_edit(
             is_service = "true" if snap_type == "service" else ""
             is_console_app = "true" if snap_type == "console" else ""
         snap.is_service = is_service == "true"
+        required = [a for a in TESTABLE_ARCHITECTURES if a in required_architectures]
+        # All (or none) checked means no restriction.
+        snap.required_architectures = (
+            ",".join(required) if 0 < len(required) < len(TESTABLE_ARCHITECTURES) else None
+        )
         # A snap can't be both a console app and a service — service wins
         # if the form somehow submits both (shouldn't happen; the UI
         # treats them as mutually exclusive).

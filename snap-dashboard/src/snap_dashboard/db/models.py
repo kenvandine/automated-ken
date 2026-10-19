@@ -182,6 +182,11 @@ class Snap(Base):
     # exclusive with is_console_app in practice (the UI only lets one be
     # set at a time), but this flag always wins if both are somehow set.
     is_service = Column(Boolean, default=False, nullable=False)
+    # Comma-separated architectures (e.g. "amd64") whose tests must pass
+    # before a release set is promoted. NULL/empty = every testable
+    # architecture is required. Other architectures are not tested and are
+    # promoted alongside the required ones — see testing/release_set.py.
+    required_architectures = Column(Text, nullable=True)
     created_at = Column(DateTime, default=_now, nullable=False)
     updated_at = Column(DateTime, default=_now, onupdate=_now, nullable=False)
 

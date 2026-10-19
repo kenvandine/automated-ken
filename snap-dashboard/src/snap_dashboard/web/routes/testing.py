@@ -26,6 +26,7 @@ from snap_dashboard.testing.release_set import (
     describe,
     member_state,
     promote_release_set,
+    split_required,
 )
 from snap_dashboard.web.fleet import bumps_needing_you_count
 from snap_dashboard.web.templating import templates
@@ -173,7 +174,11 @@ async def testing_index(request: Request, view: str = "queue") -> HTMLResponse:
             promote_ready: list[str] = []
             promote_blocked: list[str] = []
             if item["can_promote"]:
-                for member in candidate_release_set(session, user_id, snap_name, item["version"]):
+                required_members, _ = split_required(
+                    session, user_id, snap_name,
+                    candidate_release_set(session, user_id, snap_name, item["version"]),
+                )
+                for member in required_members:
                     state = member_state(member)
                     if state == READY:
                         promote_ready.append(member["architecture"])
@@ -874,10 +879,10 @@ def promote_set(
         return_to = "/releases"
 
     with get_session() as session:
-        states = [
-            (m, member_state(m))
-            for m in candidate_release_set(session, user_id, snap_name, version)
-        ]
+        required, companions = split_required(
+            session, user_id, snap_name, candidate_release_set(session, user_id, snap_name, version)
+        )
+        states = [(m, member_state(m)) for m in required]
         ready_ids = [m["run"].id for m, st in states if st == READY]
         blocked = [describe(m, st) for m, st in states if st not in (READY, PROMOTED)]
 
@@ -893,7 +898,7 @@ def promote_set(
 
     promote_release_set(
         user_id, snap_name, version, ready_ids, get_user_config(user_id),
-        skipped=blocked if override else None,
+        skipped=blocked if override else None, companions=companions,
     )
     return RedirectResponse(url=return_to, status_code=303)
 

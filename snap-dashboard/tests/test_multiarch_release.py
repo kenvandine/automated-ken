@@ -227,3 +227,37 @@ def test_promote_refuses_while_set_is_already_promoting(db):
     uc = SimpleNamespace(snapcraft_macaroon="m", github_token="", testing_repo="")
     promoted, failures = release_set.promote_release_set(alice, "foo", "2.0", [amd_id, arm_id], uc)
     assert promoted == [] and "already in progress" in failures[0]
+
+
+def test_non_required_arch_is_promoted_with_required_even_if_failed(db, monkeypatch):
+    released = []
+    monkeypatch.setattr(
+        "snap_dashboard.testing.promoter.promote_snap",
+        lambda name, rev, channel, store_credentials="": (released.append(rev) or True, "ok"),
+    )
+    monkeypatch.setattr("snap_dashboard.store.client.verify_channel_revision", lambda *a, **k: True)
+    monkeypatch.setattr(
+        "snap_dashboard.testing.baselines.persist_stable_baseline_for_run", lambda *a, **k: 0
+    )
+    with db() as s:
+        (alice,) = _users(s, 1)
+        amd_id, arm_id = _candidate_set(s, alice, arm_review="approve")
+        s.query(Snap).filter_by(name="foo").one().required_architectures = "amd64"
+        s.query(TestRun).get(arm_id).status = "failed"
+
+    with db() as s:
+        required, companions = release_set.split_required(
+            s, alice, "foo", release_set.candidate_release_set(s, alice, "foo", "2.0")
+        )
+        assert [m["architecture"] for m in required] == ["amd64"]
+        assert [m["architecture"] for m in companions] == ["arm64"]
+        assert release_set.member_state(required[0], auto_threshold=0.85) == release_set.READY
+
+    uc = SimpleNamespace(snapcraft_macaroon="m", github_token="", testing_repo="")
+    promoted, failures = release_set.promote_release_set(
+        alice, "foo", "2.0", [amd_id], uc, companions=companions
+    )
+    assert sorted(promoted) == ["amd64", "arm64"] and not failures
+    assert len(released) == 2
+    with db() as s:
+        assert s.query(TestRun).get(arm_id).promoted

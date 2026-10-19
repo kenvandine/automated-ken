@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from snap_dashboard.db.models import ChannelMap, Snap, TestRun, VersionBumpPR
 from snap_dashboard.db.session import get_session
-from snap_dashboard.testing.orchestrator import TESTABLE_ARCHITECTURES
+from snap_dashboard.testing.orchestrator import TESTABLE_ARCHITECTURES, parse_required_architectures
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,27 @@ def candidate_release_set(session, user_id: int, snap_name: str, version: str) -
     return members
 
 
+def split_required(
+    session, user_id: int, snap_name: str, members: list[dict]
+) -> tuple[list[dict], list[dict]]:
+    """Split a release set into ``(required, companions)``.
+
+    Required members must pass (and be approved) before promotion;
+    companions — architectures the snap's owner chose not to gate on — are
+    promoted along with them whatever their test state. If the snap has no
+    restriction, or none of its required architectures are in the set,
+    every member is required.
+    """
+    snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
+    required = parse_required_architectures(snap.required_architectures if snap else None)
+    if not required or not any(m["architecture"] in required for m in members):
+        return members, []
+    return (
+        [m for m in members if m["architecture"] in required],
+        [m for m in members if m["architecture"] not in required],
+    )
+
+
 def member_state(member: dict, auto_threshold: float | None = None) -> str:
     """Return ``"promoted"``, ``"ready"``, or a short reason the member isn't ready.
 
@@ -127,9 +148,11 @@ def queue_candidate_tests(user_id: int, snap_name: str, version: str, force: boo
     from snap_dashboard.testing.orchestrator import trigger_remote_run
 
     with get_session() as session:
+        members = candidate_release_set(session, user_id, snap_name, version)
+        required, _companions = split_required(session, user_id, snap_name, members)
         wanted = [
             (m["architecture"], m["revision"])
-            for m in candidate_release_set(session, user_id, snap_name, version)
+            for m in required
             if (force or m["run"] is None) and not m["promoted"]
         ]
     queued = []
@@ -156,6 +179,7 @@ def promote_release_set(
     run_ids: list[int],
     uc,
     skipped: list[str] | None = None,
+    companions: list[dict] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Promote the given runs' revisions to stable as one set.
 
@@ -165,6 +189,10 @@ def promote_release_set(
     ``skipped`` lists architectures deliberately left out by a manual
     override; it's recorded on each promoted run so the override is never
     mistaken for a normal full-set promotion.
+
+    ``companions`` are release-set members of architectures that aren't
+    required to pass (see :func:`split_required`); once the required runs
+    are promoted they're released too, regardless of their test result.
 
     Returns ``(promoted_architectures, failure_messages)``.
     """
@@ -242,6 +270,31 @@ def promote_release_set(
                 run.status = "passed"
                 run.error_msg = f"Promotion failed: {output[:400]}"
                 failures.append(f"{item['arch']} rev {item['revision']}: {output[:200]}")
+
+    if companions and not failures and promoted_archs:
+        for member in companions:
+            arch, revision = member["architecture"], member["revision"]
+            if member["promoted"]:
+                continue
+            if revision is None:
+                failures.append(f"{arch}: no revision to promote")
+                continue
+            ok, output = promote_snap(snap_name, revision, "stable", store_credentials=credentials)
+            if ok and not verify_channel_revision(snap_name, arch, revision):
+                ok, output = False, "stable channel-map doesn't show this revision"
+            if not ok:
+                failures.append(f"{arch} rev {revision}: {output[:200]}")
+                continue
+            promoted_archs.append(arch)
+            run = member["run"]
+            with get_session() as session:
+                row = session.query(TestRun).get(run.id) if run else None
+                if row is not None and row.status not in ("pending", "triggered", "running", "reviewing", "promoting"):
+                    was = row.status
+                    row.status = "promoted"
+                    row.promoted = True
+                    row.promoted_at = datetime.now(timezone.utc)
+                    row.error_msg = f"Promoted with {', '.join(i['arch'] for i in claimed)} (not a required architecture; test was {was})."
 
     for item in claimed:
         if item["arch"] in promoted_archs:

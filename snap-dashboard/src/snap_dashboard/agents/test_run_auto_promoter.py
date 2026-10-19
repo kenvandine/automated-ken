@@ -191,10 +191,12 @@ class TestRunAutoPromoterAgent(BaseAgent):
             describe,
             member_state,
             promote_release_set,
+            split_required,
         )
 
         with get_session() as session:
-            members = candidate_release_set(session, self.user_id, snap_name, version)
+            all_members = candidate_release_set(session, self.user_id, snap_name, version)
+            members, companions = split_required(session, self.user_id, snap_name, all_members)
             states = [(m, member_state(m, auto_threshold=threshold)) for m in members]
             ready_ids = [m["run"].id for m, st in states if st == READY]
             waiting = [describe(m, st) for m, st in states if st not in (READY, "promoted")]
@@ -211,8 +213,12 @@ class TestRunAutoPromoterAgent(BaseAgent):
             return f"{snap_name}: nothing left to promote"
 
         arch_list = ", ".join(m["architecture"] for m, st in states if st == READY)
+        if companions:
+            arch_list += " + " + ", ".join(m["architecture"] for m in companions)
         self._report(f"Promoting {snap_name} {version} ({arch_list}) to stable…", snap_name)
-        promoted, failures = promote_release_set(self.user_id, snap_name, version, ready_ids, uc)
+        promoted, failures = promote_release_set(
+            self.user_id, snap_name, version, ready_ids, uc, companions=companions
+        )
         if failures:
             return f"{snap_name}: promoted {', '.join(promoted) or 'nothing'}; failed: {'; '.join(failures)}"
 

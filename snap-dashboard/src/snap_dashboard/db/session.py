@@ -106,6 +106,7 @@ def _migrate() -> None:
         # Console-app opt-in for the generic desktop smoke test (see
         # Snap.is_console_app in db/models.py).
         "ALTER TABLE snaps ADD COLUMN is_console_app BOOLEAN DEFAULT 0",
+        "ALTER TABLE snaps ADD COLUMN required_architectures TEXT",
         "ALTER TABLE collection_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
         "ALTER TABLE test_runs ADD COLUMN user_id INTEGER REFERENCES users(id)",
         # Agentic phase: new UserConfig columns

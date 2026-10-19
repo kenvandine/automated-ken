@@ -644,7 +644,8 @@ class PRMonitorAgent(BaseAgent):
         refresh_channel_map(pr["snap_id"], snap_name)
 
         with get_session() as session:
-            archs = get_snap_architectures(session, pr["snap_id"])
+            archs = get_snap_architectures(session, pr["snap_id"], all_architectures=True)
+            tested_archs = get_snap_architectures(session, pr["snap_id"])
             published = {
                 (cm.channel, cm.architecture): cm.revision
                 for cm in session.query(ChannelMap).filter_by(snap_id=pr["snap_id"], version=version)
@@ -681,9 +682,9 @@ class PRMonitorAgent(BaseAgent):
         queue_candidate_tests(pr["user_id"], snap_name, version)
         _set_status(
             pr["id"], "candidate_testing",
-            f"{version} is in candidate; testing {', '.join(archs)} before promoting to stable.",
+            f"{version} is in candidate; testing {', '.join(tested_archs)} before promoting to stable.",
         )
-        self._report(f"Testing {snap_name} {version} from candidate ({', '.join(archs)})", snap_name, pr["user_id"])
+        self._report(f"Testing {snap_name} {version} from candidate ({', '.join(tested_archs)})", snap_name, pr["user_id"])
         return True
 
     def _check_candidate_set(self, pr: dict, uc) -> bool:
@@ -703,13 +704,15 @@ class PRMonitorAgent(BaseAgent):
             member_state,
             promote_release_set,
             queue_candidate_tests,
+            split_required,
         )
 
         snap_name, version, user_id = pr["snap_name"], pr["new_version"], pr["user_id"]
         threshold = float(getattr(uc, "auto_promote_confidence", 0.85) or 0.85) if uc else 0.85
         with get_session() as session:
             archs = get_snap_architectures(session, pr["snap_id"])
-            members = candidate_release_set(session, user_id, snap_name, version)
+            all_members = candidate_release_set(session, user_id, snap_name, version)
+            members, companions = split_required(session, user_id, snap_name, all_members)
             states = [(m, member_state(m, auto_threshold=threshold)) for m in members]
             covered = {m["architecture"] for m in members}
             untested = any(m["run"] is None and not m["promoted"] for m in members)
@@ -743,7 +746,9 @@ class PRMonitorAgent(BaseAgent):
             return True
 
         self._report(f"Promoting {snap_name} {version} to stable…", snap_name, user_id)
-        promoted, failures = promote_release_set(user_id, snap_name, version, ready_ids, uc)
+        promoted, failures = promote_release_set(
+            user_id, snap_name, version, ready_ids, uc, companions=companions
+        )
         if failures:
             _set_status(pr["id"], "needs_review", f"Promotion to stable failed: {'; '.join(failures)}")
         return True

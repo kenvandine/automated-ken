@@ -254,7 +254,13 @@ def find_snaps_needing_tests(session, user_id: int | None = None) -> list[dict]:
 TESTABLE_ARCHITECTURES = ("amd64", "arm64")
 
 
-def get_snap_architectures(session, snap_id: int) -> list[str]:
+def parse_required_architectures(value: str | None) -> set[str] | None:
+    """Parse ``Snap.required_architectures``; None means "all testable"."""
+    archs = {a.strip() for a in (value or "").split(",") if a.strip() in TESTABLE_ARCHITECTURES}
+    return archs or None
+
+
+def get_snap_architectures(session, snap_id: int, all_architectures: bool = False) -> list[str]:
     """Return the architectures to queue YARF tests for, in a stable order.
 
     Sourced from :class:`ChannelMap` (mirrors the Store's real per-arch
@@ -265,15 +271,22 @@ def get_snap_architectures(session, snap_id: int) -> list[str]:
     callers always get at least one architecture to test; a snap that *does*
     have channel-map data but ships none of the testable architectures
     returns an empty list rather than guessing.
+
+    When the snap restricts ``required_architectures`` only those are
+    returned (the ones tests must pass on) unless ``all_architectures``.
     """
     archs = {
         row[0]
         for row in session.query(ChannelMap.architecture).filter_by(snap_id=snap_id).distinct()
         if row[0]
     }
-    if not archs:
-        return ["amd64"]
-    return [a for a in TESTABLE_ARCHITECTURES if a in archs]
+    result = [a for a in TESTABLE_ARCHITECTURES if a in archs] if archs else ["amd64"]
+    if not all_architectures:
+        snap = session.query(Snap).get(snap_id)
+        required = parse_required_architectures(snap.required_architectures if snap else None)
+        if required:
+            result = [a for a in result if a in required]
+    return result
 
 
 def queue_auto_tests(user_id: int) -> int:
