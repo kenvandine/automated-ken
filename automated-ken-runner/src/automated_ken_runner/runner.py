@@ -38,8 +38,20 @@ _POLL_TIMEOUT_SECONDS = 25
 _IDLE_THRESHOLD_SECONDS = 120
 # How long to let a newly-launched app finish rendering before screenshotting
 # it in the generic desktop smoke test.
-_APP_SETTLE_SECONDS = 15
-_APP_LAUNCH_TIMEOUT_SECONDS = 30
+# Slow devices (e.g. arm64 Raspberry Pi) need much longer on a cold start, so
+# both waits are overridable via the environment.
+
+
+def _env_seconds(name: str, default: float) -> float:
+    try:
+        value = float(os.environ.get(name, ""))
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+_APP_SETTLE_SECONDS = _env_seconds("AUTOMATED_KEN_APP_SETTLE_SECONDS", 30)
+_APP_LAUNCH_TIMEOUT_SECONDS = _env_seconds("AUTOMATED_KEN_APP_LAUNCH_TIMEOUT_SECONDS", 90)
 # Terminal emulator used to run "console app" snaps (see Snap.is_console_app)
 # so their text UI actually renders on-screen for the screenshot instead of
 # running headless with nothing to capture. `ptyxis -- CMD` (rather than
