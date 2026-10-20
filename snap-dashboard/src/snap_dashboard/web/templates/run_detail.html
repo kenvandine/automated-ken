@@ -5,6 +5,7 @@
 
 {% block content %}
 
+<span id="run-live" data-run-id="{{ run.id }}" data-state="{{ run.status }}|{{ run.review_decision or '' }}|{{ 1 if run.promoted else 0 }}|{{ 1 if run.has_log else 0 }}" hidden></span>
 <a href="/releases/runs" class="back-link">&larr; Test runs</a>
 
 <div class="page-title-row">
@@ -95,4 +96,8 @@ This is an intentional override of the normal all-architectures gate. Continue?{
 
 {% include "_screenshot_review.html" %}
 
+{% endblock %}
+
+{% block scripts %}
+{% include "_run_live.html" %}
 {% endblock %}

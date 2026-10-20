@@ -444,7 +444,7 @@
             {% elif run.status == 'error' %}
             <span class="p-status-label p-status-label--negative" title="{{ run.failure_analysis or run.error_msg }}">error</span>
             {% elif run.status in ('pending', 'triggered', 'running', 'reviewing') %}
-            <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}">{{ run.status }}</span>
+            <span class="p-status-label p-status-label--caution js-run-status" data-run-id="{{ run.id }}" data-status="{{ run.status }}">{{ run.status }}</span>
             {% else %}
             <span class="muted small">{{ run.status }}</span>
             {% endif %}
@@ -662,6 +662,32 @@ document.getElementById('filter-tabs')?.addEventListener('click', function(e) {
   if (window.__snapActivityTimer) clearInterval(window.__snapActivityTimer);
   refreshSnapActivity();
   window.__snapActivityTimer = setInterval(refreshSnapActivity, 3000);
+})();
+</script>
+
+<script>
+// Live-update the Tests tab while any run is in flight.
+(function () {
+  function tick() {
+    var nodes = document.querySelectorAll('#tests .js-run-status');
+    if (!nodes.length) return false;
+    return fetch('/testing/api/status', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data) return true;
+        var byId = {};
+        data.runs.forEach(function (r) { byId[r.id] = r; });
+        var changed = Array.prototype.some.call(nodes, function (el) {
+          var run = byId[el.dataset.runId];
+          return run && run.status !== el.dataset.status;
+        });
+        if (!changed) return true;
+        return AK.refreshSection('#tests').then(function () {
+          return !!document.querySelector('#tests .js-run-status');
+        });
+      });
+  }
+  if (document.querySelector('#tests .js-run-status')) AK.live('snap-tests', 5000, tick);
 })();
 </script>
 

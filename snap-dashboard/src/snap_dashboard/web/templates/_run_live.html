@@ -1,0 +1,22 @@
+<script>
+// Live-update an in-flight run: poll its status and re-render the page
+// content whenever it changes, until it reaches a final state.
+(function () {
+  var IN_FLIGHT = ['pending', 'triggered', 'running', 'reviewing'];
+  function marker() { return document.getElementById('run-live'); }
+  function inFlight(m) { return !!m && IN_FLIGHT.indexOf(m.dataset.state.split('|')[0]) >= 0; }
+  if (!inFlight(marker())) return;
+  AK.live('run-detail', 5000, function () {
+    var m = marker();
+    if (!m) return false;
+    return fetch('/testing/api/runs/' + m.dataset.runId + '/status', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return true;
+        var state = [d.status, d.review_decision || '', d.promoted ? 1 : 0, d.has_log ? 1 : 0].join('|');
+        if (state === m.dataset.state) return true;
+        return AK.refreshSection('#page-content').then(function () { return inFlight(marker()); });
+      });
+  });
+})();
+</script>

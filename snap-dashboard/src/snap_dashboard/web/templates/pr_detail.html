@@ -5,6 +5,7 @@
 
 {% block content %}
 
+{% if run.id %}<span id="run-live" data-run-id="{{ run.id }}" data-state="{{ run.status }}|{{ run.review_decision or '' }}|{{ 1 if run.promoted else 0 }}|{{ 1 if run.has_log else 0 }}" hidden></span>{% endif %}
 <a href="/releases/runs" class="back-link">&larr; Test runs</a>
 
 <div class="page-title-row">
@@ -223,4 +224,8 @@
 </div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+{% include "_run_live.html" %}
 {% endblock %}

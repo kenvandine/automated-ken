@@ -27,6 +27,30 @@
       var v = AK.statuses[s];
       return v ? { tone: v[0], label: v[1] } : { tone: 'neutral', label: String(s || '').replace(/_/g, ' ') };
     };
+    // Live-update helpers. AK.live runs one polling loop per key (re-running
+    // a page script replaces the old loop); tick() returns true to go on.
+    AK.liveTimers = AK.liveTimers || {};
+    AK.live = function (key, ms, tick) {
+      clearTimeout(AK.liveTimers[key]);
+      var step = function () {
+        var p; try { p = Promise.resolve(tick()); } catch (e) { p = Promise.resolve(true); }
+        p.catch(function () { return true; }).then(function (again) {
+          if (again) AK.liveTimers[key] = setTimeout(step, ms);
+        });
+      };
+      AK.liveTimers[key] = setTimeout(step, ms);
+    };
+    // Re-fetch the current page and swap in just one section of it.
+    AK.refreshSection = function (selector) {
+      return fetch(location.pathname + location.search, { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.text() : ''; })
+        .then(function (html) {
+          if (!html) return;
+          var fresh = new DOMParser().parseFromString(html, 'text/html').querySelector(selector);
+          var cur = document.querySelector(selector);
+          if (fresh && cur) cur.innerHTML = fresh.innerHTML;
+        });
+    };
   </script>
 </head>
 <body>

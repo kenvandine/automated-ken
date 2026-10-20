@@ -590,6 +590,26 @@ async def testing_status(request: Request) -> JSONResponse:
     )
 
 
+@router.get("/testing/api/runs/{run_id}/status")
+async def run_status(run_id: int, request: Request) -> JSONResponse:
+    """Current status of a single run — polled by the run detail pages."""
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"error": "unauthorized"}, status_code=401)
+    with get_session() as session:
+        run = session.query(TestRun).filter_by(id=run_id, user_id=user["id"]).first()
+        if run is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return JSONResponse(
+            {
+                "status": run.status,
+                "review_decision": run.review_decision,
+                "promoted": bool(run.promoted),
+                "has_log": bool(run.log_output),
+            }
+        )
+
+
 # ---------------------------------------------------------------------------
 # Shared screenshot-comparison + review-score context
 # ---------------------------------------------------------------------------
