@@ -630,6 +630,27 @@ class PromotionDismissal(Base):
         return f"<PromotionDismissal snap={self.snap_name!r} version={self.version!r}>"
 
 
+class NeedsDismissal(Base):
+    """A dismissed item on the Overview "Needs you" list.
+
+    ``item_key`` encodes the item's identity plus the state that made it
+    need attention (e.g. bump id + status), so it resurfaces if that changes.
+    """
+
+    __tablename__ = "needs_dismissals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "kind", "item_key", name="uq_needs_dismissal"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    kind = Column(String(32), nullable=False)
+    item_key = Column(String(255), nullable=False)
+    dismissed_at = Column(DateTime, default=_now, nullable=False)
+
+
 class StaleBuildTrigger(Base):
     """Records a workflow_dispatch trigger sent for a snap that hasn't published in N days."""
 

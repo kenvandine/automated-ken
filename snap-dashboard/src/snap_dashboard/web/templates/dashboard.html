@@ -54,6 +54,14 @@
       <div class="inbox__actions">
         {% if item.external %}<a href="{{ item.external }}" target="_blank" rel="noopener" class="p-button is-small">PR ↗</a>{% endif %}
         <a href="{{ item.href }}" class="p-button--positive is-small">{{ item.action }}</a>
+        {% if item.key %}
+        <form method="post" action="/dismiss-need" class="inbox__dismiss"
+              hx-post="/dismiss-need" hx-target="#page-content" hx-select="#page-content" hx-swap="innerHTML" hx-disabled-elt="find button">
+          <input type="hidden" name="kind" value="{{ item.kind }}">
+          <input type="hidden" name="key" value="{{ item.key }}">
+          <button type="submit" class="p-button--base is-small" title="Hide this until its state changes">Dismiss</button>
+        </form>
+        {% endif %}
       </div>
     </li>
     {% endfor %}

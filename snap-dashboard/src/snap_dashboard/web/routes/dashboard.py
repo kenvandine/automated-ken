@@ -5,11 +5,11 @@ from __future__ import annotations
 import logging
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import APIRouter, BackgroundTasks, Request
+from fastapi import APIRouter, BackgroundTasks, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from snap_dashboard.auth import get_current_user, get_user_config
-from snap_dashboard.db.models import CollectionRun, Snap
+from snap_dashboard.db.models import CollectionRun, NeedsDismissal, Snap
 from snap_dashboard.db.session import get_session
 from snap_dashboard.web.fleet import build_overview
 from snap_dashboard.web.templating import templates
@@ -75,6 +75,23 @@ def _run_collection_sync(user_id: int):
     uc = get_user_config(user_id)
     config = uc.to_config()
     return run_collection(config, user_id=user_id)
+
+
+@router.post("/dismiss-need")
+def dismiss_need(request: Request, kind: str = Form(...), key: str = Form(...)):
+    """Hide one item from the Overview "Needs you" list."""
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    with get_session() as session:
+        exists = (
+            session.query(NeedsDismissal)
+            .filter_by(user_id=user["id"], kind=kind, item_key=key)
+            .first()
+        )
+        if exists is None:
+            session.add(NeedsDismissal(user_id=user["id"], kind=kind, item_key=key))
+    return RedirectResponse(url="/#needs-you", status_code=303)
 
 
 @router.post("/refresh")

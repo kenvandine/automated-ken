@@ -203,7 +203,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
     """Everything the Overview page shows, as plain dicts."""
     from datetime import datetime, timedelta, timezone
 
-    from snap_dashboard.db.models import AgentRun, CopilotTask, PromotionDismissal, Runner
+    from snap_dashboard.db.models import AgentRun, CopilotTask, NeedsDismissal, PromotionDismissal, Runner
     from snap_dashboard.runners import effective_status
     from snap_dashboard.testing.release_set import READY
     from snap_dashboard.web.routes.testing import _build_pending_promotion
@@ -252,6 +252,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
             "href": "/releases#promote",
             "action": "Review & promote",
             "snap": card["snap_name"],
+            "key": f"{card['snap_name']}:{card['version']}",
         })
 
     # 2. Version-bump PRs waiting on a human.
@@ -286,6 +287,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
                 "external": b.bot_pr_url,
                 "action": "Review",
                 "snap": name,
+                "key": f"{b.id}:{b.status}",
             })
         elif b.status in _BUMP_IN_FLIGHT:
             in_flight_bumps.append(info)
@@ -303,6 +305,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
                 "title": f"{r['name']} {run['version'] or ''}".strip(),
                 "meta": f"{run['architecture'] or 'amd64'} smoke test {run['status']}",
                 "href": f"/testing/runs/{run['id']}", "action": "Investigate", "snap": r["name"],
+                "key": f"run:{run['id']}",
             })
         elif run["review_decision"] == "needs_review":
             needs.append({
@@ -310,6 +313,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
                 "title": f"{r['name']} {run['version'] or ''}".strip(),
                 "meta": "The AI reviewer wasn't sure — take a look at the screenshots",
                 "href": f"/testing/runs/{run['id']}", "action": "Review", "snap": r["name"],
+                "key": f"run:{run['id']}",
             })
 
     # 4. Coding-agent tasks stuck on you (or failed).
@@ -341,6 +345,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
                 "href": "/agents/tasks",
                 "external": t.pr_url,
                 "action": "Open",
+                "key": f"{t.id}:{t.status}:{t.ci_status}",
             })
         else:
             active_tasks.append({
@@ -358,7 +363,7 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
             needs.append({
                 "kind": "runner", "tone": "caution", "label": "Runner offline",
                 "title": r.name, "meta": f"{r.arch or ''} — test runs for this architecture will queue",
-                "href": "/runners", "action": "Check",
+                "href": "/runners", "action": "Check", "key": f"runner:{r.id}",
             })
 
     # 6. Failed rebuilds.
@@ -368,7 +373,16 @@ def build_overview(session, user_id: int, rows: list[dict] | None = None) -> dic
                 "kind": "rebuild", "tone": "negative", "label": "Rebuild failed",
                 "title": r["name"], "meta": None,
                 "href": f"/snap/{r['name']}", "action": "Open", "snap": r["name"],
+                "key": f"rebuild:{r['name']}",
             })
+
+    # Per-item "dismiss" from the Needs-you list. Keys embed status/version
+    # so a changed situation resurfaces the item.
+    hidden = {
+        (d.kind, d.item_key)
+        for d in session.query(NeedsDismissal).filter_by(user_id=user_id).all()
+    }
+    needs = [n for n in needs if (n["kind"], n.get("key")) not in hidden]
 
     # In flight --------------------------------------------------------
     running_agents = [
