@@ -246,3 +246,31 @@ def test_triage_issues_caps_per_run_and_dedupes(isolated_session, monkeypatch) -
     dispatcher.calls.clear()
     agent._maybe_triage_issues(dispatcher, snap_id, "kenvandine", "gemini-desktop", "tok")
     assert len(dispatcher.calls) == 2
+
+
+def test_run_covers_same_repo_snap_with_no_upstream_repo(isolated_session, monkeypatch) -> None:
+    # collector.py nulls upstream_repo when it equals the packaging repo.
+    user_id = _seed_user_and_snap(isolated_session, None)
+    session = isolated_session()
+    snap = session.query(Snap).filter_by(user_id=user_id).first()
+    snap.packaging_repo = "https://github.com/kenvandine/gemini-desktop"
+    snap_id = snap.id
+    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
+    uc.auto_maintain_upstream = False  # manual single-snap runs bypass the opt-in
+    session.commit()
+    session.close()
+
+    dispatcher = _FakeDispatcher()
+    monkeypatch.setattr(um_module, "get_user_config", lambda uid: uc)
+    monkeypatch.setattr(um_module, "get_coding_dispatcher", lambda uc_: dispatcher)
+    monkeypatch.setattr(
+        um_module, "find_real_outdated_deps",
+        lambda client, owner, repo: {"package.json": {"svelte": ("^5.0.0", "5.57.1")}},
+    )
+    monkeypatch.setattr(UpstreamMaintainerAgent, "_maybe_request_reviews", lambda self, *a, **k: False)
+    monkeypatch.setattr(UpstreamMaintainerAgent, "_maybe_triage_issues", lambda self, *a, **k: False)
+
+    summary = UpstreamMaintainerAgent(user_id=user_id, only_snap_id=snap_id, snap_name="gemini-desktop")._run()
+
+    assert "1 upstream repo" in summary
+    assert dispatcher.calls[0][:2] == ("kenvandine", "gemini-desktop")

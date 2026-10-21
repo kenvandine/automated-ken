@@ -60,15 +60,24 @@ class UpstreamMaintainerAgent(BaseAgent):
 
     agent_type = "upstream_maintainer"
 
-    def __init__(self, user_id: int | None = None) -> None:
-        super().__init__(user_id=user_id)
+    def __init__(
+        self,
+        user_id: int | None = None,
+        only_snap_id: int | None = None,
+        snap_name: str | None = None,
+    ) -> None:
+        super().__init__(user_id=user_id, snap_name=snap_name if only_snap_id else None)
+        self.only_snap_id = only_snap_id
 
     def _run(self) -> str:
         if not self.user_id:
             return "no user_id — skipped"
         uc = get_user_config(self.user_id)
-        if not uc or not getattr(uc, "auto_maintain_upstream", False):
+        # A manual single-snap run doesn't need the fleet-wide opt-in.
+        if not self.only_snap_id and (not uc or not getattr(uc, "auto_maintain_upstream", False)):
             return "disabled"
+        if not uc:
+            return "no user config"
         token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "")
         if not token:
             return "no GitHub token configured"
@@ -77,15 +86,20 @@ class UpstreamMaintainerAgent(BaseAgent):
         with get_session() as session:
             user = session.query(User).get(self.user_id)
             login = (user.github_login or "").lower() if user else ""
-            snaps = session.query(Snap).filter_by(user_id=self.user_id).all()
-            upstream_repos = [
-                (s.id, s.name, s.upstream_repo)
-                for s in snaps
-                if s.upstream_repo and self._owned_by(s.upstream_repo, login)
-            ]
+            snap_query = session.query(Snap).filter_by(user_id=self.user_id)
+            if self.only_snap_id:
+                snap_query = snap_query.filter_by(id=self.only_snap_id)
+            # collector.py clears upstream_repo when it equals the packaging
+            # repo (a project developed and packaged together), so fall back
+            # to the packaging repo — otherwise those snaps are never maintained.
+            upstream_repos = []
+            for s in snap_query.all():
+                repo_url = s.upstream_repo or s.packaging_repo
+                if repo_url and self._owned_by(repo_url, login):
+                    upstream_repos.append((s.id, s.name, repo_url))
 
         if not upstream_repos:
-            return "no upstream-owned repos found"
+            return "no upstream-owned repos found (upstream/packaging repo must be owned by your GitHub login)"
 
         client = get_coding_dispatcher(uc)
         if not client:
@@ -122,10 +136,12 @@ class UpstreamMaintainerAgent(BaseAgent):
                     CopilotTask.kind == "dep_update",
                     CopilotTask.owner_repo == owner_repo,
                     CopilotTask.created_at >= cutoff,
+                    CopilotTask.status.notin_(RETRY_ELIGIBLE_STATUSES),
                 )
                 .first()
             )
             if recent:
+                logger.info("upstream_maintainer: %s dep update skipped — one dispatched within %d days", owner_repo, _DEP_UPDATE_COOLDOWN_DAYS)
                 return False
 
         bot_client = BotGitHubClient(token, read_token=read_token or token)
@@ -137,6 +153,7 @@ class UpstreamMaintainerAgent(BaseAgent):
         # agents/npm_registry.py for the incident this guards against.
         outdated = find_real_outdated_deps(bot_client, owner, repo)
         if not outdated:
+            logger.info("upstream_maintainer: %s has no outdated npm deps", owner_repo)
             return False  # nothing genuinely outdated — don't open an empty/bogus PR
 
         lines = []

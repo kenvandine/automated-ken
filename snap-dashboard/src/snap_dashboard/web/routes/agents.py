@@ -325,6 +325,25 @@ async def scan_now(request: Request):
     return RedirectResponse(url="/agents", status_code=303)
 
 
+@router.post("/agents/maintain-now")
+async def maintain_now(request: Request):
+    is_fetch = bool(request.headers.get("X-Requested-With"))
+    user = get_current_user(request)
+    if user is None:
+        if is_fetch:
+            return JSONResponse({"ok": False, "error": "Not signed in."}, status_code=401)
+        return RedirectResponse(url="/auth/login", status_code=302)
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.upstream_maintainer import UpstreamMaintainerAgent
+    get_runner().submit(UpstreamMaintainerAgent(user_id=user["id"]))
+    if is_fetch:
+        return JSONResponse({
+            "ok": True,
+            "message": "Maintaining upstream repos (requires “Maintain upstream repos you own” in Settings)…",
+        })
+    return RedirectResponse(url="/agents", status_code=303)
+
+
 @router.post("/agents/test-lemonade")
 async def test_lemonade(request: Request) -> JSONResponse:
     """Ping lemonade-server (starting the embedded instance if needed) and return availability + model list."""

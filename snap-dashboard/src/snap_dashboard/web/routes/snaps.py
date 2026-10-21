@@ -668,6 +668,31 @@ async def snap_stack_update(name: str, request: Request) -> RedirectResponse:
     return RedirectResponse(url=f"/snap/{name}?notice=stack_update_started", status_code=303)
 
 
+@router.post("/snap/{name}/maintain-upstream")
+async def snap_maintain_upstream(name: str, request: Request) -> RedirectResponse:
+    """Manually run the upstream-maintainer agent (dependency update, PR
+    review requests, issue-fix attempts) against just this snap's repo.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+
+    user_id = user["id"]
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=name, user_id=user_id).first()
+        if not snap:
+            return RedirectResponse(url="/snaps", status_code=303)
+        if not (snap.upstream_repo or snap.packaging_repo):
+            return RedirectResponse(url=f"/snap/{name}?error=no_packaging_repo", status_code=303)
+        snap_id = snap.id
+
+    from snap_dashboard.agents.runner import get_runner
+    from snap_dashboard.agents.upstream_maintainer import UpstreamMaintainerAgent
+
+    get_runner().submit(UpstreamMaintainerAgent(user_id=user_id, only_snap_id=snap_id, snap_name=name))
+    return RedirectResponse(url=f"/snap/{name}?notice=maintain_started", status_code=303)
+
+
 @router.post("/snap/{name}/custom-task")
 async def snap_custom_task(
     name: str, request: Request, prompt: str = Form(...)

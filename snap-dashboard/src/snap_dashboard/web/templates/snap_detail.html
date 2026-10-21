@@ -15,6 +15,7 @@
   {% elif notice == 'rebuild_started' %}Rebuild triggered — see it on the <a href="/agents" class="link-inline">Agents</a> page.
   {% elif notice == 'normalize_started' %}Normalizing this repo (workflow + AGENTS.md) — see it on the <a href="/agents/tasks" class="link-inline">Coding tasks</a> page.
   {% elif notice == 'stack_update_started' %}Reviewing the repo's stack/dependencies for updates — see it on the <a href="/agents/tasks" class="link-inline">Coding tasks</a> page.
+  {% elif notice == 'maintain_started' %}Maintaining this repo (dependencies, PR reviews, issues) — see <a href="/agents/tasks" class="link-inline">Coding tasks</a> and <a href="/agents/runs?snap_name={{ snap.name | urlencode }}" class="link-inline">Agent run history</a> for the outcome.
   {% elif notice == 'review_started' %}Reviewing open issues/PRs — reload this page in a bit to see the summary below.
   {% elif notice == 'address_started' %}Dispatched — see it on the <a href="/agents/tasks" class="link-inline">Coding tasks</a> page.
   {% elif notice == 'saved' %}Changes saved.
@@ -83,6 +84,12 @@
         {% endif %}
         {% endif %}
         {% if snap.packaging_repo or snap.upstream_repo %}
+        <form method="post" action="/snap/{{ snap.name }}/maintain-upstream"
+              hx-post="/snap/{{ snap.name }}/maintain-upstream" hx-target="#page-content" hx-select="#page-content"
+              hx-swap="innerHTML" hx-disabled-elt="find button">
+          <button type="submit" class="more-menu__item" role="menuitem">Maintain upstream
+            <small>Dependency updates, PR reviews and issue fixes (repos you own)</small></button>
+        </form>
         <form method="post" action="/snap/{{ snap.name }}/review-issues"
               hx-post="/snap/{{ snap.name }}/review-issues" hx-target="#page-content" hx-select="#page-content"
               hx-swap="innerHTML" hx-disabled-elt="find button">

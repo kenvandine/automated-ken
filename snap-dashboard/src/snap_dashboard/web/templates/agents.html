@@ -17,6 +17,9 @@
   <form method="post" action="/agents/scan-now" data-async-action>
     <button type="submit" class="p-button--positive">Check for updates</button>
   </form>
+  <form method="post" action="/agents/maintain-now" data-async-action>
+    <button type="submit" class="p-button">Maintain upstream</button>
+  </form>
 {% endcall %}
 {{ ui.agents_tabs("/agents") }}
 
