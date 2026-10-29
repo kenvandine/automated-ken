@@ -34,7 +34,6 @@ from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, IssueReviewReport, Snap
 from snap_dashboard.db.session import get_session
 from snap_dashboard.github.bot_client import BotGitHubClient
-from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.utils import parse_owner_repo, parse_repo_slug
 
 logger = logging.getLogger(__name__)
@@ -263,13 +262,8 @@ class AddressReviewItemAgent(BaseAgent):
 
     An issue gets the same ``issue_fix`` treatment ``UpstreamMaintainerAgent``
     dispatches automatically for repos the user maintains upstream — an
-    attempted fix PR, or a comment if Copilot isn't confident. A PR instead
-    gets a Copilot review request (there's no code for Copilot to write
-    against someone else's open PR, just feedback to give) — only meaningful
-    when the configured coding backend is the Copilot cloud agent itself,
-    since ``request_pr_review`` is a Copilot-cloud-agent-specific GitHub
-    reviewer-request API, not part of the generic ``CodingDispatcher``
-    protocol other backends implement.
+    attempted fix PR, or a comment if the model isn't confident. Only
+    issues are supported; there is no action for PRs.
     """
 
     agent_type = "review_item_address"
@@ -313,23 +307,7 @@ class AddressReviewItemAgent(BaseAgent):
             return "no coding backend configured/available"
 
         if self.item_type == "pr":
-            if not isinstance(dispatcher, CopilotAgentClient) and not hasattr(dispatcher, "_copilot"):
-                return "PR review requests need the Copilot cloud agent backend"
-            copilot = dispatcher if isinstance(dispatcher, CopilotAgentClient) else getattr(dispatcher, "_copilot")
-            ok = copilot.request_pr_review(owner, repo, self.number)
-            with get_session() as session:
-                session.add(
-                    CopilotTask(
-                        user_id=self.user_id,
-                        snap_id=self.snap_id,
-                        kind="pr_review_request",
-                        owner_repo=owner_repo_str,
-                        issue_number=self.number,
-                        status="requested" if ok else "dispatch_failed",
-                        error_msg=None if ok else "Failed to request a Copilot review — see server logs.",
-                    )
-                )
-            return f"requested Copilot review on {owner_repo_str}#{self.number}" if ok else "review request failed"
+            return "PR review requests are no longer supported"
 
         with get_session() as session:
             existing = (

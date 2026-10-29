@@ -1,9 +1,9 @@
 """Best-effort LLM token-usage tracking, local vs. cloud.
 
 Every LLM call in the system — local models via lemonade-server
-(``snap_dashboard.lemonade.client.LemonadeClient``) and, when configured,
-GitHub Copilot cloud agent (``snap_dashboard.github.copilot_agent.
-CopilotAgentClient``) — records an input/output token count here via
+(``snap_dashboard.lemonade.client.LemonadeClient``) and, when configured, an
+external OpenAI-compatible API (``snap_dashboard.lemonade.external_api``) —
+records an input/output token count here via
 ``record_model_usage()``. Counts are exact when the backend's own API
 reports real usage; otherwise ``estimate_tokens()`` provides a rough
 model-agnostic fallback. The ``/stats`` page aggregates these rows by
@@ -52,7 +52,7 @@ def record_model_usage(
 ) -> None:
     """Persist one LLM call's token usage. Never raises.
 
-    ``provider`` is "lemonade" (local) or "copilot" (cloud). ``task`` is a
+    ``provider`` is "lemonade" (local) or "external" (cloud API). ``task`` is a
     short label for the kind of call (e.g. "chat", "vision_compare",
     "coding_agent"). ``estimated`` marks whether the counts are a heuristic
     guess (see ``estimate_tokens()``) rather than a real count reported by

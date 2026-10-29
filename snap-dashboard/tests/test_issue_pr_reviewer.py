@@ -54,10 +54,6 @@ class _FakeDispatcher:
         return self._task
 
 
-class _FakeCopilotDispatcher(_FakeDispatcher):
-    """Stands in for CopilotAgentClient so isinstance() checks pass."""
-
-
 class _FakeBotClient:
     def __init__(self, *a, **k) -> None:
         pass
@@ -326,46 +322,13 @@ def test_address_issue_skips_if_already_dispatched(isolated_session, monkeypatch
     assert dispatcher.calls == []
 
 
-def test_address_pr_requests_copilot_review(isolated_session, monkeypatch) -> None:
+def test_address_pr_is_unsupported(isolated_session, monkeypatch) -> None:
     user_id, snap_id = _seed(isolated_session)
     session = isolated_session()
     uc = session.query(UserConfig).filter_by(user_id=user_id).first()
     session.close()
 
-    class _FakeCopilotClient(ipr_module.CopilotAgentClient):
-        def __init__(self):
-            pass
-
-        def request_pr_review(self, owner, repo, pr_number):
-            self.requested = (owner, repo, pr_number)
-            return True
-
-    fake_copilot = _FakeCopilotClient()
-    monkeypatch.setattr(ipr_module, "get_user_config", lambda uid: uc)
-    monkeypatch.setattr(ipr_module, "get_coding_dispatcher", lambda uc: fake_copilot)
-
-    agent = AddressReviewItemAgent(
-        user_id=user_id, snap_id=snap_id, owner_repo="kenvandine/my-snap",
-        number=7, item_type="pr", title="Add feature",
-    )
-    result = agent._run()
-
-    assert "requested Copilot review" in result
-    assert fake_copilot.requested == ("kenvandine", "my-snap", 7)
-    session = isolated_session()
-    task = session.query(CopilotTask).filter_by(kind="pr_review_request").first()
-    assert task is not None
-    assert task.status == "requested"
-    session.close()
-
-
-def test_address_pr_skipped_for_non_copilot_backend(isolated_session, monkeypatch) -> None:
-    user_id, snap_id = _seed(isolated_session)
-    session = isolated_session()
-    uc = session.query(UserConfig).filter_by(user_id=user_id).first()
-    session.close()
-
-    dispatcher = _FakeDispatcher()  # not a CopilotAgentClient, no _copilot attr
+    dispatcher = _FakeDispatcher()
     monkeypatch.setattr(ipr_module, "get_user_config", lambda uid: uc)
     monkeypatch.setattr(ipr_module, "get_coding_dispatcher", lambda uc: dispatcher)
 
@@ -375,4 +338,5 @@ def test_address_pr_skipped_for_non_copilot_backend(isolated_session, monkeypatc
     )
     result = agent._run()
 
-    assert "need the Copilot cloud agent backend" in result
+    assert "no longer supported" in result
+    assert dispatcher.calls == []

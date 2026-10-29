@@ -1,10 +1,10 @@
-"""Dashboard visibility for delegated Copilot cloud agent tasks.
+"""Dashboard visibility for delegated coding tasks.
 
-Every ``CopilotTask`` row is a task dispatched to whatever "capable coding"
-backend is configured (see ``agents/coding_backend.py``) — CI fixes,
-dependency upgrades, issue fixes, and fleet-normalization. This page lists
-them all so a user can see what automated-ken has asked Copilot to do on
-their behalf, and refresh each task's live status/PR link from GitHub.
+Every ``CopilotTask`` row (legacy table name) is a task dispatched to the
+configured "capable coding" backend (see ``agents/coding_backend.py``) — CI
+fixes, dependency upgrades, issue fixes, and fleet-normalization. This page
+lists them all so a user can see what automated-ken has done on their behalf,
+and retry failed ones.
 """
 
 from __future__ import annotations
@@ -14,11 +14,10 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-from snap_dashboard.agents.coding_backend import RETRY_ELIGIBLE_STATUSES, extract_pr_url
-from snap_dashboard.auth import get_current_user, get_user_config
+from snap_dashboard.agents.coding_backend import RETRY_ELIGIBLE_STATUSES
+from snap_dashboard.auth import get_current_user
 from snap_dashboard.db.models import CopilotTask
 from snap_dashboard.db.session import get_session
-from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.utils import parse_owner_repo
 from snap_dashboard.web.templating import templates
 
@@ -26,7 +25,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# States GitHub's Copilot cloud agent task API reports.
 _TERMINAL_STATUSES = {"completed", "failed", "cancelled", "timed_out", "dispatch_failed"}
 
 
@@ -79,83 +77,6 @@ async def copilot_tasks_page(request: Request) -> HTMLResponse:
             "current_user": user,
         },
     )
-
-
-@router.post("/copilot-tasks/{task_id}/refresh")
-async def refresh_copilot_task(task_id: int, request: Request) -> RedirectResponse:
-    """Poll GitHub for a single task's current status/PR, and store it."""
-    user = get_current_user(request)
-    if user is None:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    user_id = user["id"]
-    uc = get_user_config(user_id)
-    token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "") if uc else ""
-
-    if token:
-        with get_session() as session:
-            task = session.query(CopilotTask).filter_by(id=task_id, user_id=user_id).first()
-            owner_repo = task.owner_repo if task else None
-            external_task_id = task.external_task_id if task else None
-
-        if owner_repo and external_task_id:
-            owner_repo_parts = parse_owner_repo(owner_repo)
-            if owner_repo_parts:
-                owner, repo = owner_repo_parts
-                remote = CopilotAgentClient(token).get_task(owner, repo, external_task_id)
-                if remote:
-                    with get_session() as session:
-                        task = session.query(CopilotTask).filter_by(id=task_id, user_id=user_id).first()
-                        if task:
-                            task.status = remote.get("state") or task.status
-                            task.pr_url = extract_pr_url(remote) or task.pr_url
-                            if remote.get("error"):
-                                task.error_msg = str(remote.get("error"))[:2000]
-
-    return RedirectResponse(url="/agents/tasks", status_code=303)
-
-
-@router.post("/copilot-tasks/refresh-all")
-async def refresh_all_copilot_tasks(request: Request) -> RedirectResponse:
-    """Poll GitHub for every non-terminal task's status/PR in one pass."""
-    user = get_current_user(request)
-    if user is None:
-        return RedirectResponse(url="/auth/login", status_code=302)
-
-    user_id = user["id"]
-    uc = get_user_config(user_id)
-    token = (getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or "") if uc else ""
-    if not token:
-        return RedirectResponse(url="/agents/tasks", status_code=303)
-
-    with get_session() as session:
-        pending = [
-            (t.id, t.owner_repo, t.external_task_id)
-            for t in session.query(CopilotTask)
-            .filter_by(user_id=user_id)
-            .filter(~CopilotTask.status.in_(_TERMINAL_STATUSES))
-            .all()
-            if t.owner_repo and t.external_task_id
-        ]
-
-    client = CopilotAgentClient(token)
-    for task_id, owner_repo, external_task_id in pending:
-        owner_repo_parts = parse_owner_repo(owner_repo)
-        if not owner_repo_parts:
-            continue
-        owner, repo = owner_repo_parts
-        remote = client.get_task(owner, repo, external_task_id)
-        if not remote:
-            continue
-        with get_session() as session:
-            task = session.query(CopilotTask).filter_by(id=task_id, user_id=user_id).first()
-            if task:
-                task.status = remote.get("state") or task.status
-                task.pr_url = extract_pr_url(remote) or task.pr_url
-                if remote.get("error"):
-                    task.error_msg = str(remote.get("error"))[:2000]
-
-    return RedirectResponse(url="/agents/tasks", status_code=303)
 
 
 @router.post("/copilot-tasks/{task_id}/retry")

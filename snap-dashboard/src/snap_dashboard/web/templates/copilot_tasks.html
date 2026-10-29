@@ -5,12 +5,7 @@
 
 {% block content %}
 
-{% call ui.page_header("Agents", "Coding work delegated to GitHub Copilot cloud agent or a local model — CI fixes, dependency upgrades, issue fixes and fleet normalization.") %}
-  <form method="post" action="/copilot-tasks/refresh-all"
-        hx-post="/copilot-tasks/refresh-all" hx-target="#page-content" hx-select="#page-content"
-        hx-swap="innerHTML" hx-disabled-elt="find button">
-    <button type="submit" class="p-button">Refresh statuses</button>
-  </form>
+{% call ui.page_header("Agents", "Coding work delegated to the configured coding backend — CI fixes, dependency upgrades, issue fixes and fleet normalization.") %}
 {% endcall %}
 {{ ui.agents_tabs("/agents/tasks") }}
 
@@ -51,13 +46,7 @@
         </td>
         <td class="text-muted small">{{ ui.when(t.created_at) }}</td>
         <td>
-          {% if not t.is_terminal %}
-          <form method="post" action="/copilot-tasks/{{ t.id }}/refresh"
-                hx-post="/copilot-tasks/{{ t.id }}/refresh" hx-target="#page-content" hx-select="#page-content"
-                hx-swap="innerHTML" hx-disabled-elt="find button">
-            <button type="submit" class="p-button is-small">Refresh</button>
-          </form>
-          {% elif t.can_retry %}
+          {% if t.can_retry %}
           <form method="post" action="/copilot-tasks/{{ t.id }}/retry"
                 hx-post="/copilot-tasks/{{ t.id }}/retry" hx-target="#page-content" hx-select="#page-content"
                 hx-swap="innerHTML" hx-disabled-elt="find button"

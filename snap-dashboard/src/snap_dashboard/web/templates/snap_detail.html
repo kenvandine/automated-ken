@@ -306,6 +306,7 @@
           <td>{{ it.title }}</td>
           <td class="muted small">{{ it.age_days ~ 'd' if it.age_days is not none else '—' }}</td>
           <td>
+            {% if it.type != 'pr' %}
             <form method="post" action="/snap/{{ snap.name }}/review-issues/address" style="margin:0;"
                   hx-post="/snap/{{ snap.name }}/review-issues/address" hx-target="#page-content" hx-select="#page-content"
                   hx-swap="innerHTML" hx-disabled-elt="find button">
@@ -315,10 +316,11 @@
               <input type="hidden" name="title" value="{{ it.title }}">
               <input type="hidden" name="body" value="{{ it.body }}">
               <button type="submit" class="p-button--link" style="font-size:11px;"
-                      title="{{ 'Request a Copilot code review on this PR' if it.type == 'pr' else 'Ask Copilot to attempt a fix for this issue' }}">
+                      title="Ask the coding backend to attempt a fix for this issue">
                 Assign an agent
               </button>
             </form>
+            {% endif %}
           </td>
         </tr>
         {% endfor %}

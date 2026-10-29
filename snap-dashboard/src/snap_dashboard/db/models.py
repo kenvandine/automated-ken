@@ -105,7 +105,7 @@ class UserConfig(Base):
     # Remote runner settings
     prefer_remote_runner = Column(Boolean, default=False, nullable=False)
     runner_job_timeout_minutes = Column(Integer, default=10, nullable=False)
-    # Delegating "capable coding" work to GitHub Copilot cloud agent — see
+    # Delegating "capable coding" work to the coding backend — see
     # agents/pr_monitor.py, agents/upstream_maintainer.py, agents/repo_normalizer.py.
     # All default off: these open real PRs/issues-fixes against real repos,
     # so they're opt-in until a user has reviewed a first run.
@@ -119,12 +119,10 @@ class UserConfig(Base):
     auto_fix_build_failures = Column(Boolean, default=False, nullable=False)
 
     # Which backend handles "capable coding" tasks (CI fixes, dep upgrades,
-    # issue fixes, fleet normalization). Long-term goal is to run this
-    # locally as capable local models become available; "copilot_cloud_agent"
-    # is today's practical default since it needs no extra credentials.
-    # "external_api" is a forward-looking escalation path for a
-    # user-supplied API key to a hosted coding model, not yet implemented.
-    coding_task_backend = Column(String(32), default="copilot_cloud_agent", nullable=False)
+    # issue fixes, fleet normalization): "local_lemonade" (default) or
+    # "external_api" (any OpenAI-compatible endpoint with an API key). See
+    # agents/coding_backend.py.
+    coding_task_backend = Column(String(32), default="local_lemonade", nullable=False)
     external_coding_api_key = Column(Text, nullable=True)
     external_coding_api_base_url = Column(String(500), nullable=True)
     external_coding_api_model = Column(String(255), nullable=True)

@@ -765,8 +765,8 @@ async def snap_review_issues_address(
     body: str = Form(default=""),
 ) -> RedirectResponse:
     """"Assign an agent" for one item from the Issues & PRs Review
-    section — dispatches an issue-fix attempt (issues) or a Copilot review
-    request (PRs). See agents/issue_pr_reviewer.py's AddressReviewItemAgent.
+    section — dispatches an issue-fix attempt. See
+    agents/issue_pr_reviewer.py's AddressReviewItemAgent.
     """
     user = get_current_user(request)
     if user is None:

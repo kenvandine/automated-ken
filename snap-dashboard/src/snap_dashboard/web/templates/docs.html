@@ -112,7 +112,7 @@
             <tr>
               <td><strong>GitHub token</strong><br><span class="text-muted small">classic PAT: <code>repo</code> + <code>workflow</code></span></td>
               <td>Settings → GitHub Token</td>
-              <td>Reading packaging repos and issues/PRs, merging bump PRs, creating and dispatching build workflows, setting Actions secrets, creating Copilot tasks. Without it, GitHub allows only 60 API requests an hour.</td>
+              <td>Reading packaging repos and issues/PRs, merging bump PRs, creating and dispatching build workflows, setting Actions secrets, creating coding tasks. Without it, GitHub allows only 60 API requests an hour.</td>
             </tr>
             <tr>
               <td><strong>Snap Store credential</strong><br><span class="text-muted small"><code>snapcraft export-login -</code></span></td>
@@ -306,10 +306,10 @@ systemctl --user enable --now snap.automated-ken-runner.run.service</pre>
     <!-- ================================================================ CODING TASKS -->
     <section class="docs-section" id="coding-tasks">
       <h2 class="docs-h2">Delegated coding tasks</h2>
-      <p>Work that needs real code changes is delegated to the <strong>coding backend</strong> (Settings → Agents &amp; AI; GitHub Copilot cloud agent by default), which opens PRs for you to review. All are opt-in:</p>
+      <p>Work that needs real code changes is delegated to the <strong>coding backend</strong> (Settings → Agents &amp; AI; a local model by default, or any OpenAI-compatible API), which opens PRs for you to review. All are opt-in:</p>
       <ul class="docs-list">
         <li><strong>Auto-fix failing CI</strong> on version-bump PRs.</li>
-        <li><strong>Auto-maintain upstream repos you own</strong> — dependency updates, review requests on your open PRs, and fixes for a few issues per run.</li>
+        <li><strong>Auto-maintain upstream repos you own</strong> — dependency updates and fixes for a few issues per run.</li>
         <li><strong>Fleet normalization</strong> — a one-off pass (run from Settings) opening a PR per packaging repo to drop legacy <code>sync-release</code>-style workflows, normalise the build/publish workflow and add an <code>AGENTS.md</code>.</li>
       </ul>
       <p>Every dispatched task and its PR is listed on <a href="/agents/tasks">Agents → Coding tasks</a>.</p>

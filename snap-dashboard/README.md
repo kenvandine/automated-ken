@@ -85,10 +85,10 @@ src/snap_dashboard/
 │   ├── runner_watchdog.py    Fails runner jobs that exceed the job timeout
 │   ├── stale_build_scanner.py  Rebuilds snaps with no recent publication
 │   ├── upstream_maintainer.py, repo_normalizer.py, coding_backend.py
-│   │                         Delegated coding tasks (Copilot cloud agent by default)
+│   │                         Delegated coding tasks (local model by default, or any OpenAI-compatible API)
 │   └── snapcraft_credential_sync.py  Pushes the Store credential to repo secrets
 ├── db/                       SQLAlchemy models; session + additive migrations
-├── github/                   GitHub/GitLab clients, bot client, Copilot agent API, secrets sync
+├── github/                   GitHub/GitLab clients, bot client, secrets sync
 ├── lemonade/                 Lemonade client, bundled server manager, task→model defaults
 ├── runners/                  Runner token helpers and online/offline status
 ├── snapcraft/                snapcraft.yaml fetch/parse, upstream version checks, build workflow template

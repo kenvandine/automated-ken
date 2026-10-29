@@ -6,40 +6,34 @@ fleet-normalization campaign.
 
 ``UserConfig.coding_task_backend`` selects the backend:
 
-- ``copilot_cloud_agent`` (default): dispatch to GitHub Copilot cloud agent
-  — an async task, polled later for a PR link (see ``get_task()`` in
-  ``github/copilot_agent.py`` and ``web/routes/copilot_tasks.py``). Needs no
-  extra credentials (reuses the existing bot GitHub token).
-- ``local_lemonade``: a single-shot local coding model (Qwen3-Coder, run via
-  the embedded/self-managed Lemonade server — see ``lemonade/coding_agent.py``).
-  Runs synchronously and opens (or fails to open) its PR before
-  ``start_task()`` returns — no polling needed, but it's necessarily less
-  capable than the cloud agent (no tool use, no running tests, no iterating
-  on CI failures).
-- ``external_api``: reserved for a user-supplied API key to a hosted coding
-  model (``external_coding_api_key``/``external_coding_api_base_url``/
-  ``external_coding_api_model``). Not implemented yet — this is the
-  forward-looking "add an API key to offload some work to cloud models"
-  escalation path the user asked for.
+- ``local_lemonade`` (default): a single-shot local coding model (Qwen3-Coder,
+  run via the embedded/self-managed Lemonade server — see
+  ``lemonade/coding_agent.py``). Runs synchronously and opens (or fails to
+  open) its PR before ``start_task()`` returns — no polling needed, but it's
+  necessarily less capable than a hosted model (no tool use, no running
+  tests, no iterating on CI failures).
+- ``external_api``: any OpenAI-compatible chat-completions endpoint
+  (``external_coding_api_base_url``/``external_coding_api_key``/
+  ``external_coding_api_model``). Same synchronous single-shot flow as
+  ``local_lemonade`` (see ``lemonade/external_api.py``); token usage is
+  recorded under provider ``external`` and shown on ``/stats``.
 
 Callers (``agents/pr_monitor.py``, ``agents/upstream_maintainer.py``,
 ``agents/repo_normalizer.py``) should always go through
-``get_coding_dispatcher()`` rather than constructing ``CopilotAgentClient``
-directly, so a future local/external backend only needs to be added here.
-They should also use ``task_result_fields()`` below to turn a
-``start_task()`` result into ``CopilotTask`` kwargs, since the two
-implemented backends return different result shapes (async id-to-poll vs.
-already-finished state+PR url).
+``get_coding_dispatcher()``, and use ``task_result_fields()`` below to turn a
+``start_task()`` result into ``CopilotTask`` kwargs (the table name is a
+legacy of an earlier backend).
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from typing import Protocol
 
-from snap_dashboard.github.copilot_agent import CopilotAgentClient
-
 logger = logging.getLogger(__name__)
+
+DEFAULT_BACKEND = "local_lemonade"
 
 # CopilotTask statuses that mean the dispatch never produced usable work and
 # should NOT block a future retry of the same (kind, owner_repo[, issue])
@@ -63,102 +57,23 @@ class CodingDispatcher(Protocol):
     ) -> dict | None: ...
 
 
-class _CopilotWithLocalFallback:
-    """Wraps ``copilot_cloud_agent`` (the default backend) so an account with
-    no Copilot license degrades gracefully to the local Lemonade backend
-    instead of just failing every dispatch for the rest of the run.
-
-    ``CopilotAgentClient.start_task()`` already short-circuits its own
-    repeated 403s within a run (see ``github/copilot_agent.py``) and sets
-    ``_plan_required`` the first time it sees GitHub's
-    ``copilot_plan_required`` error — once that's set, every subsequent
-    (and the triggering) call here is instead delegated to a lazily-created
-    ``LocalLemonadeCodingDispatcher``, so a fleet-wide campaign started
-    against the default backend still makes progress with whatever local
-    model is configured, rather than the caller having to notice the 403s
-    and manually flip ``coding_task_backend`` to ``local_lemonade`` in
-    Settings.
-    """
-
-    def __init__(self, copilot: CopilotAgentClient, user_config, token: str) -> None:
-        self._copilot = copilot
-        self._uc = user_config
-        self._token = token
-        self._local = None
-        self._last_backend_was_local = False
-
-    @property
-    def token(self) -> str:
-        return self._token
-
-    @property
-    def last_error(self) -> str | None:
-        """Reason the most recent ``start_task()`` call failed, if any.
-
-        Only meaningful when the call actually went to Copilot (the local
-        Lemonade backend reports its own failure reason inline in the
-        result dict's ``error`` key instead — see ``task_result_fields()``).
-        """
-        if self._last_backend_was_local:
-            return None
-        return self._copilot.last_error
-
-    def _local_dispatcher(self):
-        if self._local is None:
-            from snap_dashboard.lemonade.coding_agent import LocalLemonadeCodingDispatcher
-
-            self._local = LocalLemonadeCodingDispatcher(self._uc, self._token)
-        return self._local
-
-    def start_task(
-        self,
-        owner: str,
-        repo: str,
-        prompt: str,
-        base_ref: str = "main",
-        create_pull_request: bool = True,
-        model: str | None = None,
-    ) -> dict | None:
-        self._last_backend_was_local = False
-        if not self._copilot.plan_required:
-            task = self._copilot.start_task(
-                owner, repo, prompt, base_ref=base_ref,
-                create_pull_request=create_pull_request, model=model,
-            )
-            if task is not None or not self._copilot.plan_required:
-                return task
-            logger.info(
-                "coding_task_backend=copilot_cloud_agent has no Copilot license on this "
-                "account — falling back to the local Lemonade model for %s/%s (and the "
-                "rest of this run)", owner, repo,
-            )
-        self._last_backend_was_local = True
-        return self._local_dispatcher().start_task(
-            owner, repo, prompt, base_ref=base_ref,
-            create_pull_request=create_pull_request, model=model,
-        )
-
-
 def get_coding_dispatcher(uc) -> CodingDispatcher | None:
     """Return the configured coding-task dispatcher for this user, or None.
 
-    Returns ``None`` when the selected backend isn't usable (missing token,
-    or a backend that's a reserved-but-not-yet-implemented placeholder) —
-    callers should treat that as "skip this dispatch," not an error.
+    Returns ``None`` when the selected backend isn't usable (missing token or
+    configuration) — callers should treat that as "skip this dispatch," not
+    an error. A legacy ``copilot_cloud_agent`` setting falls back to the
+    default backend.
     """
     if uc is None:
         return None
-    backend = (getattr(uc, "coding_task_backend", "") or "copilot_cloud_agent").strip()
-
+    backend = (getattr(uc, "coding_task_backend", "") or DEFAULT_BACKEND).strip()
     if backend == "copilot_cloud_agent":
-        token = getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or ""
-        if not token:
-            logger.info("coding_task_backend=copilot_cloud_agent but no GitHub token configured")
-            return None
-        return _CopilotWithLocalFallback(CopilotAgentClient(token), uc, token)
+        backend = DEFAULT_BACKEND
+
+    token = getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or ""
 
     if backend == "local_lemonade":
-        token = getattr(uc, "bot_github_token", "") or getattr(uc, "github_token", "") or ""
         if not token:
             logger.info("coding_task_backend=local_lemonade but no GitHub token configured")
             return None
@@ -167,28 +82,26 @@ def get_coding_dispatcher(uc) -> CodingDispatcher | None:
         return LocalLemonadeCodingDispatcher(uc, token)
 
     if backend == "external_api":
-        api_key = getattr(uc, "external_coding_api_key", "") or ""
-        if not api_key:
-            logger.info("coding_task_backend=external_api but no external_coding_api_key configured")
+        if not token:
+            logger.info("coding_task_backend=external_api but no GitHub token configured")
             return None
-        logger.info(
-            "coding_task_backend=external_api is not implemented yet — skipping dispatch. "
-            "This is a reserved extension point for a user-supplied hosted coding model."
-        )
-        return None
+        if not (
+            getattr(uc, "external_coding_api_key", "")
+            and getattr(uc, "external_coding_api_base_url", "")
+            and getattr(uc, "external_coding_api_model", "")
+        ):
+            logger.info("coding_task_backend=external_api but API key/base URL/model not all configured")
+            return None
+        from snap_dashboard.lemonade.external_api import ExternalApiCodingDispatcher
+
+        return ExternalApiCodingDispatcher(uc, token)
 
     logger.warning("unknown coding_task_backend %r — skipping dispatch", backend)
     return None
 
 
 def extract_pr_url(remote: dict) -> str | None:
-    """Best-effort PR URL extraction from a coding-backend task result.
-
-    Handles both the GitHub Copilot cloud agent task-status shape (the
-    agent-tasks API is documented as "public preview and subject to change"
-    with no fixed schema for the pull-request field) and the local Lemonade
-    backend's own ``{"html_url": ...}`` shape.
-    """
+    """Best-effort PR URL extraction from a coding-backend task result."""
     for key in ("pull_request_url", "html_url"):
         val = remote.get(key)
         if isinstance(val, str) and val:
@@ -204,9 +117,8 @@ def extract_pr_url(remote: dict) -> str | None:
 def extract_pr_number(remote: dict) -> int | None:
     """Best-effort PR number extraction from a coding-backend task result.
 
-    Handles the local Lemonade backend's own ``{"number": ...}`` shape, a
-    nested ``pull_request`` dict (either shape), and falls back to parsing
-    the trailing digits off a ``.../pull/123`` URL when nothing else works.
+    Handles a top-level ``{"number": ...}``, a nested ``pull_request`` dict,
+    and falls back to parsing the trailing digits off a ``.../pull/123`` URL.
     """
     val = remote.get("number")
     if isinstance(val, int):
@@ -218,8 +130,6 @@ def extract_pr_number(remote: dict) -> int | None:
             return num
     url = extract_pr_url(remote)
     if url:
-        import re
-
         m = re.search(r"/pull/(\d+)/?$", url)
         if m:
             return int(m.group(1))
@@ -229,24 +139,13 @@ def extract_pr_number(remote: dict) -> int | None:
 def task_result_fields(task: dict | None, fallback_error: str | None = None) -> dict:
     """Turn a ``CodingDispatcher.start_task()`` result into ``CopilotTask`` kwargs.
 
-    The two implemented backends return different result shapes:
+    Backends do all their work synchronously inside ``start_task()``, so the
+    result already has a terminal ``state`` ("completed"/"failed") and, on
+    success, a PR url; on failure it carries an ``error`` string.
 
-    - GitHub Copilot cloud agent dispatches an async remote task — the
-      result only has an ``id`` to poll later (see
-      ``web/routes/copilot_tasks.py``), so the initial status is ``queued``
-      with no PR url yet.
-    - The local Lemonade backend does all its work synchronously inside
-      ``start_task()`` itself, so the result already has a terminal
-      ``state`` ("completed"/"failed") and, on success, a PR url — nothing
-      left to poll, and ``external_task_id`` stays unset. On failure it also
-      carries an ``error`` string explaining why.
-
-    ``task is None`` means the dispatch call itself never got a response to
-    interpret (e.g. Copilot's HTTP call raised or returned an unexpected
-    status) — ``fallback_error`` (typically the dispatcher's own
-    ``last_error``, see ``_CopilotWithLocalFallback``) fills in ``error_msg``
-    for that case, so a ``dispatch_failed`` row isn't left with no
-    explanation at all (see web/routes/copilot_tasks.py's Retry action).
+    ``task is None`` means the dispatch call never got a result to interpret
+    — ``fallback_error`` fills in ``error_msg`` for that case, so a
+    ``dispatch_failed`` row isn't left with no explanation at all.
 
     Returns a dict with ``external_task_id``, ``status``, ``pr_url``, and
     ``error_msg``, suitable for ``**``-splatting into a ``CopilotTask(...)``

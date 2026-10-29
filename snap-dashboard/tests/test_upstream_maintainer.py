@@ -109,9 +109,6 @@ def test_run_dispatches_dep_update_for_owned_repo(isolated_session, monkeypatch)
         lambda client, owner, repo: {"package.json": {"svelte": ("^5.0.0", "5.57.1")}},
     )
     monkeypatch.setattr(
-        UpstreamMaintainerAgent, "_maybe_request_reviews", lambda self, *a, **k: False
-    )
-    monkeypatch.setattr(
         UpstreamMaintainerAgent, "_maybe_triage_issues", lambda self, *a, **k: False
     )
 
@@ -150,9 +147,6 @@ def test_dep_update_skips_when_nothing_really_outdated(isolated_session, monkeyp
     monkeypatch.setattr(um_module, "get_coding_dispatcher", lambda uc_: dispatcher)
     monkeypatch.setattr(um_module, "find_real_outdated_deps", lambda client, owner, repo: {})
     monkeypatch.setattr(
-        UpstreamMaintainerAgent, "_maybe_request_reviews", lambda self, *a, **k: False
-    )
-    monkeypatch.setattr(
         UpstreamMaintainerAgent, "_maybe_triage_issues", lambda self, *a, **k: False
     )
 
@@ -188,9 +182,6 @@ def test_dep_update_respects_cooldown(isolated_session, monkeypatch) -> None:
     dispatcher = _FakeDispatcher()
     monkeypatch.setattr(um_module, "get_user_config", lambda uid: uc)
     monkeypatch.setattr(um_module, "get_coding_dispatcher", lambda uc_: dispatcher)
-    monkeypatch.setattr(
-        UpstreamMaintainerAgent, "_maybe_request_reviews", lambda self, *a, **k: False
-    )
     monkeypatch.setattr(
         UpstreamMaintainerAgent, "_maybe_triage_issues", lambda self, *a, **k: False
     )
@@ -267,7 +258,6 @@ def test_run_covers_same_repo_snap_with_no_upstream_repo(isolated_session, monke
         um_module, "find_real_outdated_deps",
         lambda client, owner, repo: {"package.json": {"svelte": ("^5.0.0", "5.57.1")}},
     )
-    monkeypatch.setattr(UpstreamMaintainerAgent, "_maybe_request_reviews", lambda self, *a, **k: False)
     monkeypatch.setattr(UpstreamMaintainerAgent, "_maybe_triage_issues", lambda self, *a, **k: False)
 
     summary = UpstreamMaintainerAgent(user_id=user_id, only_snap_id=snap_id, snap_name="gemini-desktop")._run()

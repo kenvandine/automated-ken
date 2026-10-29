@@ -147,7 +147,7 @@
     <div class="card">
       <h3 class="section-label">Cloud LLM tokens</h3>
       <p style="font-size:2rem; margin:0;">{{ "{:,}".format(cloud_tokens) }}</p>
-      <p class="text-muted small">via Copilot cloud agent (in + out, est.)</p>
+      <p class="text-muted small">via external API (in + out)</p>
     </div>
   </div>
   <div class="col-3">
@@ -165,8 +165,7 @@
   <h3 class="section-label">Token usage by model</h3>
   <p class="text-muted small">
     Counts are exact when the backend reports real usage; rows marked
-    "est." fall back to a rough ~4-chars/token estimate (always the case
-    for Copilot's cloud-agent task API, which doesn't report usage).
+    "est." fall back to a rough ~4-chars/token estimate.
   </p>
   {% if not model_usage %}
   <p class="text-muted">No LLM calls recorded yet.</p>

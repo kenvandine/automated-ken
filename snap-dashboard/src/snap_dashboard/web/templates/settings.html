@@ -245,7 +245,7 @@
     </div>
     <div class="form-row">
       {{ toggle('auto_maintain_upstream', 'Maintain upstream repos you own', config.auto_maintain_upstream) }}
-      <span class="form-hint">For upstreams owned by your account: dependency upgrades, Copilot reviews on your PRs, and fixes for a few open issues per run.</span>
+      <span class="form-hint">For upstreams owned by your account: dependency upgrades and fixes for a few open issues per run.</span>
     </div>
     <div class="form-row">
       {{ toggle('fleet_normalization_enabled', 'Allow fleet normalization', config.fleet_normalization_enabled) }}
@@ -272,19 +272,19 @@
     <input type="hidden" name="section" value="coding">
     <p class="form-hint">
       CI fixes, dependency updates, issue fixes and fleet normalization need a capable coding model.
-      GitHub Copilot cloud agent is multi-turn and can run tests; the local Lemonade model (Qwen3-Coder)
-      makes a single best-effort pass with no subscription needed.
+      The local Lemonade model (Qwen3-Coder) makes a single best-effort pass with no subscription needed;
+      an OpenAI-compatible API gives you a hosted model of your choice. Neither can run tests or iterate on CI.
     </p>
     <div class="form-row">
       <label class="form-label" for="coding_task_backend">Backend</label>
       <select id="coding_task_backend" name="coding_task_backend" class="form-input form-select">
-        <option value="copilot_cloud_agent" {% if (config.coding_task_backend or 'copilot_cloud_agent') == 'copilot_cloud_agent' %}selected{% endif %}>GitHub Copilot cloud agent (default)</option>
-        <option value="local_lemonade" {% if config.coding_task_backend == 'local_lemonade' %}selected{% endif %}>Local model (Lemonade / Qwen3-Coder)</option>
-        <option value="external_api" {% if config.coding_task_backend == 'external_api' %}selected{% endif %}>External API (reserved — not yet implemented)</option>
+        {% set cur = config.coding_task_backend if config.coding_task_backend in ('local_lemonade', 'external_api') else 'local_lemonade' %}
+        <option value="local_lemonade" {% if cur == 'local_lemonade' %}selected{% endif %}>Local model (Lemonade / Qwen3-Coder) (default)</option>
+        <option value="external_api" {% if cur == 'external_api' %}selected{% endif %}>Any OpenAI-compatible API (API key)</option>
       </select>
     </div>
     <details class="inline-details">
-      <summary>External API (reserved)</summary>
+      <summary>OpenAI-compatible API (base URL, key, model)</summary>
       <div class="form-row">
         <label class="form-label" for="external_coding_api_key">API key</label>
         <input type="password" id="external_coding_api_key" name="external_coding_api_key" class="form-input"
@@ -293,12 +293,17 @@
       <div class="form-row">
         <label class="form-label" for="external_coding_api_base_url">Base URL</label>
         <input type="text" id="external_coding_api_base_url" name="external_coding_api_base_url" class="form-input"
-               value="{{ config.external_coding_api_base_url or '' }}">
+               value="{{ config.external_coding_api_base_url or '' }}" placeholder="https://api.openai.com/v1">
       </div>
       <div class="form-row">
         <label class="form-label" for="external_coding_api_model">Model</label>
         <input type="text" id="external_coding_api_model" name="external_coding_api_model" class="form-input"
-               value="{{ config.external_coding_api_model or '' }}">
+               value="{{ config.external_coding_api_model or '' }}" list="external_api_models">
+        <datalist id="external_api_models"></datalist>
+        <button type="button" id="fetch-external-models" class="p-button">Fetch models</button>
+        <span class="form-hint" id="fetch-external-models-status">
+          Queries the endpoint's /models; you can still type a model name manually.
+        </span>
       </div>
     </details>
     <div class="form-actions">
@@ -356,6 +361,26 @@
 </div>
 
 <script>
+(function () {
+  const btn = document.getElementById('fetch-external-models');
+  if (!btn) return;
+  const status = document.getElementById('fetch-external-models-status');
+  btn.addEventListener('click', async () => {
+    const body = new URLSearchParams({
+      external_coding_api_base_url: document.getElementById('external_coding_api_base_url').value,
+      external_coding_api_key: document.getElementById('external_coding_api_key').value,
+    });
+    status.textContent = 'Fetching…';
+    try {
+      const r = await fetch('/settings/external-api-models', { method: 'POST', body });
+      const data = await r.json();
+      if (!r.ok) { status.textContent = data.error || 'Failed to fetch models'; return; }
+      const dl = document.getElementById('external_api_models');
+      dl.replaceChildren(...data.models.map(m => Object.assign(document.createElement('option'), { value: m })));
+      status.textContent = data.models.length + ' models found — start typing in the Model field to pick one.';
+    } catch (e) { status.textContent = 'Request failed: ' + e; }
+  });
+})();
 (function () {
   const nav = document.getElementById('settings-subnav');
   if (!nav || !('IntersectionObserver' in window)) return;

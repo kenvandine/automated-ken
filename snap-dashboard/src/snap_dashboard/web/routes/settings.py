@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.concurrency import run_in_threadpool
 
 from snap_dashboard.auth import get_current_user, get_user_config
 from snap_dashboard.db.models import CollectionRun, UserConfig
@@ -108,7 +109,7 @@ async def settings_post(
     auto_fix_build_failures: str = Form(default=""),
     auto_maintain_upstream: str = Form(default=""),
     fleet_normalization_enabled: str = Form(default=""),
-    coding_task_backend: str = Form(default="copilot_cloud_agent"),
+    coding_task_backend: str = Form(default="local_lemonade"),
     external_coding_api_key: str = Form(default=""),
     external_coding_api_base_url: str = Form(default=""),
     external_coding_api_model: str = Form(default=""),
@@ -234,6 +235,37 @@ async def settings_remove_snap(snap_name: str, request: Request):
     from snap_dashboard.web.routes.snaps import snap_remove
 
     return await snap_remove(snap_name, request)
+
+
+@router.post("/settings/external-api-models")
+async def settings_external_api_models(
+    request: Request,
+    external_coding_api_base_url: str = Form(default=""),
+    external_coding_api_key: str = Form(default=""),
+):
+    """Discover model ids from the configured OpenAI-compatible endpoint.
+
+    Blank form fields fall back to the saved values so the stored key never
+    has to be re-entered.
+    """
+    from fastapi.responses import JSONResponse
+
+    from snap_dashboard.lemonade.external_api import list_models
+
+    user = get_current_user(request)
+    if user is None:
+        return JSONResponse({"error": "not authenticated"}, status_code=401)
+    uc = get_user_config(user["id"])
+    base_url = external_coding_api_base_url.strip() or getattr(uc, "external_coding_api_base_url", "") or ""
+    api_key = external_coding_api_key.strip() or getattr(uc, "external_coding_api_key", "") or ""
+    if not base_url or not api_key:
+        return JSONResponse({"error": "Base URL and API key are required"}, status_code=400)
+    try:
+        models = await run_in_threadpool(list_models, base_url, api_key)
+    except Exception as exc:
+        logger.info("external API model discovery failed: %s", exc)
+        return JSONResponse({"error": f"Could not list models: {exc}"}, status_code=502)
+    return {"models": models}
 
 
 @router.post("/settings/run-fleet-normalization")

@@ -1,8 +1,6 @@
 """Local Lemonade coding-task backend — the ``local_lemonade`` CodingDispatcher.
 
-Unlike ``CopilotAgentClient`` (which kicks off an async GitHub Copilot cloud
-agent task and is polled for a PR later — see ``github/copilot_agent.py``),
-this does the whole thing synchronously in a single ``start_task()`` call,
+This does the whole thing synchronously in a single ``start_task()`` call,
 using only the GitHub REST API (no git clone/push needed):
 
   1. List the repo's file tree and inline a bounded set of text files as
@@ -14,7 +12,7 @@ using only the GitHub REST API (no git clone/push needed):
   3. Apply that plan as one atomic multi-file commit via ``GitTreeClient``
      (``github/tree_commit.py``), and open the PR.
 
-This is necessarily less capable than GitHub Copilot cloud agent — no
+This is necessarily less capable than a tool-using agent — no
 multi-turn tool use, no running tests, no iterating on CI failures. It's a
 best-effort single-shot (with one corrective retry — see
 ``_noop_retry_prompt``) patch, offered as a local/no-subscription-required
@@ -89,12 +87,10 @@ class LocalLemonadeCodingDispatcher:
         create_pull_request: bool = True,
         model: str | None = None,
     ) -> dict | None:
-        client = get_lemonade_client(self._uc, ensure_started=True, task=TASK_CODING)
-        if client is None or not client.is_available():
-            logger.warning(
-                "local_lemonade coding backend: Lemonade server unavailable for %s/%s", owner, repo,
-            )
-            return {"state": "failed", "error": "Local Lemonade server is not reachable"}
+        client, client_error = self._get_client()
+        if client is None:
+            logger.warning("coding backend unavailable for %s/%s: %s", owner, repo, client_error)
+            return {"state": "failed", "error": client_error}
 
         base_branch = base_ref or self._bot.get_default_branch(owner, repo)
         context = self._build_repo_context(owner, repo, base_branch)
@@ -150,6 +146,13 @@ class LocalLemonadeCodingDispatcher:
         if not pr:
             return {"state": "failed", "error": "committed changes but failed to open a pull request"}
         return {"state": "completed", "html_url": pr.get("html_url"), "number": pr.get("number")}
+
+    def _get_client(self):
+        """Return ``(chat_client, None)`` or ``(None, error_message)``."""
+        client = get_lemonade_client(self._uc, ensure_started=True, task=TASK_CODING)
+        if client is None or not client.is_available():
+            return None, "Local Lemonade server is not reachable"
+        return client, None
 
     @staticmethod
     def _files_from_plan(plan: dict) -> tuple[dict[str, str], list[str]]:

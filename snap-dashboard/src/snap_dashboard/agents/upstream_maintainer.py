@@ -4,17 +4,15 @@ Some tracked snaps package software the user personally develops (e.g. an
 Electron app). For those repos this agent, opt-in via
 ``UserConfig.auto_maintain_upstream``:
 
-  1. Asks Copilot cloud agent to check for outdated npm/node dependencies
-     and open an upgrade PR (rate-limited to at most one dispatch per repo
-     per ``_DEP_UPDATE_COOLDOWN_DAYS``).
-  2. Requests a Copilot code review on any of the user's own open PRs that
-     doesn't have one yet.
-  3. Triages open issues and, for a small capped batch per run, asks
-     Copilot cloud agent to attempt a fix (each issue is only ever
+  1. Asks the configured coding backend to check for outdated npm/node
+     dependencies and open an upgrade PR (rate-limited to at most one
+     dispatch per repo per ``_DEP_UPDATE_COOLDOWN_DAYS``).
+  2. Triages open issues and, for a small capped batch per run, asks the
+     coding backend to attempt a fix (each issue is only ever
      dispatched once — tracked via CopilotTask.issue_number).
 
-All actual code-writing is delegated to Copilot cloud agent (the "capable
-coding" model tier) rather than attempted locally — see github/copilot_agent.py.
+All actual code-writing is delegated to the coding backend — see
+agents/coding_backend.py.
 """
 
 from __future__ import annotations
@@ -35,7 +33,6 @@ from snap_dashboard.agents.coding_backend import (
 from snap_dashboard.auth import get_user_config
 from snap_dashboard.db.models import CopilotTask, Snap, User
 from snap_dashboard.db.session import get_session
-from snap_dashboard.github.copilot_agent import CopilotAgentClient
 from snap_dashboard.github.bot_client import BotGitHubClient
 from snap_dashboard.github.utils import is_owned_by, parse_owner_repo
 from snap_dashboard.agents.npm_registry import find_real_outdated_deps
@@ -112,7 +109,6 @@ class UpstreamMaintainerAgent(BaseAgent):
             owner, repo = owner_repo
             self._report(f"Maintaining {upstream_repo}", snap_name)
             actions.append(self._maybe_dep_update(client, snap_id, owner, repo, token, read_token))
-            actions.append(self._maybe_request_reviews(client, owner, repo, token))
             actions.append(self._maybe_triage_issues(client, snap_id, owner, repo, token, read_token))
 
         done = [a for a in actions if a]
@@ -193,41 +189,6 @@ class UpstreamMaintainerAgent(BaseAgent):
                 )
             )
         return bool(task)
-
-    # ------------------------------------------------------------------
-    # PR review requests
-    # ------------------------------------------------------------------
-
-    def _maybe_request_reviews(self, client: CodingDispatcher, owner: str, repo: str, token: str) -> bool:
-        try:
-            with httpx.Client(timeout=15) as http:
-                resp = http.get(
-                    f"{_GH_API}/repos/{owner}/{repo}/pulls",
-                    params={"state": "open", "per_page": 20},
-                    headers=_gh_headers(token),
-                )
-            if resp.status_code != 200:
-                return False
-            prs = resp.json()
-        except httpx.HTTPError as exc:
-            logger.warning("upstream_maintainer: list PRs failed for %s/%s: %s", owner, repo, exc)
-            return False
-
-        acted = False
-        for pr in prs:
-            reviewers = [r.get("login", "") for r in pr.get("requested_reviewers", [])]
-            already_reviewed = any("copilot" in (r or "").lower() for r in reviewers)
-            if already_reviewed:
-                continue
-            # request_pr_review is a Copilot-cloud-agent-specific feature (it
-            # requests the "copilot-pull-request-reviewer[bot]" reviewer),
-            # not part of the generic CodingDispatcher protocol — skip it
-            # cleanly for any other backend.
-            if not isinstance(client, CopilotAgentClient):
-                continue
-            if client.request_pr_review(owner, repo, pr["number"]):
-                acted = True
-        return acted
 
     # ------------------------------------------------------------------
     # Issue triage / auto-fix attempts

@@ -100,7 +100,7 @@ async def _post(user_id: int, **fields):
         auto_fix_ci_failures="",
         auto_maintain_upstream="",
         fleet_normalization_enabled="",
-        coding_task_backend="copilot_cloud_agent",
+        coding_task_backend="local_lemonade",
         external_coding_api_key="",
         external_coding_api_base_url="",
         external_coding_api_model="",
