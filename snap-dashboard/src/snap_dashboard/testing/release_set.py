@@ -75,12 +75,22 @@ def candidate_release_set(session, user_id: int, snap_name: str, version: str) -
         if run.promoted:
             promoted.add(arch)
 
+    # Architectures whose stable channel already carries this revision (or
+    # a newer one) are done, whatever their test run says — e.g. released
+    # outside the dashboard, or by a path that left the run row "passed".
+    in_stable: set[str] = set()
+    if snap:
+        for cm in session.query(ChannelMap).filter_by(snap_id=snap.id, channel="stable"):
+            in_stable.add((cm.architecture, cm.revision))
+
     members = []
     for arch in TESTABLE_ARCHITECTURES:
         if arch not in revisions and arch not in latest:
             continue
         run = latest.get(arch)
         revision = run.revision if run and run.revision is not None else revisions.get(arch)
+        if revision is not None and any(a == arch and r is not None and r >= revision for a, r in in_stable):
+            promoted.add(arch)
         members.append(
             {"architecture": arch, "run": run, "revision": revision, "promoted": arch in promoted}
         )
