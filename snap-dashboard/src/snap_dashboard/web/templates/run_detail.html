@@ -91,6 +91,26 @@ This is an intentional override of the normal all-architectures gate. Continue?{
     </button>
   </form>
   {% endif %}
+  {% set unpromoted = release_set | rejectattr('state', 'equalto', 'promoted') | list %}
+  {% if unpromoted %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+    {% for target in [''] + (unpromoted | map(attribute='architecture') | list if unpromoted | length > 1 else []) %}
+    <form method="post" action="/testing/force-promote/{{ run.snap_name }}"
+          hx-post="/testing/force-promote/{{ run.snap_name }}" hx-target="#page-content" hx-select="#page-content"
+          hx-swap="innerHTML" hx-disabled-elt="find button"
+          hx-confirm="FORCE PROMOTE {{ run.snap_name }} {{ run.version }} to stable for {{ target or 'ALL architectures' }}?
+
+This ignores test results (including failed, untested and AI-rejected runs). Continue?">
+      <input type="hidden" name="version" value="{{ run.version }}">
+      <input type="hidden" name="archs" value="{{ target or 'all' }}">
+      <input type="hidden" name="return_to" value="/testing/runs/{{ run.id }}">
+      <button type="submit" class="p-button--negative is-small" title="Promote regardless of test result">
+        {% if target %}Force {{ target }}{% else %}Force promote all{% endif %}
+      </button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 {% endif %}
 

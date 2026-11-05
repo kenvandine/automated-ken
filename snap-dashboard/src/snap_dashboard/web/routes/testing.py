@@ -923,6 +923,52 @@ def promote_set(
     return RedirectResponse(url=return_to, status_code=303)
 
 
+@router.post("/testing/force-promote/{snap_name}")
+def force_promote_set(
+    snap_name: str,
+    request: Request,
+    version: str = Form(...),
+    archs: list[str] = Form(default=[]),
+    return_to: str = Form(default="/releases"),
+) -> RedirectResponse:
+    """Promote a candidate version to stable regardless of test results.
+
+    ``archs`` lists the architectures to force; empty or containing
+    ``all`` means every architecture of the release set. Already
+    promoted architectures and ones without a revision are skipped.
+    Only the confirmed "Force promote" buttons send this.
+    """
+    user = get_current_user(request)
+    if user is None:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    user_id = user["id"]
+    if not return_to.startswith(("/releases", "/testing", "/version-bumps")):
+        return_to = "/releases"
+
+    with get_session() as session:
+        members = candidate_release_set(session, user_id, snap_name, version)
+    wanted = {a for a in archs if a and a != "all"}
+    if "all" in archs or not wanted:
+        chosen = members
+    else:
+        chosen = [m for m in members if m["architecture"] in wanted]
+    chosen = [m for m in chosen if not m["promoted"]]
+    if not chosen:
+        logger.info("force_promote_set: nothing to promote for %s %s", snap_name, version)
+        return RedirectResponse(url=return_to, status_code=303)
+
+    left_out = [m["architecture"] for m in members if m not in chosen and not m["promoted"]]
+    logger.warning(
+        "force_promote_set: user %s force-promoting %s %s (%s) regardless of test result",
+        user_id, snap_name, version, ", ".join(m["architecture"] for m in chosen),
+    )
+    promote_release_set(
+        user_id, snap_name, version, [], get_user_config(user_id),
+        skipped=left_out or None, forced=chosen,
+    )
+    return RedirectResponse(url=return_to, status_code=303)
+
+
 @router.post("/testing/dismiss-promotion")
 def dismiss_promotion(
     request: Request,

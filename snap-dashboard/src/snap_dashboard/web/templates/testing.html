@@ -42,6 +42,23 @@ This is an intentional override of the normal all-architectures gate. Continue?{
 </form>
 {%- endmacro %}
 
+{% macro force_form(snap_name, version, arch, return_to="/releases") -%}
+{#- arch="" forces every un-promoted architecture; otherwise just that one. -#}
+<form method="post" action="/testing/force-promote/{{ snap_name }}"
+      hx-post="/testing/force-promote/{{ snap_name }}" hx-target="#page-content" hx-select="#page-content"
+      hx-swap="innerHTML" hx-disabled-elt="find button"
+      hx-confirm="FORCE PROMOTE {{ snap_name }} {{ version }} to stable for {{ arch or 'ALL architectures' }}?
+
+This ignores test results (including failed, untested and AI-rejected runs). Continue?">
+  <input type="hidden" name="version" value="{{ version }}">
+  <input type="hidden" name="archs" value="{{ arch or 'all' }}">
+  <input type="hidden" name="return_to" value="{{ return_to }}">
+  <button type="submit" class="p-button--negative is-small" title="Promote regardless of test result">
+    {% if arch %}Force {{ arch }}{% else %}Force promote all{% endif %}
+  </button>
+</form>
+{%- endmacro %}
+
 {% block content %}
 
 {% call ui.page_header("Releases", "Test new builds, review version bumps and promote release sets to stable.") %}
@@ -186,6 +203,11 @@ This is an intentional override of the normal all-architectures gate. Continue?{
       <div class="release-set__actions">
         {% if ready %}
         {{ promote_form(rs.snap_name, rs.version, ready, blocked | map(attribute='architecture') | join(', ')) }}
+        {% endif %}
+        {% set unpromoted = rs.members | rejectattr('state', 'equalto', 'promoted') | list %}
+        {% if unpromoted %}
+        {{ force_form(rs.snap_name, rs.version, '') }}
+        {% if unpromoted | length > 1 %}{% for m in unpromoted %}{{ force_form(rs.snap_name, rs.version, m.architecture) }}{% endfor %}{% endif %}
         {% endif %}
         <form method="post" action="/testing/dismiss-promotion"
               hx-post="/testing/dismiss-promotion" hx-target="#page-content" hx-select="#page-content"
