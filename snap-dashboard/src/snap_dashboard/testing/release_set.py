@@ -335,6 +335,12 @@ def promote_release_set(
             persist_stable_baseline_for_run(item["id"], item["repo"] or getattr(uc, "testing_repo", ""), token)
 
     if promoted_archs:
+        revisions = {i["arch"]: i["revision"] for i in claimed}
+        for member in (companions or []) + (forced or []):
+            revisions.setdefault(member["architecture"], member["revision"])
+        _record_stable_release(
+            user_id, snap_name, version, {a: revisions.get(a) for a in promoted_archs}
+        )
         _mark_bumps_promoted(user_id, snap_name, version, promoted_archs, skipped)
 
     logger.info(
@@ -344,6 +350,36 @@ def promote_release_set(
         f"; failed {'; '.join(failures)}" if failures else "",
     )
     return promoted_archs, failures
+
+
+def _record_stable_release(
+    user_id: int, snap_name: str, version: str, revisions: dict[str, int | None]
+) -> None:
+    """Reflect a confirmed stable release in the local ChannelMap right away.
+
+    The dashboard decides what still needs promoting by comparing the
+    candidate and stable rows of ``ChannelMap``, which otherwise only
+    catch up on the next collector run — leaving a just-promoted release
+    listed as promotable until then.
+    """
+    now = datetime.now(timezone.utc)
+    with get_session() as session:
+        snap = session.query(Snap).filter_by(name=snap_name, user_id=user_id).first()
+        if snap is None:
+            return
+        for arch, revision in revisions.items():
+            if revision is None:
+                continue
+            row = session.query(ChannelMap).filter_by(
+                snap_id=snap.id, channel="stable", architecture=arch
+            ).first()
+            if row is None:
+                row = ChannelMap(snap_id=snap.id, channel="stable", architecture=arch)
+                session.add(row)
+            row.revision = revision
+            row.version = version
+            row.released_at = now
+            row.fetched_at = now
 
 
 def _mark_bumps_promoted(
