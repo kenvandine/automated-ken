@@ -172,6 +172,48 @@ def describe(member: dict, state: str) -> str:
     return f"{member['architecture']} ({state})"
 
 
+def _promote_members(
+    snap_name: str,
+    members: list[dict],
+    credentials: str,
+    promoted_archs: list[str],
+    failures: list[str],
+    note: str,
+) -> None:
+    """Release each member's revision to stable without requiring a passed test.
+
+    Appends to ``promoted_archs`` / ``failures``. If the member has a run
+    that is not in flight, it's marked promoted with *note* (``{was}`` is
+    replaced by its previous status).
+    """
+    from snap_dashboard.store.client import verify_channel_revision
+    from snap_dashboard.testing.promoter import promote_snap
+
+    for member in members:
+        arch, revision = member["architecture"], member["revision"]
+        if member["promoted"] or arch in promoted_archs:
+            continue
+        if revision is None:
+            failures.append(f"{arch}: no revision to promote")
+            continue
+        ok, output = promote_snap(snap_name, revision, "stable", store_credentials=credentials)
+        if ok and not verify_channel_revision(snap_name, arch, revision):
+            ok, output = False, "stable channel-map doesn't show this revision"
+        if not ok:
+            failures.append(f"{arch} rev {revision}: {output[:200]}")
+            continue
+        promoted_archs.append(arch)
+        run = member["run"]
+        with get_session() as session:
+            row = session.query(TestRun).get(run.id) if run else None
+            if row is not None and row.status not in ("pending", "triggered", "running", "reviewing", "promoting"):
+                was = row.status
+                row.status = "promoted"
+                row.promoted = True
+                row.promoted_at = datetime.now(timezone.utc)
+                row.error_msg = note.replace("{was}", was)
+
+
 def promote_release_set(
     user_id: int,
     snap_name: str,
@@ -180,6 +222,7 @@ def promote_release_set(
     uc,
     skipped: list[str] | None = None,
     companions: list[dict] | None = None,
+    forced: list[dict] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Promote the given runs' revisions to stable as one set.
 
@@ -193,6 +236,10 @@ def promote_release_set(
     ``companions`` are release-set members of architectures that aren't
     required to pass (see :func:`split_required`); once the required runs
     are promoted they're released too, regardless of their test result.
+
+    ``forced`` are release-set members promoted regardless of their test
+    result (untested, failed, rejected…) by an explicit manual force
+    action; they are released even when ``run_ids`` is empty.
 
     Returns ``(promoted_architectures, failure_messages)``.
     """
@@ -227,7 +274,7 @@ def promote_release_set(
                 {"id": run.id, "arch": run.architecture or "amd64", "revision": revision, "repo": run.repo or ""}
             )
 
-    if not claimed:
+    if not claimed and not forced:
         return [], ["nothing in this release set is ready to promote"]
 
     credentials = getattr(uc, "snapcraft_macaroon", "") or ""
@@ -272,29 +319,16 @@ def promote_release_set(
                 failures.append(f"{item['arch']} rev {item['revision']}: {output[:200]}")
 
     if companions and not failures and promoted_archs:
-        for member in companions:
-            arch, revision = member["architecture"], member["revision"]
-            if member["promoted"]:
-                continue
-            if revision is None:
-                failures.append(f"{arch}: no revision to promote")
-                continue
-            ok, output = promote_snap(snap_name, revision, "stable", store_credentials=credentials)
-            if ok and not verify_channel_revision(snap_name, arch, revision):
-                ok, output = False, "stable channel-map doesn't show this revision"
-            if not ok:
-                failures.append(f"{arch} rev {revision}: {output[:200]}")
-                continue
-            promoted_archs.append(arch)
-            run = member["run"]
-            with get_session() as session:
-                row = session.query(TestRun).get(run.id) if run else None
-                if row is not None and row.status not in ("pending", "triggered", "running", "reviewing", "promoting"):
-                    was = row.status
-                    row.status = "promoted"
-                    row.promoted = True
-                    row.promoted_at = datetime.now(timezone.utc)
-                    row.error_msg = f"Promoted with {', '.join(i['arch'] for i in claimed)} (not a required architecture; test was {was})."
+        _promote_members(
+            snap_name, companions, credentials, promoted_archs, failures,
+            note=f"Promoted with {', '.join(i['arch'] for i in claimed)} (not a required architecture; test was {{was}}).",
+        )
+
+    if forced:
+        _promote_members(
+            snap_name, forced, credentials, promoted_archs, failures,
+            note="Force-promoted by manual override regardless of test result (test was {was}).",
+        )
 
     for item in claimed:
         if item["arch"] in promoted_archs:
